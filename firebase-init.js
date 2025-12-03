@@ -1,24 +1,22 @@
 // firebase-init.js
-// Configuración base de Firebase para el panel de Clínica Rennat
+// Configuración de Firebase para el panel Clínica Rennat
 
+// Importamos desde la CDN de Firebase (ESM)
 import { initializeApp } from "https://www.gstatic.com/firebasejs/11.7.3/firebase-app.js";
-import {
-  getAuth
-} from "https://www.gstatic.com/firebasejs/11.7.3/firebase-auth.js";
-import {
-  getFirestore
-} from "https://www.gstatic.com/firebasejs/11.7.3/firebase-firestore.js";
+import { getAuth } from "https://www.gstatic.com/firebasejs/11.7.3/firebase-auth.js";
+import { getFirestore } from "https://www.gstatic.com/firebasejs/11.7.3/firebase-firestore.js";
 
-// TODO: Reemplaza con tu config real
+// Config de tu proyecto (la que me enviaste)
 const firebaseConfig = {
-  apiKey: "XXX",
-  authDomain: "XXX.firebaseapp.com",
-  projectId: "XXX",
-  storageBucket: "XXX.appspot.com",
-  messagingSenderId: "XXX",
-  appId: "XXX"
+  apiKey: "AIzaSyAZE4H0iAgLv5f3gsYBupSE7_0ykpjfTUE",
+  authDomain: "sistemas-crennat.firebaseapp.com",
+  projectId: "sistemas-crennat",
+  storageBucket: "sistemas-crennat.firebasestorage.app",
+  messagingSenderId: "496974042856",
+  appId: "1:496974042856:web:44e539285d507223691b5d"
 };
 
+// Inicializamos Firebase y exportamos para el resto del código
 export const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
-export const db = getFirestore(app);
+export const db   = getFirestore(app);
