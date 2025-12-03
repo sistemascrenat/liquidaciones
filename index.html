@@ -41,9 +41,10 @@
     /* ========= LAYOUT GENERAL ========= */
 
     .app-shell {
-      display: none; /* Se muestra solo si está logueado */
+      /* Oculta el dashboard hasta que el usuario esté logueado.
+         Luego el JS hace: appShell.style.display = 'grid'; */
+      display: none;
       min-height: 100vh;
-      display: grid;
       grid-template-rows: auto 1fr;
       grid-template-columns: 260px 1fr;
       grid-template-areas:
