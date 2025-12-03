@@ -38,6 +38,20 @@
       text-decoration: none;
     }
 
+    .logo-img {
+      height: 40px;
+      object-fit: contain;
+      display: block;
+    }
+
+    .panel-label {
+      font-size: 14px;
+      color: #e5f5f2;
+      margin-left: 10px;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+
     /* ========= LAYOUT GENERAL ========= */
 
     .app-shell {
@@ -66,36 +80,6 @@
       display: flex;
       align-items: center;
       gap: 12px;
-    }
-
-    .logo-mark {
-      width: 40px;
-      height: 40px;
-      border-radius: 999px;
-      border: 2px solid #fff;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-weight: 800;
-      font-size: 20px;
-    }
-
-    .logo-text {
-      display: flex;
-      flex-direction: column;
-      line-height: 1.1;
-    }
-
-    .logo-text span:first-child {
-      font-size: 13px;
-      text-transform: uppercase;
-      letter-spacing: .15em;
-      opacity: .8;
-    }
-
-    .logo-text span:last-child {
-      font-size: 18px;
-      font-weight: 700;
     }
 
     .header-right {
@@ -313,23 +297,23 @@
     .login-card {
       background: var(--card);
       border-radius: 18px;
-      padding: 28px 24px 20px;
       max-width: 380px;
       width: 100%;
       box-shadow: 0 18px 40px rgba(15, 23, 42, .15);
       border: 1px solid rgba(148, 163, 184, .3);
+      overflow: hidden; /* para que el header verde respete el borde redondeado */
     }
 
-    .login-logo {
+    .login-card-header {
+      background: var(--bg-strong);
+      padding: 14px 20px;
       display: flex;
       align-items: center;
-      gap: 10px;
-      margin-bottom: 14px;
+      justify-content: flex-start;
     }
 
-    .login-logo .logo-mark {
-      border-color: var(--bg-strong);
-      color: var(--bg-strong);
+    .login-card-body {
+      padding: 24px 24px 20px;
     }
 
     .login-title {
@@ -410,35 +394,34 @@
   <!-- ====== LOGIN ====== -->
   <div id="loginShell" class="login-shell">
     <div class="login-card">
-      <div class="login-logo">
-        <div class="logo-mark">R</div>
-        <div class="logo-text">
-          <span>Clínica</span>
-          <span>RENNAT</span>
+      <div class="login-card-header">
+        <img src="logoCR.png" alt="Clínica Rennat" class="logo-img">
+      </div>
+
+      <div class="login-card-body">
+        <div class="login-title">Panel de liquidaciones</div>
+        <div class="login-subtitle">
+          Acceso exclusivo para el equipo de gestión de Clínica Rennat.
         </div>
-      </div>
-      <div class="login-title">Panel de liquidaciones</div>
-      <div class="login-subtitle">
-        Acceso exclusivo para el equipo de gestión de Clínica Rennat.
-      </div>
 
-      <div class="form-field">
-        <label for="loginEmail">Correo institucional</label>
-        <input id="loginEmail" type="email" placeholder="usuario@clinicarennat.cl" />
-      </div>
-      <div class="form-field">
-        <label for="loginPassword">Contraseña</label>
-        <input id="loginPassword" type="password" placeholder="••••••••" />
-      </div>
+        <div class="form-field">
+          <label for="loginEmail">Correo institucional</label>
+          <input id="loginEmail" type="email" placeholder="usuario@clinicarennat.cl" />
+        </div>
+        <div class="form-field">
+          <label for="loginPassword">Contraseña</label>
+          <input id="loginPassword" type="password" placeholder="••••••••" />
+        </div>
 
-      <div id="loginError" class="login-error" style="display:none;"></div>
+        <div id="loginError" class="login-error" style="display:none;"></div>
 
-      <div class="login-actions">
-        <button id="btnLogin" class="btn btn-primary btn-full">Ingresar</button>
-      </div>
+        <div class="login-actions">
+          <button id="btnLogin" class="btn btn-primary btn-full">Ingresar</button>
+        </div>
 
-      <div class="login-hint">
-        Si tienes problemas para ingresar, contacta a administración.
+        <div class="login-hint">
+          Si tienes problemas para ingresar, contacta a administración.
+        </div>
       </div>
     </div>
   </div>
@@ -448,11 +431,8 @@
     <!-- Header -->
     <header class="app-header">
       <div class="header-left">
-        <div class="logo-mark">R</div>
-        <div class="logo-text">
-          <span>Clínica</span>
-          <span>RENNAT – Panel</span>
-        </div>
+        <img src="logoCR.png" alt="Clínica Rennat" class="logo-img">
+        <span class="panel-label">Panel de liquidaciones</span>
       </div>
 
       <div class="header-right">
