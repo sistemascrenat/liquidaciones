@@ -1,0 +1,380 @@
+:root {
+  --bg: #f4f6fb;
+  --bg-strong: #00a89d;
+  --bg-dark: #008477;
+  --accent: #00c7b6;
+  --accent-soft: #e0fffa;
+  --ink: #0f172a;
+  --muted: #6b7280;
+  --card: #ffffff;
+  --border: #d1d5db;
+  --danger: #e11d48;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+  background: var(--bg);
+  color: var(--ink);
+  min-height: 100vh;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.logo-img {
+  height: 40px;
+  object-fit: contain;
+  display: block;
+}
+
+.panel-label {
+  font-size: 14px;
+  color: #e5f5f2;
+  margin-left: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+/* ========= LAYOUT GENERAL ========= */
+
+.app-shell {
+  /* Oculta el dashboard hasta que el usuario esté logueado.
+     Luego el JS hace: appShell.style.display = 'grid'; */
+  display: none;
+  min-height: 100vh;
+  grid-template-rows: auto 1fr;
+  grid-template-columns: 260px 1fr;
+  grid-template-areas:
+    "header header"
+    "sidebar main";
+}
+
+header.app-header {
+  grid-area: header;
+  background: var(--bg-strong);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 24px;
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  font-size: 14px;
+}
+
+.pill {
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(255,255,255,.2);
+  font-size: 12px;
+}
+
+.btn-outline {
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,.5);
+  padding: 6px 14px;
+  font-size: 13px;
+  cursor: pointer;
+  background: transparent;
+  color: #fff;
+}
+.btn-outline:hover {
+  background: rgba(255,255,255,.15);
+}
+
+aside.sidebar {
+  grid-area: sidebar;
+  background: #ffffff;
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  padding: 16px 12px;
+  gap: 12px;
+}
+
+.sidebar-title {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: .18em;
+  color: var(--muted);
+  margin-bottom: 4px;
+  padding: 0 8px;
+}
+
+.nav-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 999px;
+  font-size: 14px;
+  color: var(--muted);
+  cursor: pointer;
+  border: 1px solid transparent;
+}
+
+.nav-item span.icon {
+  font-size: 16px;
+}
+
+.nav-item.active {
+  background: var(--accent-soft);
+  color: var(--bg-dark);
+  border-color: var(--accent);
+  font-weight: 600;
+}
+
+.nav-item:hover:not(.active) {
+  background: #f3f4f6;
+}
+
+main.app-main {
+  grid-area: main;
+  padding: 18px 20px;
+  overflow-y: auto;
+}
+
+.view {
+  display: none;
+}
+.view.active {
+  display: block;
+}
+
+.view-header {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.view-title {
+  font-size: 22px;
+  font-weight: 700;
+}
+
+.view-subtitle {
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.card {
+  background: var(--card);
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  padding: 16px 18px;
+  margin-bottom: 16px;
+}
+
+.card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  gap: 8px;
+}
+
+.card-title {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.card-subtitle {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.card-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.btn {
+  border-radius: 999px;
+  border: none;
+  padding: 6px 12px;
+  font-size: 13px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.btn-primary {
+  background: var(--bg-dark);
+  color: #fff;
+}
+
+.btn-soft {
+  background: #eef2ff;
+  color: #1e293b;
+}
+
+.badge {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #f3f4f6;
+  color: var(--muted);
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  margin-top: 6px;
+}
+
+thead {
+  background: #f9fafb;
+}
+
+th, td {
+  padding: 8px 6px;
+  border-bottom: 1px solid #e5e7eb;
+  text-align: left;
+}
+
+th {
+  font-weight: 600;
+  color: var(--muted);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+}
+
+tr:nth-child(even) td {
+  background: #fcfcff;
+}
+
+.text-right { text-align: right; }
+.text-center { text-align: center; }
+
+/* ========= LOGIN ========= */
+
+.login-shell {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+.login-card {
+  background: var(--card);
+  border-radius: 18px;
+  max-width: 380px;
+  width: 100%;
+  box-shadow: 0 18px 40px rgba(15, 23, 42, .15);
+  border: 1px solid rgba(148, 163, 184, .3);
+  overflow: hidden; /* para que el header verde respete el borde redondeado */
+}
+
+.login-card-header {
+  background: var(--bg-strong);
+  padding: 14px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+}
+
+.login-card-body {
+  padding: 24px 24px 20px;
+}
+
+.login-title {
+  font-size: 20px;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+.login-subtitle {
+  font-size: 13px;
+  color: var(--muted);
+  margin-bottom: 18px;
+}
+
+.form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+
+.form-field label {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.form-field input {
+  padding: 8px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  font-size: 14px;
+  outline: none;
+}
+.form-field input:focus {
+  border-color: var(--bg-strong);
+  box-shadow: 0 0 0 1px var(--accent-soft);
+}
+
+.login-actions {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.btn-full {
+  width: 100%;
+  justify-content: center;
+}
+
+.login-hint {
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 8px;
+}
+
+.login-error {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--danger);
+}
+
+@media (max-width: 800px) {
+  .app-shell {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "header"
+      "main";
+  }
+  aside.sidebar {
+    display: none; /* versión 1: ocultamos sidebar en mobile */
+  }
+}
