@@ -1,6 +1,9 @@
 // dashboard.js
-// Lógica principal del panel de liquidaciones Clínica Rennat
+// Lógica principal del Panel de Liquidaciones Clínica Rennat
 
+/* =========================================================
+   0) IMPORTES FIREBASE
+   ========================================================= */
 import { app, auth, db } from './firebase-init.js';
 import {
   signInWithEmailAndPassword,
@@ -16,7 +19,10 @@ import {
   limit
 } from "https://www.gstatic.com/firebasejs/11.7.3/firebase-firestore.js";
 
-/* ================== DOM REFS ================== */
+/* =========================================================
+   1) REFERENCIAS DOM (COMUNES)
+   ========================================================= */
+
 const loginShell = document.getElementById('loginShell');
 const appShell   = document.getElementById('appShell');
 
@@ -40,6 +46,7 @@ const tablaProcedimientos    = document.getElementById('tablaProcedimientos');
 const tablaProduccion        = document.getElementById('tablaProduccion');
 const tablaLiquidaciones     = document.getElementById('tablaLiquidaciones');
 
+// Selects de período
 const prodMesSelect   = document.getElementById('prodMes');
 const prodProfSelect  = document.getElementById('prodProfesional');
 const btnRefrescarProduccion = document.getElementById('btnRefrescarProduccion');
@@ -47,7 +54,9 @@ const btnRefrescarProduccion = document.getElementById('btnRefrescarProduccion')
 const liqMesSelect    = document.getElementById('liqMes');
 const btnCalcularLiquidaciones = document.getElementById('btnCalcularLiquidaciones');
 
-/* ================== HELPERS ================== */
+/* =========================================================
+   2) HELPERS GENERALES
+   ========================================================= */
 
 function getCurrentPeriodoText() {
   const now = new Date();
@@ -67,8 +76,11 @@ function setActiveNav(targetView) {
   });
 }
 
-/* ================== LOGIN / AUTH ================== */
+/* =========================================================
+   3) MÓDULO AUTH (LOGIN / LOGOUT / ESTADO)
+   ========================================================= */
 
+// 3.1) Login manual (botón)
 btnLogin?.addEventListener('click', async () => {
   loginError.style.display = 'none';
   loginError.textContent = '';
@@ -91,10 +103,12 @@ btnLogin?.addEventListener('click', async () => {
   }
 });
 
+// 3.2) Logout
 btnLogout?.addEventListener('click', async () => {
   await signOut(auth);
 });
 
+// 3.3) Listener de estado de autenticación
 onAuthStateChanged(auth, user => {
   if (user) {
     // Mostrar app
@@ -118,7 +132,9 @@ onAuthStateChanged(auth, user => {
   }
 });
 
-/* ================== NAVEGACIÓN SIDEBAR ================== */
+/* =========================================================
+   4) MÓDULO NAVEGACIÓN (SIDEBAR / VISTAS)
+   ========================================================= */
 
 navItems.forEach(item => {
   item.addEventListener('click', () => {
@@ -128,7 +144,9 @@ navItems.forEach(item => {
   });
 });
 
-/* ================== SELECTS DE PERÍODO ================== */
+/* =========================================================
+   5) MÓDULO PERÍODO (SELECTS MES)
+   ========================================================= */
 
 function initSelectsPeriodo() {
   const now = new Date();
@@ -154,9 +172,10 @@ function initSelectsPeriodo() {
   });
 }
 
-/* ================== LECTURAS INICIALES ================== */
+/* =========================================================
+   6) MÓDULO HOME (KPIs + ÚLTIMAS LIQUIDACIONES)
+   ========================================================= */
 
-// Resumen HOME (versión simplificada para partir)
 async function loadHomeData() {
   try {
     // Total profesionales
@@ -177,6 +196,7 @@ async function loadHomeData() {
     const liqRows = [];
     liqSnap.forEach(doc => liqRows.push({ id: doc.id, ...doc.data() }));
 
+    // KPIs
     homeKpis.innerHTML = `
       <div style="display:flex;gap:12px;flex-wrap:wrap;">
         <div class="card" style="flex:1;min-width:140px;margin-bottom:0;">
@@ -190,6 +210,7 @@ async function loadHomeData() {
       </div>
     `;
 
+    // Últimas liquidaciones
     if (!liqRows.length) {
       homeLastLiquidaciones.innerHTML = `
         <p style="font-size:13px;color:var(--muted);">
@@ -227,6 +248,10 @@ async function loadHomeData() {
     </p>`;
   }
 }
+
+/* =========================================================
+   7) MÓDULO PROFESIONALES (LISTADO BÁSICO)
+   ========================================================= */
 
 async function loadProfesionales() {
   try {
@@ -274,6 +299,10 @@ async function loadProfesionales() {
   }
 }
 
+/* =========================================================
+   8) MÓDULO PROCEDIMIENTOS (LISTADO BÁSICO)
+   ========================================================= */
+
 async function loadProcedimientos() {
   try {
     const snap = await getDocs(collection(db, 'procedimientos'));
@@ -318,7 +347,10 @@ async function loadProcedimientos() {
   }
 }
 
-// Producción (versión mínima para probar estructura)
+/* =========================================================
+   9) MÓDULO PRODUCCIÓN (LECTURA SIMPLE)
+   ========================================================= */
+
 btnRefrescarProduccion?.addEventListener('click', () => {
   loadProduccion();
 });
@@ -373,7 +405,10 @@ async function loadProduccion() {
   }
 }
 
-// Liquidaciones (solo lectura inicial)
+/* =========================================================
+   10) MÓDULO LIQUIDACIONES (LECTURA + BOTÓN CALCULAR)
+   ========================================================= */
+
 async function loadLiquidaciones() {
   tablaLiquidaciones.innerHTML = `<p style="font-size:13px;color:var(--muted);">
     Cargando liquidaciones...
@@ -421,15 +456,18 @@ async function loadLiquidaciones() {
   }
 }
 
-/* ================== CALCULAR LIQUIDACIONES (STUB) ================== */
-
+// Botón "Calcular liquidaciones" (stub)
 btnCalcularLiquidaciones?.addEventListener('click', async () => {
   const periodo = liqMesSelect.value;
   alert(`Aquí implementaremos el cálculo de liquidaciones para el período ${periodo}.`);
-  // En la siguiente iteración hacemos:
+  // Próximos pasos:
   // 1. Leer producción del período.
   // 2. Agrupar por profesional.
   // 3. Aplicar reglas desde "profesionales" y "procedimientos".
   // 4. Guardar/actualizar documentos en "liquidaciones".
   // 5. Llamar loadLiquidaciones() nuevamente.
 });
+
+/* =========================================================
+   FIN DASHBOARD
+   ========================================================= */
