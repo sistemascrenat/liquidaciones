@@ -16,8 +16,11 @@ import {
   query,
   where,
   orderBy,
-  limit
+  limit,
+  doc,
+  setDoc
 } from "https://www.gstatic.com/firebasejs/11.7.3/firebase-firestore.js";
+
 
 /* =========================================================
    1) REFERENCIAS DOM (COMUNES)
@@ -46,13 +49,18 @@ const tablaProcedimientos    = document.getElementById('tablaProcedimientos');
 const tablaProduccion        = document.getElementById('tablaProduccion');
 const tablaLiquidaciones     = document.getElementById('tablaLiquidaciones');
 
-// Selects de período
 const prodMesSelect   = document.getElementById('prodMes');
 const prodProfSelect  = document.getElementById('prodProfesional');
 const btnRefrescarProduccion = document.getElementById('btnRefrescarProduccion');
 
 const liqMesSelect    = document.getElementById('liqMes');
 const btnCalcularLiquidaciones = document.getElementById('btnCalcularLiquidaciones');
+
+// Importar profesionales desde CSV (vista Configuración)
+const fileProfesionales       = document.getElementById('fileProfesionales');
+const btnImportProfesionales  = document.getElementById('btnImportProfesionales');
+const importProfResultado     = document.getElementById('importProfResultado');
+
 
 /* =========================================================
    2) HELPERS GENERALES
@@ -456,17 +464,161 @@ async function loadLiquidaciones() {
   }
 }
 
-// Botón "Calcular liquidaciones" (stub)
+/* ================== CALCULAR LIQUIDACIONES (STUB) ================== */
+
 btnCalcularLiquidaciones?.addEventListener('click', async () => {
   const periodo = liqMesSelect.value;
   alert(`Aquí implementaremos el cálculo de liquidaciones para el período ${periodo}.`);
-  // Próximos pasos:
+  // En la siguiente iteración hacemos:
   // 1. Leer producción del período.
   // 2. Agrupar por profesional.
   // 3. Aplicar reglas desde "profesionales" y "procedimientos".
   // 4. Guardar/actualizar documentos en "liquidaciones".
   // 5. Llamar loadLiquidaciones() nuevamente.
 });
+
+
+/* ================== IMPORTAR PROFESIONALES DESDE CSV ================== */
+
+// Normaliza RUT para usarlo como ID de documento (sin puntos, guión ni espacios, en mayúsculas)
+function normalizaRut(rutRaw = '') {
+  return rutRaw
+    .toString()
+    .trim()
+    .replace(/\./g, '')
+    .replace(/-/g, '')
+    .replace(/\s+/g, '')
+    .toUpperCase();
+}
+
+// Parsea un CSV simple a objetos { rol, rut, razonSocial, nombre }
+function parseProfesionalesCsv(text) {
+  const lines = text
+    .split(/\r?\n/)
+    .map(l => l.trim())
+    .filter(l => l.length > 0);
+
+  if (!lines.length) return [];
+
+  // Detectamos separador ; o ,
+  const delimiter = lines[0].includes(';') ? ';' : ',';
+
+  const headers = lines[0].split(delimiter).map(h =>
+    h.trim().toLowerCase()
+  );
+
+  const idxRol   = headers.findIndex(h => h === 'rol');
+  const idxRut   = headers.findIndex(h => h === 'rut');
+  const idxRazon = headers.findIndex(h => h === 'razonsocial');
+  const idxNom   = headers.findIndex(h => h === 'nombreprofesional');
+
+  if (idxRut === -1 || idxNom === -1) {
+    throw new Error(
+      'El CSV debe tener al menos las columnas "rut" y "nombreProfesional" (encabezados exactos).'
+    );
+  }
+
+  const rows = [];
+
+  for (let i = 1; i < lines.length; i++) {
+    const parts = lines[i].split(delimiter);
+    if (parts.every(p => !p.trim())) continue; // fila vacía
+
+    const row = {
+      rol: idxRol >= 0 ? (parts[idxRol] || '').trim() : '',
+      rut: (parts[idxRut] || '').trim(),
+      razonSocial: idxRazon >= 0 ? (parts[idxRazon] || '').trim() : '',
+      nombre: idxNom >= 0 ? (parts[idxNom] || '').trim() : ''
+    };
+
+    // descartamos filas sin RUT o sin nombre
+    if (!row.rut || !row.nombre) continue;
+
+    rows.push(row);
+  }
+
+  return rows;
+}
+
+btnImportProfesionales?.addEventListener('click', async () => {
+  if (!fileProfesionales?.files?.length) {
+    alert('Selecciona primero un archivo CSV de profesionales.');
+    return;
+  }
+
+  const file = fileProfesionales.files[0];
+  importProfResultado.textContent = 'Leyendo archivo…';
+  importProfResultado.style.color = 'var(--muted)';
+
+  const reader = new FileReader();
+
+  reader.onload = async (e) => {
+    try {
+      const text = e.target.result;
+      const rows = parseProfesionalesCsv(text);
+
+      if (!rows.length) {
+        importProfResultado.textContent = 'El archivo no tiene filas válidas.';
+        importProfResultado.style.color = '#e11d48';
+        return;
+      }
+
+      importProfResultado.textContent = `Importando ${rows.length} profesionales…`;
+      importProfResultado.style.color = 'var(--muted)';
+
+      let ok = 0;
+      let fail = 0;
+
+      for (const row of rows) {
+        const id = normalizaRut(row.rut);
+        if (!id) {
+          fail++;
+          continue;
+        }
+
+        const docRef = doc(db, 'profesionales', id);
+
+        try {
+          await setDoc(docRef, {
+            rut: row.rut,
+            rutId: id,
+            nombre: row.nombre,
+            razonSocial: row.razonSocial || null,
+            rol: row.rol || 'sin-clasificar',
+            estado: 'activo',
+            actualizadoEl: new Date()
+          }, { merge: true });
+
+          ok++;
+        } catch (e) {
+          console.error('Error guardando profesional', row, e);
+          fail++;
+        }
+      }
+
+      importProfResultado.textContent =
+        `Importación completada. OK: ${ok}, con problemas: ${fail}.`;
+      importProfResultado.style.color = 'var(--ink)';
+
+      // Recargar tabla de profesionales para ver los datos nuevos
+      loadProfesionales();
+
+    } catch (err) {
+      console.error('Error en importación CSV:', err);
+      importProfResultado.textContent =
+        'Error al importar profesionales: ' + (err.message || err);
+      importProfResultado.style.color = '#e11d48';
+    }
+  };
+
+  reader.onerror = () => {
+    importProfResultado.textContent = 'No se pudo leer el archivo.';
+    importProfResultado.style.color = '#e11d48';
+  };
+
+  reader.readAsText(file, 'utf-8');
+});
+
 
 /* =========================================================
    FIN DASHBOARD
