@@ -277,6 +277,48 @@
               <div id="importProfResultado" style="margin-top:8px;font-size:12px;"></div>
             </div>
           </div>
+          <hr style="margin:16px 0;border:none;border-top:1px solid var(--border);" />
+          
+          <!-- IMPORTAR CLÍNICAS DESDE CSV -->
+          <div>
+            <div style="font-weight:600;font-size:14px;margin-bottom:4px;">
+              Importar clínicas desde CSV
+            </div>
+            <p style="font-size:12px;color:var(--muted);margin-bottom:8px;">
+              CSV con columnas: <code>clinica</code>. Se guardará en <code>clinicas</code> con IDs legibles.
+            </p>
+          
+            <input type="file" id="fileClinicas" accept=".csv" />
+          
+            <div style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+              <button id="btnImportClinicas" class="btn btn-primary">Importar clínicas</button>
+            </div>
+          
+            <div id="importClinicasResultado" style="margin-top:8px;font-size:12px;"></div>
+          </div>
+          
+          <hr style="margin:16px 0;border:none;border-top:1px solid var(--border);" />
+          
+          <!-- IMPORTAR PROCEDIMIENTOS + TARIFAS DESDE CSV -->
+          <div>
+            <div style="font-weight:600;font-size:14px;margin-bottom:4px;">
+              Importar procedimientos + tarifas (por clínica) desde CSV
+            </div>
+            <p style="font-size:12px;color:var(--muted);margin-bottom:8px;">
+              CSV con columnas:
+              <code>clinica</code>, <code>cirugia</code>, <code>precioTotal</code>, <code>derechosPabellon</code>, <code>hmq</code>, <code>insumos</code>.
+              Guarda en <code>procedimientos</code> y <code>tarifas</code>.
+            </p>
+          
+            <input type="file" id="fileTarifas" accept=".csv" />
+          
+            <div style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+              <button id="btnImportTarifas" class="btn btn-primary">Importar procedimientos + tarifas</button>
+            </div>
+          
+            <div id="importTarifasResultado" style="margin-top:8px;font-size:12px;"></div>
+          </div>
+
         </div>
       </section>
     </main>
