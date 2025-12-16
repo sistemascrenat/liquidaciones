@@ -18,7 +18,8 @@ import {
   orderBy,
   limit,
   doc,
-  setDoc
+  setDoc,
+  writeBatch
 } from "https://www.gstatic.com/firebasejs/11.7.3/firebase-firestore.js";
 
 
@@ -60,6 +61,17 @@ const btnCalcularLiquidaciones = document.getElementById('btnCalcularLiquidacion
 const fileProfesionales       = document.getElementById('fileProfesionales');
 const btnImportProfesionales  = document.getElementById('btnImportProfesionales');
 const importProfResultado     = document.getElementById('importProfResultado');
+
+// Importar clínicas desde CSV
+const fileClinicas            = document.getElementById('fileClinicas');
+const btnImportClinicas       = document.getElementById('btnImportClinicas');
+const importClinicasResultado = document.getElementById('importClinicasResultado');
+
+// Importar procedimientos + tarifas desde CSV
+const fileTarifas             = document.getElementById('fileTarifas');
+const btnImportTarifas        = document.getElementById('btnImportTarifas');
+const importTarifasResultado  = document.getElementById('importTarifasResultado');
+
 
 
 /* =========================================================
@@ -540,6 +552,50 @@ function parseProfesionalesCsv(text) {
   return rows;
 }
 
+function slugify(text = '') {
+  return text
+    .toString()
+    .trim()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+}
+
+function parseCsv(text) {
+  const lines = text
+    .split(/\r?\n/)
+    .map(l => l.trim())
+    .filter(l => l.length > 0);
+
+  if (!lines.length) return { headers: [], rows: [] };
+
+  const delimiter = lines[0].includes(';') ? ';' : ',';
+  const headers = lines[0].split(delimiter).map(h => h.trim());
+
+  const rows = [];
+  for (let i = 1; i < lines.length; i++) {
+    const parts = lines[i].split(delimiter).map(p => p.trim());
+    const obj = {};
+    headers.forEach((h, idx) => obj[h] = parts[idx] ?? '');
+    rows.push(obj);
+  }
+  return { headers, rows };
+}
+
+function moneyToNumber(v) {
+  if (v == null) return 0;
+  return Number(
+    v.toString()
+      .replace(/\$/g, '')
+      .replace(/\./g, '')
+      .replace(/,/g, '')
+      .replace(/\s+/g, '')
+      .trim()
+  ) || 0;
+}
+
+
 btnImportProfesionales?.addEventListener('click', async () => {
   if (!fileProfesionales?.files?.length) {
     alert('Selecciona primero un archivo CSV de profesionales.');
@@ -618,6 +674,175 @@ btnImportProfesionales?.addEventListener('click', async () => {
 
   reader.readAsText(file, 'utf-8');
 });
+
+/* ================== IMPORTAR CLÍNICAS DESDE CSV ================== */
+btnImportClinicas?.addEventListener('click', async () => {
+  if (!fileClinicas?.files?.length) {
+    alert('Selecciona primero un CSV de clínicas.');
+    return;
+  }
+
+  const file = fileClinicas.files[0];
+  importClinicasResultado.textContent = 'Leyendo archivo…';
+  importClinicasResultado.style.color = 'var(--muted)';
+
+  const reader = new FileReader();
+
+  reader.onload = async (e) => {
+    try {
+      const text = e.target.result;
+      const { rows } = parseCsv(text);
+
+      const cleanRows = rows
+        .map(r => ({
+          clinica: (r.clinica || r.Clinica || r['Clínica'] || '').trim()
+        }))
+        .filter(r => r.clinica);
+
+      if (!cleanRows.length) throw new Error('CSV vacío o sin columna "clinica".');
+
+      const batch = writeBatch(db);
+      let count = 0;
+
+      for (const r of cleanRows) {
+        const clinicaId = `c_${slugify(r.clinica)}`;
+        batch.set(doc(db, 'clinicas', clinicaId), {
+          id: clinicaId,
+          nombre: r.clinica,
+          estado: 'activa',
+          actualizadoEl: new Date()
+        }, { merge: true });
+        count++;
+      }
+
+      await batch.commit();
+      importClinicasResultado.textContent = `Clínicas importadas/actualizadas: ${count}.`;
+      importClinicasResultado.style.color = 'var(--ink)';
+
+    } catch (err) {
+      console.error(err);
+      importClinicasResultado.textContent = 'Error: ' + (err.message || err);
+      importClinicasResultado.style.color = '#e11d48';
+    }
+  };
+
+  reader.onerror = () => {
+    importClinicasResultado.textContent = 'No se pudo leer el archivo.';
+    importClinicasResultado.style.color = '#e11d48';
+  };
+
+  reader.readAsText(file, 'utf-8');
+});
+
+
+/* ================== IMPORTAR PROCEDIMIENTOS + TARIFAS DESDE CSV ================== */
+btnImportTarifas?.addEventListener('click', async () => {
+  if (!fileTarifas?.files?.length) {
+    alert('Selecciona primero un CSV de tarifas.');
+    return;
+  }
+
+  const file = fileTarifas.files[0];
+  importTarifasResultado.textContent = 'Leyendo archivo…';
+  importTarifasResultado.style.color = 'var(--muted)';
+
+  const reader = new FileReader();
+
+  reader.onload = async (e) => {
+    try {
+      const text = e.target.result;
+      const { rows } = parseCsv(text);
+
+      const cleanRows = rows.map(r => {
+        const clinica = (r.clinica || r.Clinica || r['Clínica'] || '').trim();
+        const cirugia = (r.cirugia || r.Cirugia || r['Cirugía'] || r['Cirugías'] || '').trim();
+
+        const precioTotal = moneyToNumber(r.precioTotal || r['precioTotal'] || r['Precios'] || r['Precio']);
+        const derechosPabellon = moneyToNumber(r.derechosPabellon || r['Derechos de Pabellón'] || r['derechosPabellon']);
+        const hmq = moneyToNumber(r.hmq || r.HMQ);
+        const insumos = moneyToNumber(r.insumos || r.Insumos);
+
+        return { clinica, cirugia, precioTotal, derechosPabellon, hmq, insumos };
+      }).filter(x => x.clinica && x.cirugia);
+
+      if (!cleanRows.length) throw new Error('CSV vacío o sin columnas mínimas (clinica, cirugia).');
+
+      let batch = writeBatch(db);
+      let ops = 0;
+
+      const commitIfNeeded = async () => {
+        if (ops >= 450) {
+          await batch.commit();
+          batch = writeBatch(db);
+          ops = 0;
+        }
+      };
+
+      let upsertProc = 0;
+      let upsertTar = 0;
+
+      for (const r of cleanRows) {
+        const clinicaId = `c_${slugify(r.clinica)}`;
+        const procedimientoId = `p_${slugify(r.cirugia)}`;
+        const tarifaId = `t_${clinicaId}__${procedimientoId}`;
+
+        // clínica
+        batch.set(doc(db, 'clinicas', clinicaId), {
+          id: clinicaId,
+          nombre: r.clinica,
+          estado: 'activa',
+          actualizadoEl: new Date()
+        }, { merge: true });
+        ops++; await commitIfNeeded();
+
+        // procedimiento
+        batch.set(doc(db, 'procedimientos', procedimientoId), {
+          id: procedimientoId,
+          nombre: r.cirugia,
+          tipo: 'ambulatorio',
+          actualizadoEl: new Date()
+        }, { merge: true });
+        ops++; upsertProc++; await commitIfNeeded();
+
+        // tarifa cruce
+        batch.set(doc(db, 'tarifas', tarifaId), {
+          id: tarifaId,
+          clinicaId,
+          clinicaNombre: r.clinica,
+          procedimientoId,
+          procedimientoNombre: r.cirugia,
+          precioTotal: r.precioTotal || 0,
+          derechosPabellon: r.derechosPabellon || 0,
+          hmq: r.hmq || 0,
+          insumos: r.insumos || 0,
+          actualizadoEl: new Date()
+        }, { merge: true });
+        ops++; upsertTar++; await commitIfNeeded();
+      }
+
+      if (ops > 0) await batch.commit();
+
+      importTarifasResultado.textContent =
+        `Listo. Procedimientos upsert: ${upsertProc}. Tarifas upsert: ${upsertTar}.`;
+      importTarifasResultado.style.color = 'var(--ink)';
+
+      loadProcedimientos();
+
+    } catch (err) {
+      console.error(err);
+      importTarifasResultado.textContent = 'Error: ' + (err.message || err);
+      importTarifasResultado.style.color = '#e11d48';
+    }
+  };
+
+  reader.onerror = () => {
+    importTarifasResultado.textContent = 'No se pudo leer el archivo.';
+    importTarifasResultado.style.color = '#e11d48';
+  };
+
+  reader.readAsText(file, 'utf-8');
+});
+
 
 
 /* =========================================================
