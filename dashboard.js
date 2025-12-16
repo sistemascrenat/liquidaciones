@@ -19,8 +19,11 @@ import {
   limit,
   doc,
   setDoc,
-  writeBatch
+  writeBatch,
+  addDoc,
+  serverTimestamp
 } from "https://www.gstatic.com/firebasejs/11.7.3/firebase-firestore.js";
+
 
 
 /* =========================================================
@@ -47,6 +50,10 @@ const homeKpis               = document.getElementById('homeKpis');
 const homeLastLiquidaciones  = document.getElementById('homeLastLiquidaciones');
 const tablaProfesionales     = document.getElementById('tablaProfesionales');
 const tablaProcedimientos    = document.getElementById('tablaProcedimientos');
+// Botones “Nuevo”
+const btnNuevoProfesional   = document.getElementById('btnNuevoProfesional');
+const btnNuevoProcedimiento = document.getElementById('btnNuevoProcedimiento');
+
 const tablaProduccion        = document.getElementById('tablaProduccion');
 const tablaLiquidaciones     = document.getElementById('tablaLiquidaciones');
 
@@ -320,6 +327,40 @@ async function loadProfesionales() {
 }
 
 /* =========================================================
+   7.1) CREAR PROFESIONAL (BOTÓN + NUEVO)
+   ========================================================= */
+
+btnNuevoProfesional?.addEventListener('click', async () => {
+  try {
+    const nombre = prompt('Nombre del profesional (obligatorio):');
+    if (!nombre?.trim()) return;
+
+    const rut = prompt('RUT (opcional):') || '';
+    const especialidad = prompt('Especialidad (opcional):') || '';
+    const tipoContrato = prompt('Tipo contrato (opcional):') || '';
+    const porcentajeBaseRaw = prompt('% base (opcional, ej 70):') || '';
+    const porcentajeBase = porcentajeBaseRaw.trim() === '' ? null : Number(porcentajeBaseRaw);
+
+    await addDoc(collection(db, 'profesionales'), {
+      nombre: nombre.trim(),
+      rut: rut.trim() || null,
+      especialidad: especialidad.trim() || null,
+      tipoContrato: tipoContrato.trim() || null,
+      porcentajeBase: Number.isFinite(porcentajeBase) ? porcentajeBase : null,
+      estado: 'activo',
+      creadoEl: serverTimestamp(),
+      actualizadoEl: serverTimestamp()
+    });
+
+    await loadProfesionales();
+    alert('Profesional creado ✅');
+  } catch (err) {
+    console.error('Error creando profesional:', err);
+    alert('No se pudo crear el profesional. Revisa consola.');
+  }
+});
+
+/* =========================================================
    8) MÓDULO PROCEDIMIENTOS (LISTADO BÁSICO)
    ========================================================= */
 
@@ -366,6 +407,38 @@ async function loadProcedimientos() {
     </p>`;
   }
 }
+
+/* =========================================================
+   8.1) CREAR PROCEDIMIENTO (BOTÓN + NUEVO)
+   ========================================================= */
+
+btnNuevoProcedimiento?.addEventListener('click', async () => {
+  try {
+    const nombre = prompt('Nombre del procedimiento (obligatorio):');
+    if (!nombre?.trim()) return;
+
+    const codigo = prompt('Código (opcional):') || '';
+    const tipo = prompt('Tipo (ej: ambulatorio) (opcional):') || 'ambulatorio';
+    const valorBaseRaw = prompt('Valor base (opcional, ej 250000):') || '';
+    const valorBase = valorBaseRaw.trim() === '' ? 0 : Number(valorBaseRaw);
+
+    await addDoc(collection(db, 'procedimientos'), {
+      nombre: nombre.trim(),
+      codigo: codigo.trim() || null,
+      tipo: tipo.trim() || 'ambulatorio',
+      valorBase: Number.isFinite(valorBase) ? valorBase : 0,
+      creadoEl: serverTimestamp(),
+      actualizadoEl: serverTimestamp()
+    });
+
+    await loadProcedimientos();
+    alert('Procedimiento creado ✅');
+  } catch (err) {
+    console.error('Error creando procedimiento:', err);
+    alert('No se pudo crear el procedimiento. Revisa consola.');
+  }
+});
+
 
 /* =========================================================
    9) MÓDULO PRODUCCIÓN (LECTURA SIMPLE)
