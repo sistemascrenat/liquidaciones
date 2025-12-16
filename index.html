@@ -242,10 +242,40 @@
               <div class="card-subtitle">Ej: UF del mes, tabla por defecto, etc.</div>
             </div>
           </div>
+
           <div id="configContent">
             <p style="font-size:13px;color:var(--muted);">
               Aquí conectaremos la colección <code>parametros</code> de Firebase (UF, porcentajes, etc.).
             </p>
+
+            <hr style="margin:16px 0;border:none;border-top:1px solid var(--border);" />
+
+            <!-- IMPORTAR PROFESIONALES DESDE CSV -->
+            <div>
+              <div style="font-weight:600;font-size:14px;margin-bottom:4px;">
+                Importar profesionales desde CSV
+              </div>
+              <p style="font-size:12px;color:var(--muted);margin-bottom:8px;">
+                Sube un archivo CSV con columnas:
+                <code>rol</code>, <code>rut</code>, <code>razonSocial</code>, <code>nombreProfesional</code>.
+                Se crearán o actualizarán documentos en la colección
+                <code>profesionales</code> usando el RUT normalizado como ID.
+              </p>
+
+              <input type="file" id="fileProfesionales" accept=".csv" />
+
+              <div style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+                <button id="btnImportProfesionales" class="btn btn-primary">
+                  Importar profesionales
+                </button>
+                <span style="font-size:12px;color:var(--muted);">
+                  Puedes volver a importar el mismo archivo cuando actualices la planilla
+                  (sobrescribe por RUT).
+                </span>
+              </div>
+
+              <div id="importProfResultado" style="margin-top:8px;font-size:12px;"></div>
+            </div>
           </div>
         </div>
       </section>
