@@ -284,7 +284,7 @@ async function loadProfesionales() {
   try {
     const snap = await getDocs(collection(db, 'profesionales'));
     const rows = [];
-    snap.forEach(doc => rows.push({ id: doc.id, ...doc.data() }));
+    snap.forEach(d => rows.push({ id: d.id, ...d.data() }));
 
     if (!rows.length) {
       tablaProfesionales.innerHTML = `
@@ -294,15 +294,27 @@ async function loadProfesionales() {
       return;
     }
 
-    const htmlRows = rows.map(p => `
-      <tr>
-        <td>${p.nombre || '—'}</td>
-        <td>${p.rut || '—'}</td>
-        <td>${p.especialidad || '—'}</td>
-        <td>${p.tipoContrato || '—'}</td>
-        <td>${p.porcentajeBase != null ? p.porcentajeBase + '%' : '—'}</td>
-      </tr>
-    `).join('');
+    const htmlRows = rows.map(p => {
+      const desc = p.tieneDescuento ? `$${(p.descuentoMonto ?? 0).toLocaleString('es-CL')} (${p.descuentoRazon || '—'})` : 'No';
+      const estado = p.estado || 'activo';
+      return `
+        <tr>
+          <td>${p.nombreProfesional || p.nombre || '—'}</td>
+          <td>${p.rut || '—'}</td>
+          <td>${p.razonSocial || '—'}</td>
+          <td>${(p.clinicasIds || []).length ? (p.clinicasIds.join(', ')) : '—'}</td>
+          <td>${p.rolPrincipalId || '—'}</td>
+          <td>${desc}</td>
+          <td>${estado}</td>
+          <td class="text-right">
+            <button class="btn btn-soft" data-action="edit-prof" data-id="${p.rutId || p.id}">Editar</button>
+            <button class="btn btn-soft" data-action="toggle-prof" data-id="${p.rutId || p.id}">
+              ${estado === 'inactivo' ? 'Activar' : 'Desactivar'}
+            </button>
+          </td>
+        </tr>
+      `;
+    }).join('');
 
     tablaProfesionales.innerHTML = `
       <table>
@@ -310,9 +322,12 @@ async function loadProfesionales() {
           <tr>
             <th>Nombre</th>
             <th>RUT</th>
-            <th>Especialidad</th>
-            <th>Tipo contrato</th>
-            <th>% base</th>
+            <th>Razón social</th>
+            <th>Clínicas</th>
+            <th>Rol principal</th>
+            <th>Descuento</th>
+            <th>Estado</th>
+            <th class="text-right">Acciones</th>
           </tr>
         </thead>
         <tbody>${htmlRows}</tbody>
@@ -326,37 +341,115 @@ async function loadProfesionales() {
   }
 }
 
+tablaProfesionales?.addEventListener('click', async (e) => {
+  const btn = e.target.closest('button[data-action]');
+  if (!btn) return;
+
+  const action = btn.dataset.action;
+  const rutId = btn.dataset.id;
+
+  try {
+    if (action === 'toggle-prof') {
+      // leer doc actual
+      const ref = doc(db, 'profesionales', rutId);
+      // no importaste getDoc/updateDoc, así que hacemos merge directo con estado nuevo:
+      const nuevoEstado = (btn.textContent.includes('Activar')) ? 'activo' : 'inactivo';
+      await setDoc(ref, { estado: nuevoEstado, actualizadoEl: serverTimestamp() }, { merge: true });
+      await loadProfesionales();
+      return;
+    }
+
+    if (action === 'edit-prof') {
+      const nombreProfesional = prompt('Nuevo nombre (deja vacío para no cambiar):') || '';
+      const razonSocial = prompt('Nueva razón social (deja vacío para no cambiar):') || '';
+      const giro = prompt('Nuevo giro (deja vacío para no cambiar):') || '';
+      const direccion = prompt('Nueva dirección (deja vacío para no cambiar):') || '';
+
+      const tieneDescuento = (prompt('¿Tiene descuento? (SI/NO)', 'NO') || 'NO').trim().toUpperCase() === 'SI';
+      let descuentoMonto = 0;
+      let descuentoRazon = '';
+      if (tieneDescuento) {
+        descuentoMonto = Number((prompt('Monto descuento (numero):', '0') || '0').replace(/[^\d]/g, '')) || 0;
+        descuentoRazon = (prompt('Razón descuento:', '') || '').trim();
+      }
+
+      const patch = {
+        actualizadoEl: serverTimestamp(),
+        tieneDescuento,
+        descuentoMonto: tieneDescuento ? descuentoMonto : 0,
+        descuentoRazon: tieneDescuento ? (descuentoRazon || null) : null
+      };
+      if (nombreProfesional.trim()) patch.nombreProfesional = nombreProfesional.trim();
+      if (razonSocial.trim()) patch.razonSocial = razonSocial.trim();
+      if (giro.trim()) patch.giro = giro.trim();
+      if (direccion.trim()) patch.direccion = direccion.trim();
+
+      await setDoc(doc(db, 'profesionales', rutId), patch, { merge: true });
+      await loadProfesionales();
+      return;
+    }
+  } catch (err) {
+    console.error(err);
+    alert('Error ejecutando acción. Revisa consola.');
+  }
+});
+
 /* =========================================================
    7.1) CREAR PROFESIONAL (BOTÓN + NUEVO)
    ========================================================= */
 
 btnNuevoProfesional?.addEventListener('click', async () => {
   try {
-    const nombre = prompt('Nombre del profesional (obligatorio):');
-    if (!nombre?.trim()) return;
+    const rut = prompt('RUT del profesional (obligatorio, ej 16128922-1):');
+    if (!rut?.trim()) return;
 
-    const rut = prompt('RUT (opcional):') || '';
-    const especialidad = prompt('Especialidad (opcional):') || '';
-    const tipoContrato = prompt('Tipo contrato (opcional):') || '';
-    const porcentajeBaseRaw = prompt('% base (opcional, ej 70):') || '';
-    const porcentajeBase = porcentajeBaseRaw.trim() === '' ? null : Number(porcentajeBaseRaw);
+    const rutId = normalizaRut(rut);
+    if (!rutId) { alert('RUT inválido.'); return; }
 
-    await addDoc(collection(db, 'profesionales'), {
-      nombre: nombre.trim(),
-      rut: rut.trim() || null,
-      especialidad: especialidad.trim() || null,
-      tipoContrato: tipoContrato.trim() || null,
-      porcentajeBase: Number.isFinite(porcentajeBase) ? porcentajeBase : null,
+    const nombreProfesional = prompt('Nombre profesional (obligatorio):');
+    if (!nombreProfesional?.trim()) return;
+
+    const razonSocial = prompt('Razón social (opcional):') || '';
+    const giro = prompt('Giro (opcional):') || '';
+    const direccion = prompt('Dirección (opcional):') || '';
+
+    // Descuento
+    const tieneDescuento = (prompt('¿Tiene descuento? (SI/NO)', 'NO') || 'NO').trim().toUpperCase() === 'SI';
+    let descuentoMonto = 0;
+    let descuentoRazon = '';
+    if (tieneDescuento) {
+      descuentoMonto = Number((prompt('Monto descuento (numero, ej 50000):', '0') || '0').replace(/[^\d]/g, '')) || 0;
+      descuentoRazon = (prompt('Razón descuento:', '') || '').trim();
+    }
+
+    // Por ahora: rol/clinicas se configuran por import masivo o edición posterior
+    await setDoc(doc(db, 'profesionales', rutId), {
+      rut: rut.trim(),
+      rutId,
+      nombreProfesional: nombreProfesional.trim(),
+      razonSocial: razonSocial.trim() || null,
+      giro: giro.trim() || null,
+      direccion: direccion.trim() || null,
+
+      rolPrincipalId: null,
+      rolesSecundariosIds: [],
+      clinicasIds: [],
+
+      tieneDescuento,
+      descuentoMonto,
+      descuentoRazon: descuentoRazon || null,
+      descuentoMoneda: 'CLP',
+
       estado: 'activo',
       creadoEl: serverTimestamp(),
       actualizadoEl: serverTimestamp()
-    });
+    }, { merge: true });
 
     await loadProfesionales();
-    alert('Profesional creado ✅');
+    alert('Profesional guardado ✅');
   } catch (err) {
     console.error('Error creando profesional:', err);
-    alert('No se pudo crear el profesional. Revisa consola.');
+    alert('No se pudo guardar el profesional. Revisa consola.');
   }
 });
 
@@ -585,45 +678,64 @@ function parseProfesionalesCsv(text) {
 
   if (!lines.length) return [];
 
-  // Detectamos separador ; o ,
   const delimiter = lines[0].includes(';') ? ';' : ',';
+  const headers = lines[0].split(delimiter).map(h => h.trim());
 
-  const headers = lines[0].split(delimiter).map(h =>
-    h.trim().toLowerCase()
-  );
+  const H = (name) => headers.findIndex(h => h.toLowerCase() === name.toLowerCase());
 
-  const idxRol   = headers.findIndex(h => h === 'rol');
-  const idxRut   = headers.findIndex(h => h === 'rut');
-  const idxRazon = headers.findIndex(h => h === 'razonsocial');
-  const idxNom   = headers.findIndex(h => h === 'nombreprofesional');
-
+  const idxRut = H('rut');
+  const idxNom = H('nombreProfesional');
   if (idxRut === -1 || idxNom === -1) {
-    throw new Error(
-      'El CSV debe tener al menos las columnas "rut" y "nombreProfesional" (encabezados exactos).'
-    );
+    throw new Error('CSV debe tener columnas: rut, nombreProfesional');
   }
 
-  const rows = [];
+  const idxRazon = H('razonSocial');
+  const idxGiro = H('giro');
+  const idxDir = H('direccion');
+  const idxRolP = H('rolPrincipal');
+  const idxRolS = H('rolesSecundarios');
+  const idxClin = H('clinicas');
+  const idxTD = H('tieneDescuento');
+  const idxDM = H('descuentoMonto');
+  const idxDR = H('descuentoRazon');
+  const idxEstado = H('estado');
 
+  const rows = [];
   for (let i = 1; i < lines.length; i++) {
     const parts = lines[i].split(delimiter);
-    if (parts.every(p => !p.trim())) continue; // fila vacía
 
-    const row = {
-      rol: idxRol >= 0 ? (parts[idxRol] || '').trim() : '',
-      rut: (parts[idxRut] || '').trim(),
+    const rut = (parts[idxRut] || '').trim();
+    const nombreProfesional = (parts[idxNom] || '').trim();
+    if (!rut || !nombreProfesional) continue;
+
+    const tieneDescuento = ((parts[idxTD] || 'NO').trim().toUpperCase() === 'SI');
+    const descuentoMonto = tieneDescuento ? (Number((parts[idxDM] || '0').toString().replace(/[^\d]/g, '')) || 0) : 0;
+    const descuentoRazon = tieneDescuento ? ((parts[idxDR] || '').trim()) : '';
+
+    const parseList = (v) => (v || '')
+      .split('|')
+      .map(x => x.trim())
+      .filter(Boolean);
+
+    rows.push({
+      rut,
+      nombreProfesional,
       razonSocial: idxRazon >= 0 ? (parts[idxRazon] || '').trim() : '',
-      nombre: idxNom >= 0 ? (parts[idxNom] || '').trim() : ''
-    };
-
-    // descartamos filas sin RUT o sin nombre
-    if (!row.rut || !row.nombre) continue;
-
-    rows.push(row);
+      giro: idxGiro >= 0 ? (parts[idxGiro] || '').trim() : '',
+      direccion: idxDir >= 0 ? (parts[idxDir] || '').trim() : '',
+      rolPrincipal: idxRolP >= 0 ? (parts[idxRolP] || '').trim() : '',
+      rolesSecundarios: idxRolS >= 0 ? parseList(parts[idxRolS]) : [],
+      clinicas: idxClin >= 0 ? parseList(parts[idxClin]) : [],
+      tieneDescuento,
+      descuentoMonto,
+      descuentoRazon,
+      estado: idxEstado >= 0 ? ((parts[idxEstado] || 'activo').trim().toLowerCase()) : 'activo'
+    });
   }
 
   return rows;
 }
+
 
 function slugify(text = '') {
   return text
