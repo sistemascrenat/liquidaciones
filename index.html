@@ -77,6 +77,10 @@
           <span class="icon">🩺</span>
           <span>Ambulatorios</span>
         </div>
+        <div class="nav-item" data-view="view-clinicas">
+          <span class="icon">🏥</span>
+          <span>Clínicas</span>
+        </div>
         <div class="nav-item" data-view="view-produccion">
           <span class="icon">📅</span>
           <span>Producción mensual</span>
@@ -147,6 +151,7 @@
               <div class="card-subtitle">Datos desde la colección <code>profesionales</code>.</div>
             </div>
             <div class="card-actions">
+              <button class="btn btn-soft" id="btnAdministrarRoles">Administrar roles</button>
               <button class="btn btn-primary" id="btnNuevoProfesional">+ Nuevo profesional</button>
             </div>
           </div>
@@ -178,6 +183,31 @@
           </div>
         </div>
       </section>
+
+      <!-- CLÍNICAS -->
+      <section id="view-clinicas" class="view">
+        <div class="view-header">
+          <div class="view-title">Clínicas</div>
+          <div class="view-subtitle">Listado y administración de clínicas.</div>
+        </div>
+      
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <div class="card-title">Listado de clínicas</div>
+              <div class="card-subtitle">Datos desde la colección <code>clinicas</code>.</div>
+            </div>
+            <div class="card-actions">
+              <button class="btn btn-primary" id="btnNuevaClinica">+ Nueva clínica</button>
+            </div>
+          </div>
+      
+          <div id="tablaClinicas">
+            <!-- Tabla generada por JS -->
+          </div>
+        </div>
+      </section>
+
 
       <!-- PRODUCCIÓN -->
       <section id="view-produccion" class="view">
@@ -483,6 +513,93 @@
       </div>
     </div>
   </div>
+
+  <!-- Modal Roles -->
+  <div id="modalRoles" class="modal" role="dialog" aria-modal="true" aria-labelledby="modalRolesTitle" style="display:none;">
+    <div class="modal-header">
+      <div>
+        <div id="modalRolesTitle" class="modal-title">Administrar roles</div>
+        <div class="modal-subtitle">Crear / editar / eliminar roles</div>
+      </div>
+      <button type="button" class="modal-close" id="btnCerrarModalRoles" aria-label="Cerrar">✕</button>
+    </div>
+  
+    <div class="modal-body">
+      <div class="grid-2">
+        <div class="form-field">
+          <label>Nombre del rol *</label>
+          <input id="mRolNombre" type="text" placeholder="Ej: Cirujano">
+          <div class="hint">Este nombre es lo visible en el sistema.</div>
+        </div>
+  
+        <div class="form-field">
+          <label>&nbsp;</label>
+          <div style="display:flex;gap:8px;align-items:center;">
+            <button class="btn btn-primary" id="btnGuardarRol">Guardar rol</button>
+            <button class="btn btn-soft" id="btnNuevoRol">Nuevo</button>
+          </div>
+        </div>
+      </div>
+  
+      <div id="mRolesError" class="modal-error" style="display:none;"></div>
+  
+      <hr class="modal-hr">
+  
+      <div id="tablaRoles">
+        <!-- Tabla roles por JS -->
+      </div>
+    </div>
+  
+    <div class="modal-footer">
+      <button type="button" class="btn btn-soft" id="btnCerrarRoles">Cerrar</button>
+    </div>
+  </div>
+
+  <!-- Modal Clínica -->
+  <div id="modalClinica" class="modal" role="dialog" aria-modal="true" aria-labelledby="modalClinicaTitle" style="display:none;">
+    <div class="modal-header">
+      <div>
+        <div id="modalClinicaTitle" class="modal-title">Clínica</div>
+        <div id="modalClinicaSubtitle" class="modal-subtitle">Crear / editar clínica</div>
+      </div>
+      <button type="button" class="modal-close" id="btnCerrarModalClinica" aria-label="Cerrar">✕</button>
+    </div>
+  
+    <div class="modal-body">
+      <div class="grid-2">
+        <div class="form-field">
+          <label>Código *</label>
+          <input id="mClinicaCodigo" type="text" placeholder="C001">
+          <div class="hint">Formato: C + 3 dígitos. Se propone automáticamente.</div>
+        </div>
+  
+        <div class="form-field">
+          <label>Nombre *</label>
+          <input id="mClinicaNombre" type="text" placeholder="Ej: Clínica Rennat">
+        </div>
+      </div>
+  
+      <div class="grid-2">
+        <div class="form-field">
+          <label>Estado</label>
+          <select id="mClinicaEstado" class="badge">
+            <option value="activa">Activa</option>
+            <option value="inactiva">Inactiva</option>
+          </select>
+        </div>
+        <div class="form-field"></div>
+      </div>
+  
+      <div id="mClinicaError" class="modal-error" style="display:none;"></div>
+    </div>
+  
+    <div class="modal-footer">
+      <button type="button" class="btn btn-soft" id="btnCancelarModalClinica">Cancelar</button>
+      <button type="button" class="btn btn-primary" id="btnGuardarModalClinica">Guardar</button>
+    </div>
+  </div>
+
+
 
   <!-- ===== Estilos rápidos del modal (si no quieres tocar estilo.css aún) ===== -->
   <style>
