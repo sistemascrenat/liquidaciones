@@ -858,9 +858,7 @@ tablaProfesionales?.addEventListener('click', async (e) => {
 
   try {
     if (action === 'toggle-prof') {
-      // leer doc actual
       const ref = doc(db, 'profesionales', rutId);
-      // no importaste getDoc/updateDoc, así que hacemos merge directo con estado nuevo:
       const nuevoEstado = (btn.textContent.includes('Activar')) ? 'activo' : 'inactivo';
       await setDoc(ref, { estado: nuevoEstado, actualizadoEl: serverTimestamp() }, { merge: true });
       await loadProfesionales();
@@ -872,26 +870,14 @@ tablaProfesionales?.addEventListener('click', async (e) => {
       return;
     }
 
-      const patch = {
-        actualizadoEl: serverTimestamp(),
-        tieneDescuento,
-        descuentoMonto: tieneDescuento ? descuentoMonto : 0,
-        descuentoRazon: tieneDescuento ? (descuentoRazon || null) : null
-      };
-      if (nombreProfesional.trim()) patch.nombreProfesional = nombreProfesional.trim();
-      if (razonSocial.trim()) patch.razonSocial = razonSocial.trim();
-      if (giro.trim()) patch.giro = giro.trim();
-      if (direccion.trim()) patch.direccion = direccion.trim();
-
-      await setDoc(doc(db, 'profesionales', rutId), patch, { merge: true });
-      await loadProfesionales();
-      return;
-    }
+    // Si llega aquí, es una acción no soportada
+    console.warn('Acción no soportada en tablaProfesionales:', action);
   } catch (err) {
     console.error(err);
     alert('Error ejecutando acción. Revisa consola.');
   }
 });
+
 
 /* =========================================================
    7.1) CREAR PROFESIONAL (BOTÓN + NUEVO)
