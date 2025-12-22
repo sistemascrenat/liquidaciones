@@ -144,7 +144,7 @@ const mProcValorBase = document.getElementById('mProcValorBase');
 // Modal Roles
 const modalRoles = document.getElementById('modalRoles');
 const btnCerrarModalRoles = document.getElementById('btnCerrarModalRoles');
-const btnCerrarRoles = document.getElementById('btnCerrarRoles');
+const btnCancelarModalRoles = document.getElementById('btnCancelarModalRoles');
 const mRolNombre = document.getElementById('mRolNombre');
 const btnGuardarRol = document.getElementById('btnGuardarRol');
 const btnNuevoRol = document.getElementById('btnNuevoRol');
@@ -335,7 +335,7 @@ function closeAllModals() {
 }
 
 btnCerrarModalRoles?.addEventListener('click', closeAllModals);
-btnCerrarRoles?.addEventListener('click', closeAllModals);
+btnCancelarModalRoles?.addEventListener('click', closeAllModals);
 
 btnCerrarModalClinica?.addEventListener('click', closeAllModals);
 btnCancelarModalClinica?.addEventListener('click', closeAllModals);
