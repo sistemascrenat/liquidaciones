@@ -239,14 +239,10 @@
           <div class="card-header">
             <div>
               <div class="card-title">Parámetros globales</div>
-              <div class="card-subtitle">Ej: UF del mes, tabla por defecto, etc.</div>
             </div>
           </div>
 
           <div id="configContent">
-            <p style="font-size:13px;color:var(--muted);">
-              Aquí conectaremos la colección <code>parametros</code> de Firebase (UF, porcentajes, etc.).
-            </p>
           
             <!-- NUEVO: Plantilla modelo -->
             <div style="margin-top:10px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
@@ -254,8 +250,6 @@
                 ⬇️ Descargar plantilla modelo (Google Sheets)
               </button>
               <span style="font-size:12px;color:var(--muted);">
-                Se descargará un archivo con pestañas: Profesionales | Roles | Clínicas | Tarifas.
-                Ábrelo con Google Sheets y luego exporta cada pestaña como CSV.
               </span>
             </div>
           
@@ -267,12 +261,6 @@
               <div style="font-weight:600;font-size:14px;margin-bottom:4px;">
                 Importar profesionales desde CSV
               </div>
-              <p style="font-size:12px;color:var(--muted);margin-bottom:8px;">
-                Sube un archivo CSV con columnas:
-                <code>rol</code>, <code>rut</code>, <code>razonSocial</code>, <code>nombreProfesional</code>.
-                Se crearán o actualizarán documentos en la colección
-                <code>profesionales</code> usando el RUT normalizado como ID.
-              </p>
 
               <input type="file" id="fileProfesionales" accept=".csv" />
 
@@ -281,8 +269,6 @@
                   Importar profesionales
                 </button>
                 <span style="font-size:12px;color:var(--muted);">
-                  Puedes volver a importar el mismo archivo cuando actualices la planilla
-                  (sobrescribe por RUT).
                 </span>
               </div>
 
@@ -296,9 +282,6 @@
             <div style="font-weight:600;font-size:14px;margin-bottom:4px;">
               Importar roles desde CSV
             </div>
-            <p style="font-size:12px;color:var(--muted);margin-bottom:8px;">
-              CSV con columna: <code>rol</code>. Guarda en <code>roles</code>.
-            </p>
           
             <input type="file" id="fileRoles" accept=".csv" />
           
@@ -314,9 +297,6 @@
             <div style="font-weight:600;font-size:14px;margin-bottom:4px;">
               Importar clínicas desde CSV
             </div>
-            <p style="font-size:12px;color:var(--muted);margin-bottom:8px;">
-              CSV con columnas: <code>clinica</code>. Se guardará en <code>clinicas</code> con IDs legibles.
-            </p>
           
             <input type="file" id="fileClinicas" accept=".csv" />
           
@@ -334,12 +314,7 @@
             <div style="font-weight:600;font-size:14px;margin-bottom:4px;">
               Importar procedimientos + tarifas (por clínica) desde CSV
             </div>
-            <p style="font-size:12px;color:var(--muted);margin-bottom:8px;">
-              CSV con columnas:
-              <code>clinica</code>, <code>cirugia</code>, <code>precioTotal</code>, <code>derechosPabellon</code>, <code>hmq</code>, <code>insumos</code>.
-              Guarda en <code>procedimientos</code> y <code>tarifas</code>.
-            </p>
-          
+         
             <input type="file" id="fileTarifas" accept=".csv" />
           
             <div style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
