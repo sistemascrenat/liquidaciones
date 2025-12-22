@@ -354,8 +354,232 @@
     </main>
   </div>
 
+  <!-- =========================
+       MODALES (Profesional / Procedimiento)
+       ========================= -->
+  <div id="modalOverlay" class="modal-overlay" style="display:none;">
+    <!-- Modal Profesional -->
+    <div id="modalProfesional" class="modal" role="dialog" aria-modal="true" aria-labelledby="modalProfTitle" style="display:none;">
+      <div class="modal-header">
+        <div>
+          <div id="modalProfTitle" class="modal-title">Profesional</div>
+          <div id="modalProfSubtitle" class="modal-subtitle">Crear / editar profesional</div>
+        </div>
+        <button type="button" class="modal-close" id="btnCerrarModalProf" aria-label="Cerrar">✕</button>
+      </div>
+
+      <div class="modal-body">
+        <div class="grid-2">
+          <div class="form-field">
+            <label>RUT *</label>
+            <input id="mProfRut" type="text" placeholder="16128922-1">
+            <div class="hint">Se usa como ID (normalizado). No se recomienda cambiarlo al editar.</div>
+          </div>
+
+          <div class="form-field">
+            <label>Nombre profesional *</label>
+            <input id="mProfNombre" type="text" placeholder="Nombre y apellido">
+          </div>
+        </div>
+
+        <div class="grid-2">
+          <div class="form-field">
+            <label>Razón social</label>
+            <input id="mProfRazon" type="text" placeholder="Opcional">
+          </div>
+
+          <div class="form-field">
+            <label>Giro</label>
+            <input id="mProfGiro" type="text" placeholder="Opcional">
+          </div>
+        </div>
+
+        <div class="form-field">
+          <label>Dirección</label>
+          <input id="mProfDireccion" type="text" placeholder="Opcional">
+        </div>
+
+        <hr class="modal-hr">
+
+        <div class="grid-2">
+          <div class="form-field">
+            <label>Rol principal</label>
+            <select id="mProfRolPrincipal" class="badge"></select>
+            <div class="hint">Se carga desde la colección <code>roles</code>.</div>
+          </div>
+
+          <div class="form-field">
+            <label>Estado</label>
+            <select id="mProfEstado" class="badge">
+              <option value="activo">Activo</option>
+              <option value="inactivo">Inactivo</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="grid-2">
+          <div class="form-field">
+            <label>Roles secundarios (checkboxes)</label>
+            <div id="mProfRolesSec" class="checklist"></div>
+          </div>
+
+          <div class="form-field">
+            <label>Clínicas (checkboxes)</label>
+            <div id="mProfClinicas" class="checklist"></div>
+          </div>
+        </div>
+
+        <hr class="modal-hr">
+
+        <div class="grid-2">
+          <div class="form-field">
+            <label>
+              <input id="mProfTieneDesc" type="checkbox">
+              Tiene descuento
+            </label>
+            <div class="hint">Si está activo, se guardará monto + razón.</div>
+          </div>
+
+          <div class="form-field">
+            <label>Monto descuento (CLP)</label>
+            <input id="mProfDescMonto" type="text" placeholder="0">
+          </div>
+        </div>
+
+        <div class="form-field">
+          <label>Razón descuento</label>
+          <input id="mProfDescRazon" type="text" placeholder="Opcional">
+        </div>
+
+        <div id="mProfError" class="modal-error" style="display:none;"></div>
+      </div>
+
+      <div class="modal-footer">
+        <button type="button" class="btn btn-soft" id="btnCancelarModalProf">Cancelar</button>
+        <button type="button" class="btn btn-primary" id="btnGuardarModalProf">Guardar</button>
+      </div>
+    </div>
+
+    <!-- Modal Procedimiento -->
+    <div id="modalProcedimiento" class="modal" role="dialog" aria-modal="true" aria-labelledby="modalProcTitle" style="display:none;">
+      <div class="modal-header">
+        <div>
+          <div id="modalProcTitle" class="modal-title">Procedimiento</div>
+          <div id="modalProcSubtitle" class="modal-subtitle">Crear procedimiento</div>
+        </div>
+        <button type="button" class="modal-close" id="btnCerrarModalProc" aria-label="Cerrar">✕</button>
+      </div>
+
+      <div class="modal-body">
+        <div class="grid-2">
+          <div class="form-field">
+            <label>Nombre *</label>
+            <input id="mProcNombre" type="text" placeholder="Ej: Artroscopia de rodilla">
+          </div>
+
+          <div class="form-field">
+            <label>Código</label>
+            <input id="mProcCodigo" type="text" placeholder="Opcional">
+          </div>
+        </div>
+
+        <div class="grid-2">
+          <div class="form-field">
+            <label>Tipo</label>
+            <select id="mProcTipo" class="badge">
+              <option value="ambulatorio">Ambulatorio</option>
+              <option value="hospitalario">Hospitalario</option>
+              <option value="otro">Otro</option>
+            </select>
+          </div>
+
+          <div class="form-field">
+            <label>Valor base (CLP)</label>
+            <input id="mProcValorBase" type="text" placeholder="0">
+          </div>
+        </div>
+
+        <div id="mProcError" class="modal-error" style="display:none;"></div>
+      </div>
+
+      <div class="modal-footer">
+        <button type="button" class="btn btn-soft" id="btnCancelarModalProc">Cancelar</button>
+        <button type="button" class="btn btn-primary" id="btnGuardarModalProc">Guardar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== Estilos rápidos del modal (si no quieres tocar estilo.css aún) ===== -->
+  <style>
+    .modal-overlay{
+      position:fixed; inset:0;
+      background: rgba(2,6,23,.55);
+      display:flex; align-items:center; justify-content:center;
+      padding:18px;
+      z-index:9999;
+    }
+    .modal{
+      width:min(920px, 96vw);
+      background: var(--panel, #fff);
+      border:1px solid var(--border, #e5e7eb);
+      border-radius:14px;
+      box-shadow: 0 20px 60px rgba(0,0,0,.25);
+      overflow:hidden;
+    }
+    .modal-header{
+      display:flex; align-items:flex-start; justify-content:space-between;
+      gap:12px;
+      padding:14px 16px;
+      border-bottom:1px solid var(--border, #e5e7eb);
+      background: rgba(255,255,255,.02);
+    }
+    .modal-title{ font-weight:800; font-size:16px; }
+    .modal-subtitle{ font-size:12px; color: var(--muted, #6b7280); margin-top:2px; }
+    .modal-close{
+      border:none; background:transparent; cursor:pointer;
+      font-size:18px; line-height:1; padding:6px 10px;
+      border-radius:10px;
+    }
+    .modal-close:hover{ background: rgba(0,0,0,.06); }
+    .modal-body{ padding:14px 16px; }
+    .modal-footer{
+      display:flex; justify-content:flex-end; gap:10px;
+      padding:14px 16px;
+      border-top:1px solid var(--border, #e5e7eb);
+      background: rgba(255,255,255,.02);
+    }
+    .grid-2{
+      display:grid; grid-template-columns: 1fr 1fr;
+      gap:12px;
+    }
+    @media (max-width:720px){
+      .grid-2{ grid-template-columns:1fr; }
+    }
+    .hint{ font-size:11px; color: var(--muted, #6b7280); margin-top:6px; }
+    .modal-hr{ margin:14px 0; border:none; border-top:1px solid var(--border, #e5e7eb); }
+    .checklist{
+      border:1px solid var(--border, #e5e7eb);
+      border-radius:12px;
+      padding:10px;
+      max-height:160px;
+      overflow:auto;
+      background: rgba(255,255,255,.03);
+    }
+    .check-row{ display:flex; gap:8px; align-items:center; padding:6px 4px; }
+    .modal-error{
+      margin-top:10px;
+      color:#b91c1c;
+      font-size:12px;
+      background: rgba(185,28,28,.08);
+      border:1px solid rgba(185,28,28,.25);
+      padding:8px 10px;
+      border-radius:10px;
+    }
+  </style>
+
   <!-- Firebase + lógica -->
   <script type="module" src="./firebase-init.js"></script>
   <script type="module" src="./dashboard.js"></script>
 </body>
 </html>
+
