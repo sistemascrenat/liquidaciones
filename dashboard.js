@@ -79,6 +79,12 @@ const fileTarifas             = document.getElementById('fileTarifas');
 const btnImportTarifas        = document.getElementById('btnImportTarifas');
 const importTarifasResultado  = document.getElementById('importTarifasResultado');
 
+// Importar roles desde CSV
+const fileRoles               = document.getElementById('fileRoles');
+const btnImportRoles          = document.getElementById('btnImportRoles');
+const importRolesResultado    = document.getElementById('importRolesResultado');
+
+
 
 
 /* =========================================================
@@ -820,15 +826,31 @@ btnImportProfesionales?.addEventListener('click', async () => {
         const docRef = doc(db, 'profesionales', id);
 
         try {
-          await setDoc(docRef, {
-            rut: row.rut,
-            rutId: id,
-            nombre: row.nombre,
-            razonSocial: row.razonSocial || null,
-            rol: row.rol || 'sin-clasificar',
-            estado: 'activo',
-            actualizadoEl: new Date()
-          }, { merge: true });
+         const rolPrincipalId = row.rolPrincipal ? `r_${slugify(row.rolPrincipal)}` : null;
+         const rolesSecundariosIds = (row.rolesSecundarios || []).map(x => `r_${slugify(x)}`);
+         const clinicasIds = (row.clinicas || []).map(x => `c_${slugify(x)}`);
+         
+         await setDoc(docRef, {
+           rut: row.rut,
+           rutId: id,
+           nombreProfesional: row.nombreProfesional,
+           razonSocial: row.razonSocial || null,
+           giro: row.giro || null,
+           direccion: row.direccion || null,
+         
+           rolPrincipalId,
+           rolesSecundariosIds,
+           clinicasIds,
+         
+           tieneDescuento: !!row.tieneDescuento,
+           descuentoMonto: row.tieneDescuento ? (row.descuentoMonto || 0) : 0,
+           descuentoRazon: row.tieneDescuento ? (row.descuentoRazon || null) : null,
+           descuentoMoneda: 'CLP',
+         
+           estado: (row.estado || 'activo'),
+           actualizadoEl: serverTimestamp()
+         }, { merge: true });
+
 
           ok++;
         } catch (e) {
@@ -855,6 +877,63 @@ btnImportProfesionales?.addEventListener('click', async () => {
   reader.onerror = () => {
     importProfResultado.textContent = 'No se pudo leer el archivo.';
     importProfResultado.style.color = '#e11d48';
+  };
+
+  reader.readAsText(file, 'utf-8');
+});
+
+/* ================== IMPORTAR ROLES DESDE CSV ================== */
+btnImportRoles?.addEventListener('click', async () => {
+  if (!fileRoles?.files?.length) {
+    alert('Selecciona primero un CSV de roles.');
+    return;
+  }
+
+  const file = fileRoles.files[0];
+  importRolesResultado.textContent = 'Leyendo archivo…';
+  importRolesResultado.style.color = 'var(--muted)';
+
+  const reader = new FileReader();
+
+  reader.onload = async (e) => {
+    try {
+      const text = e.target.result;
+      const { rows } = parseCsv(text);
+
+      const cleanRows = rows
+        .map(r => ({ rol: (r.rol || r.Rol || '').trim() }))
+        .filter(r => r.rol);
+
+      if (!cleanRows.length) throw new Error('CSV vacío o sin columna "rol".');
+
+      const batch = writeBatch(db);
+      let count = 0;
+
+      for (const r of cleanRows) {
+        const rolId = `r_${slugify(r.rol)}`;
+        batch.set(doc(db, 'roles', rolId), {
+          id: rolId,
+          nombre: r.rol,
+          estado: 'activo',
+          actualizadoEl: new Date()
+        }, { merge: true });
+        count++;
+      }
+
+      await batch.commit();
+      importRolesResultado.textContent = `Roles importados/actualizados: ${count}.`;
+      importRolesResultado.style.color = 'var(--ink)';
+
+    } catch (err) {
+      console.error(err);
+      importRolesResultado.textContent = 'Error: ' + (err.message || err);
+      importRolesResultado.style.color = '#e11d48';
+    }
+  };
+
+  reader.onerror = () => {
+    importRolesResultado.textContent = 'No se pudo leer el archivo.';
+    importRolesResultado.style.color = '#e11d48';
   };
 
   reader.readAsText(file, 'utf-8');
