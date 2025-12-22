@@ -512,93 +512,98 @@
         <button type="button" class="btn btn-primary" id="btnGuardarModalProc">Guardar</button>
       </div>
     </div>
-  </div>
 
-  <!-- Modal Roles -->
-  <div id="modalRoles" class="modal" role="dialog" aria-modal="true" aria-labelledby="modalRolesTitle" style="display:none;">
-    <div class="modal-header">
-      <div>
-        <div id="modalRolesTitle" class="modal-title">Administrar roles</div>
-        <div class="modal-subtitle">Crear / editar / eliminar roles</div>
-      </div>
-      <button type="button" class="modal-close" id="btnCerrarModalRoles" aria-label="Cerrar">✕</button>
-    </div>
-  
-    <div class="modal-body">
-      <div class="grid-2">
-        <div class="form-field">
-          <label>Nombre del rol *</label>
-          <input id="mRolNombre" type="text" placeholder="Ej: Cirujano">
-          <div class="hint">Este nombre es lo visible en el sistema.</div>
+
+    <!-- Modal Roles -->
+    <!-- Modal Roles (UNIFORME) -->
+    <div id="modalRoles" class="modal" role="dialog" aria-modal="true" aria-labelledby="modalRolesTitle" style="display:none;">
+      <div class="modal-header">
+        <div>
+          <div id="modalRolesTitle" class="modal-title">Administrar roles</div>
+          <div class="modal-subtitle">Crear / editar / eliminar roles</div>
         </div>
+        <button type="button" class="modal-close" id="btnCerrarModalRoles" aria-label="Cerrar">✕</button>
+      </div>
   
-        <div class="form-field">
-          <label>&nbsp;</label>
-          <div style="display:flex;gap:8px;align-items:center;">
-            <button class="btn btn-primary" id="btnGuardarRol">Guardar rol</button>
-            <button class="btn btn-soft" id="btnNuevoRol">Nuevo</button>
+      <div class="modal-body">
+        <div class="grid-2">
+          <div class="form-field">
+            <label>Nombre del rol *</label>
+            <input id="mRolNombre" type="text" placeholder="Ej: Cirujano">
+            <div class="hint">Este nombre es lo visible en el sistema.</div>
+          </div>
+  
+          <div class="form-field">
+            <label>&nbsp;</label>
+            <div class="hint">Usa “Nuevo” para limpiar y “Guardar” para crear/actualizar.</div>
           </div>
         </div>
+  
+        <div id="mRolesError" class="modal-error" style="display:none;"></div>
+  
+        <hr class="modal-hr">
+  
+        <div id="tablaRoles">
+          <!-- Tabla roles por JS -->
+        </div>
       </div>
   
-      <div id="mRolesError" class="modal-error" style="display:none;"></div>
+      <!-- ✅ Footer estándar como los otros modales -->
+      <div class="modal-footer" style="justify-content:space-between;">
+        <button type="button" class="btn btn-soft" id="btnNuevoRol">Nuevo</button>
   
-      <hr class="modal-hr">
-  
-      <div id="tablaRoles">
-        <!-- Tabla roles por JS -->
+        <div style="display:flex;gap:10px;">
+          <button type="button" class="btn btn-soft" id="btnCancelarModalRoles">Cancelar</button>
+          <button type="button" class="btn btn-primary" id="btnGuardarRol">Guardar</button>
+        </div>
       </div>
     </div>
+
   
-    <div class="modal-footer">
-      <button type="button" class="btn btn-soft" id="btnCerrarRoles">Cerrar</button>
+    <!-- Modal Clínica -->
+    <div id="modalClinica" class="modal" role="dialog" aria-modal="true" aria-labelledby="modalClinicaTitle" style="display:none;">
+      <div class="modal-header">
+        <div>
+          <div id="modalClinicaTitle" class="modal-title">Clínica</div>
+          <div id="modalClinicaSubtitle" class="modal-subtitle">Crear / editar clínica</div>
+        </div>
+        <button type="button" class="modal-close" id="btnCerrarModalClinica" aria-label="Cerrar">✕</button>
+      </div>
+    
+      <div class="modal-body">
+        <div class="grid-2">
+          <div class="form-field">
+            <label>Código *</label>
+            <input id="mClinicaCodigo" type="text" placeholder="C001">
+            <div class="hint">Formato: C + 3 dígitos. Se propone automáticamente.</div>
+          </div>
+    
+          <div class="form-field">
+            <label>Nombre *</label>
+            <input id="mClinicaNombre" type="text" placeholder="Ej: Clínica Rennat">
+          </div>
+        </div>
+    
+        <div class="grid-2">
+          <div class="form-field">
+            <label>Estado</label>
+            <select id="mClinicaEstado" class="badge">
+              <option value="activa">Activa</option>
+              <option value="inactiva">Inactiva</option>
+            </select>
+          </div>
+          <div class="form-field"></div>
+        </div>
+    
+        <div id="mClinicaError" class="modal-error" style="display:none;"></div>
+      </div>
+    
+      <div class="modal-footer">
+        <button type="button" class="btn btn-soft" id="btnCancelarModalClinica">Cancelar</button>
+        <button type="button" class="btn btn-primary" id="btnGuardarModalClinica">Guardar</button>
+      </div>
     </div>
   </div>
-
-  <!-- Modal Clínica -->
-  <div id="modalClinica" class="modal" role="dialog" aria-modal="true" aria-labelledby="modalClinicaTitle" style="display:none;">
-    <div class="modal-header">
-      <div>
-        <div id="modalClinicaTitle" class="modal-title">Clínica</div>
-        <div id="modalClinicaSubtitle" class="modal-subtitle">Crear / editar clínica</div>
-      </div>
-      <button type="button" class="modal-close" id="btnCerrarModalClinica" aria-label="Cerrar">✕</button>
-    </div>
-  
-    <div class="modal-body">
-      <div class="grid-2">
-        <div class="form-field">
-          <label>Código *</label>
-          <input id="mClinicaCodigo" type="text" placeholder="C001">
-          <div class="hint">Formato: C + 3 dígitos. Se propone automáticamente.</div>
-        </div>
-  
-        <div class="form-field">
-          <label>Nombre *</label>
-          <input id="mClinicaNombre" type="text" placeholder="Ej: Clínica Rennat">
-        </div>
-      </div>
-  
-      <div class="grid-2">
-        <div class="form-field">
-          <label>Estado</label>
-          <select id="mClinicaEstado" class="badge">
-            <option value="activa">Activa</option>
-            <option value="inactiva">Inactiva</option>
-          </select>
-        </div>
-        <div class="form-field"></div>
-      </div>
-  
-      <div id="mClinicaError" class="modal-error" style="display:none;"></div>
-    </div>
-  
-    <div class="modal-footer">
-      <button type="button" class="btn btn-soft" id="btnCancelarModalClinica">Cancelar</button>
-      <button type="button" class="btn btn-primary" id="btnGuardarModalClinica">Guardar</button>
-    </div>
-  </div>
-
 
 
   <!-- ===== Estilos rápidos del modal (si no quieres tocar estilo.css aún) ===== -->
