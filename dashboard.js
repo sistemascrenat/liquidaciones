@@ -13,6 +13,7 @@ import {
 import {
   collection,
   getDocs,
+  getDoc,
   query,
   where,
   orderBy,
@@ -88,6 +89,48 @@ const fileRoles               = document.getElementById('fileRoles');
 const btnImportRoles          = document.getElementById('btnImportRoles');
 const importRolesResultado    = document.getElementById('importRolesResultado');
 
+/* =========================
+   MODALES (DOM refs)
+========================= */
+const modalOverlay = document.getElementById('modalOverlay');
+
+// Modal Profesional
+const modalProfesional = document.getElementById('modalProfesional');
+const btnCerrarModalProf = document.getElementById('btnCerrarModalProf');
+const btnCancelarModalProf = document.getElementById('btnCancelarModalProf');
+const btnGuardarModalProf = document.getElementById('btnGuardarModalProf');
+
+const mProfTitle = document.getElementById('modalProfTitle');
+const mProfSubtitle = document.getElementById('modalProfSubtitle');
+const mProfError = document.getElementById('mProfError');
+
+const mProfRut = document.getElementById('mProfRut');
+const mProfNombre = document.getElementById('mProfNombre');
+const mProfRazon = document.getElementById('mProfRazon');
+const mProfGiro = document.getElementById('mProfGiro');
+const mProfDireccion = document.getElementById('mProfDireccion');
+const mProfRolPrincipal = document.getElementById('mProfRolPrincipal');
+const mProfRolesSec = document.getElementById('mProfRolesSec');
+const mProfClinicas = document.getElementById('mProfClinicas');
+const mProfEstado = document.getElementById('mProfEstado');
+const mProfTieneDesc = document.getElementById('mProfTieneDesc');
+const mProfDescMonto = document.getElementById('mProfDescMonto');
+const mProfDescRazon = document.getElementById('mProfDescRazon');
+
+// Modal Procedimiento
+const modalProcedimiento = document.getElementById('modalProcedimiento');
+const btnCerrarModalProc = document.getElementById('btnCerrarModalProc');
+const btnCancelarModalProc = document.getElementById('btnCancelarModalProc');
+const btnGuardarModalProc = document.getElementById('btnGuardarModalProc');
+
+const mProcTitle = document.getElementById('modalProcTitle');
+const mProcSubtitle = document.getElementById('modalProcSubtitle');
+const mProcError = document.getElementById('mProcError');
+
+const mProcNombre = document.getElementById('mProcNombre');
+const mProcCodigo = document.getElementById('mProcCodigo');
+const mProcTipo = document.getElementById('mProcTipo');
+const mProcValorBase = document.getElementById('mProcValorBase');
 
 
 
@@ -209,6 +252,364 @@ function descargarPlantillaModelo() {
 
   XLSX.writeFile(wb, filename);
 }
+
+/* =========================================================
+   MODALES: estado + helpers
+   ========================================================= */
+
+const modalState = {
+  open: null, // 'prof' | 'proc' | null
+  profMode: 'create', // 'create' | 'edit'
+  profRutId: null,    // id doc (rut normalizado)
+  procMode: 'create',
+  procId: null,
+  cacheRoles: [],     // [{id,nombre}]
+  cacheClinicas: []   // [{id,nombre}]
+};
+
+function lockScroll(lock) {
+  document.body.style.overflow = lock ? 'hidden' : '';
+}
+
+function showError(el, msg) {
+  if (!el) return;
+  el.textContent = msg || '';
+  el.style.display = msg ? 'block' : 'none';
+}
+
+function openOverlay() {
+  if (!modalOverlay) return;
+  modalOverlay.style.display = 'flex';
+  lockScroll(true);
+}
+
+function closeAllModals() {
+  modalState.open = null;
+
+  if (modalProfesional) modalProfesional.style.display = 'none';
+  if (modalProcedimiento) modalProcedimiento.style.display = 'none';
+
+  if (modalOverlay) modalOverlay.style.display = 'none';
+  lockScroll(false);
+
+  showError(mProfError, '');
+  showError(mProcError, '');
+}
+
+function onlyDigits(v='') {
+  return v.toString().replace(/[^\d]/g,'');
+}
+
+function parseMoneyInput(v='') {
+  return Number(onlyDigits(v)) || 0;
+}
+
+function formatMoneyCLP(n=0) {
+  return (Number(n)||0).toLocaleString('es-CL');
+}
+
+// Cerrar por click fuera (overlay)
+modalOverlay?.addEventListener('click', (e) => {
+  // Si clickeas el overlay (no el contenido), cierra
+  if (e.target === modalOverlay) closeAllModals();
+});
+
+// Cerrar por Escape
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && modalOverlay?.style.display === 'flex') {
+    closeAllModals();
+  }
+});
+
+// Botones cerrar/cancelar
+btnCerrarModalProf?.addEventListener('click', closeAllModals);
+btnCancelarModalProf?.addEventListener('click', closeAllModals);
+btnCerrarModalProc?.addEventListener('click', closeAllModals);
+btnCancelarModalProc?.addEventListener('click', closeAllModals);
+
+async function ensureRolesClinicasLoaded() {
+  // Roles
+  if (!modalState.cacheRoles.length) {
+    const snap = await getDocs(collection(db, 'roles'));
+    const roles = [];
+    snap.forEach(d => roles.push({ id: d.id, ...d.data() }));
+    // orden por nombre si viene
+    roles.sort((a,b) => (a.nombre||a.id).localeCompare((b.nombre||b.id), 'es'));
+    modalState.cacheRoles = roles;
+  }
+
+  // Clínicas
+  if (!modalState.cacheClinicas.length) {
+    const snap = await getDocs(collection(db, 'clinicas'));
+    const clin = [];
+    snap.forEach(d => clin.push({ id: d.id, ...d.data() }));
+    clin.sort((a,b) => (a.nombre||a.id).localeCompare((b.nombre||b.id), 'es'));
+    modalState.cacheClinicas = clin;
+  }
+}
+
+function renderSelectRolPrincipal(selectedId=null) {
+  if (!mProfRolPrincipal) return;
+  mProfRolPrincipal.innerHTML = '';
+  const optNone = document.createElement('option');
+  optNone.value = '';
+  optNone.textContent = '— Sin rol principal —';
+  mProfRolPrincipal.appendChild(optNone);
+
+  for (const r of modalState.cacheRoles) {
+    const opt = document.createElement('option');
+    opt.value = r.id;
+    opt.textContent = r.nombre || r.id;
+    mProfRolPrincipal.appendChild(opt);
+  }
+  mProfRolPrincipal.value = selectedId || '';
+}
+
+function renderChecklist(containerEl, items, selectedIds=[]) {
+  if (!containerEl) return;
+  const set = new Set(selectedIds || []);
+  containerEl.innerHTML = '';
+
+  if (!items.length) {
+    containerEl.innerHTML = `<div style="font-size:12px;color:var(--muted);">No hay ítems cargados.</div>`;
+    return;
+  }
+
+  for (const it of items) {
+    const id = it.id;
+    const label = it.nombre || it.nombreProfesional || it.nombre || it.id;
+
+    const row = document.createElement('label');
+    row.className = 'check-row';
+
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.value = id;
+    cb.checked = set.has(id);
+
+    const span = document.createElement('span');
+    span.textContent = label;
+
+    row.appendChild(cb);
+    row.appendChild(span);
+    containerEl.appendChild(row);
+  }
+}
+
+function getCheckedValues(containerEl) {
+  if (!containerEl) return [];
+  return Array.from(containerEl.querySelectorAll('input[type="checkbox"]'))
+    .filter(x => x.checked)
+    .map(x => x.value);
+}
+
+async function openModalProfesionalCreate() {
+  await ensureRolesClinicasLoaded();
+
+  modalState.open = 'prof';
+  modalState.profMode = 'create';
+  modalState.profRutId = null;
+
+  openOverlay();
+  modalProcedimiento.style.display = 'none';
+  modalProfesional.style.display = 'block';
+
+  mProfTitle.textContent = 'Nuevo profesional';
+  mProfSubtitle.textContent = 'Crear un nuevo profesional';
+
+  // limpiar campos
+  mProfRut.disabled = false;
+  mProfRut.value = '';
+  mProfNombre.value = '';
+  mProfRazon.value = '';
+  mProfGiro.value = '';
+  mProfDireccion.value = '';
+
+  renderSelectRolPrincipal(null);
+  renderChecklist(mProfRolesSec, modalState.cacheRoles, []);
+  renderChecklist(mProfClinicas, modalState.cacheClinicas, []);
+
+  mProfEstado.value = 'activo';
+  mProfTieneDesc.checked = false;
+  mProfDescMonto.value = '';
+  mProfDescRazon.value = '';
+
+  showError(mProfError, '');
+
+  setTimeout(() => mProfRut?.focus(), 50);
+}
+
+async function openModalProfesionalEdit(rutId) {
+  await ensureRolesClinicasLoaded();
+
+  modalState.open = 'prof';
+  modalState.profMode = 'edit';
+  modalState.profRutId = rutId;
+
+  openOverlay();
+  modalProcedimiento.style.display = 'none';
+  modalProfesional.style.display = 'block';
+
+  mProfTitle.textContent = 'Editar profesional';
+  mProfSubtitle.textContent = `ID: ${rutId}`;
+
+  showError(mProfError, '');
+
+  // ✅ Lectura directa por ID (rápida y correcta)
+  const ref = doc(db, 'profesionales', rutId);
+  const snap = await getDoc(ref);
+
+  if (!snap.exists()) {
+    showError(mProfError, 'No se encontró el profesional. Refresca e intenta de nuevo.');
+    return;
+  }
+
+  const data = { id: snap.id, ...snap.data() };
+
+
+  // poblar campos
+  mProfRut.value = data.rut || '';
+  mProfRut.disabled = true; // no cambiar rut
+  mProfNombre.value = data.nombreProfesional || '';
+  mProfRazon.value = data.razonSocial || '';
+  mProfGiro.value = data.giro || '';
+  mProfDireccion.value = data.direccion || '';
+
+  renderSelectRolPrincipal(data.rolPrincipalId || '');
+  renderChecklist(mProfRolesSec, modalState.cacheRoles, data.rolesSecundariosIds || []);
+  renderChecklist(mProfClinicas, modalState.cacheClinicas, data.clinicasIds || []);
+
+  mProfEstado.value = (data.estado || 'activo');
+  mProfTieneDesc.checked = !!data.tieneDescuento;
+  mProfDescMonto.value = data.tieneDescuento ? formatMoneyCLP(data.descuentoMonto || 0) : '';
+  mProfDescRazon.value = data.tieneDescuento ? (data.descuentoRazon || '') : '';
+
+  setTimeout(() => mProfNombre?.focus(), 50);
+}
+
+// Guardar profesional (create/edit)
+btnGuardarModalProf?.addEventListener('click', async () => {
+  try {
+    showError(mProfError, '');
+
+    const rutRaw = (mProfRut.value || '').trim();
+    const rutId = normalizaRut(rutRaw);
+
+    const nombre = (mProfNombre.value || '').trim();
+    if (!rutId) { showError(mProfError, 'RUT inválido.'); return; }
+    if (!nombre) { showError(mProfError, 'Nombre profesional es obligatorio.'); return; }
+
+    // Si edit: rutId no cambia
+    const docId = (modalState.profMode === 'edit') ? modalState.profRutId : rutId;
+
+    // Roles/clinicas desde UI
+    const rolPrincipalId = (mProfRolPrincipal.value || '').trim() || null;
+    const rolesSecundariosIds = getCheckedValues(mProfRolesSec);
+    const clinicasIds = getCheckedValues(mProfClinicas);
+
+    // Descuento
+    const tieneDescuento = !!mProfTieneDesc.checked;
+    const descuentoMonto = tieneDescuento ? parseMoneyInput(mProfDescMonto.value) : 0;
+    const descuentoRazon = tieneDescuento ? (mProfDescRazon.value || '').trim() : '';
+
+    const patch = {
+      rut: rutRaw,
+      rutId: docId,
+      nombreProfesional: nombre,
+      razonSocial: (mProfRazon.value || '').trim() || null,
+      giro: (mProfGiro.value || '').trim() || null,
+      direccion: (mProfDireccion.value || '').trim() || null,
+
+      rolPrincipalId,
+      rolesSecundariosIds,
+      clinicasIds,
+
+      tieneDescuento,
+      descuentoMonto: tieneDescuento ? descuentoMonto : 0,
+      descuentoRazon: tieneDescuento ? (descuentoRazon || null) : null,
+      descuentoMoneda: 'CLP',
+
+      estado: (mProfEstado.value || 'activo'),
+      actualizadoEl: serverTimestamp()
+    };
+
+    // Si es create, ponemos creadoEl si no existía
+    if (modalState.profMode === 'create') {
+      patch.creadoEl = serverTimestamp();
+    }
+
+    await setDoc(doc(db, 'profesionales', docId), patch, { merge: true });
+
+    closeAllModals();
+    await loadProfesionales();
+    alert('Profesional guardado ✅');
+
+  } catch (err) {
+    console.error(err);
+    showError(mProfError, 'No se pudo guardar. Revisa consola.');
+  }
+});
+
+// UX: al destildar descuento, limpia campos
+mProfTieneDesc?.addEventListener('change', () => {
+  if (!mProfTieneDesc.checked) {
+    mProfDescMonto.value = '';
+    mProfDescRazon.value = '';
+  }
+});
+
+
+function openModalProcedimientoCreate() {
+  modalState.open = 'proc';
+  modalState.procMode = 'create';
+  modalState.procId = null;
+
+  openOverlay();
+  modalProfesional.style.display = 'none';
+  modalProcedimiento.style.display = 'block';
+
+  mProcTitle.textContent = 'Nuevo procedimiento';
+  mProcSubtitle.textContent = 'Crear un procedimiento';
+
+  mProcNombre.value = '';
+  mProcCodigo.value = '';
+  mProcTipo.value = 'ambulatorio';
+  mProcValorBase.value = '';
+
+  showError(mProcError, '');
+
+  setTimeout(() => mProcNombre?.focus(), 50);
+}
+
+btnGuardarModalProc?.addEventListener('click', async () => {
+  try {
+    showError(mProcError, '');
+
+    const nombre = (mProcNombre.value || '').trim();
+    if (!nombre) { showError(mProcError, 'Nombre es obligatorio.'); return; }
+
+    const codigo = (mProcCodigo.value || '').trim() || null;
+    const tipo = (mProcTipo.value || 'ambulatorio').trim();
+    const valorBase = parseMoneyInput(mProcValorBase.value);
+
+    await addDoc(collection(db, 'procedimientos'), {
+      nombre,
+      codigo,
+      tipo,
+      valorBase: Number.isFinite(valorBase) ? valorBase : 0,
+      creadoEl: serverTimestamp(),
+      actualizadoEl: serverTimestamp()
+    });
+
+    closeAllModals();
+    await loadProcedimientos();
+    alert('Procedimiento creado ✅');
+  } catch (err) {
+    console.error(err);
+    showError(mProcError, 'No se pudo guardar. Revisa consola.');
+  }
+});
+
 
 /* =========================================================
    3) MÓDULO AUTH (LOGIN / LOGOUT / ESTADO)
@@ -467,18 +868,9 @@ tablaProfesionales?.addEventListener('click', async (e) => {
     }
 
     if (action === 'edit-prof') {
-      const nombreProfesional = prompt('Nuevo nombre (deja vacío para no cambiar):') || '';
-      const razonSocial = prompt('Nueva razón social (deja vacío para no cambiar):') || '';
-      const giro = prompt('Nuevo giro (deja vacío para no cambiar):') || '';
-      const direccion = prompt('Nueva dirección (deja vacío para no cambiar):') || '';
-
-      const tieneDescuento = (prompt('¿Tiene descuento? (SI/NO)', 'NO') || 'NO').trim().toUpperCase() === 'SI';
-      let descuentoMonto = 0;
-      let descuentoRazon = '';
-      if (tieneDescuento) {
-        descuentoMonto = Number((prompt('Monto descuento (numero):', '0') || '0').replace(/[^\d]/g, '')) || 0;
-        descuentoRazon = (prompt('Razón descuento:', '') || '').trim();
-      }
+      await openModalProfesionalEdit(rutId);
+      return;
+    }
 
       const patch = {
         actualizadoEl: serverTimestamp(),
@@ -507,56 +899,10 @@ tablaProfesionales?.addEventListener('click', async (e) => {
 
 btnNuevoProfesional?.addEventListener('click', async () => {
   try {
-    const rut = prompt('RUT del profesional (obligatorio, ej 16128922-1):');
-    if (!rut?.trim()) return;
-
-    const rutId = normalizaRut(rut);
-    if (!rutId) { alert('RUT inválido.'); return; }
-
-    const nombreProfesional = prompt('Nombre profesional (obligatorio):');
-    if (!nombreProfesional?.trim()) return;
-
-    const razonSocial = prompt('Razón social (opcional):') || '';
-    const giro = prompt('Giro (opcional):') || '';
-    const direccion = prompt('Dirección (opcional):') || '';
-
-    // Descuento
-    const tieneDescuento = (prompt('¿Tiene descuento? (SI/NO)', 'NO') || 'NO').trim().toUpperCase() === 'SI';
-    let descuentoMonto = 0;
-    let descuentoRazon = '';
-    if (tieneDescuento) {
-      descuentoMonto = Number((prompt('Monto descuento (numero, ej 50000):', '0') || '0').replace(/[^\d]/g, '')) || 0;
-      descuentoRazon = (prompt('Razón descuento:', '') || '').trim();
-    }
-
-    // Por ahora: rol/clinicas se configuran por import masivo o edición posterior
-    await setDoc(doc(db, 'profesionales', rutId), {
-      rut: rut.trim(),
-      rutId,
-      nombreProfesional: nombreProfesional.trim(),
-      razonSocial: razonSocial.trim() || null,
-      giro: giro.trim() || null,
-      direccion: direccion.trim() || null,
-
-      rolPrincipalId: null,
-      rolesSecundariosIds: [],
-      clinicasIds: [],
-
-      tieneDescuento,
-      descuentoMonto,
-      descuentoRazon: descuentoRazon || null,
-      descuentoMoneda: 'CLP',
-
-      estado: 'activo',
-      creadoEl: serverTimestamp(),
-      actualizadoEl: serverTimestamp()
-    }, { merge: true });
-
-    await loadProfesionales();
-    alert('Profesional guardado ✅');
+    await openModalProfesionalCreate();
   } catch (err) {
-    console.error('Error creando profesional:', err);
-    alert('No se pudo guardar el profesional. Revisa consola.');
+    console.error(err);
+    alert('No se pudo abrir el modal. Revisa consola.');
   }
 });
 
@@ -612,32 +958,15 @@ async function loadProcedimientos() {
    8.1) CREAR PROCEDIMIENTO (BOTÓN + NUEVO)
    ========================================================= */
 
-btnNuevoProcedimiento?.addEventListener('click', async () => {
+btnNuevoProcedimiento?.addEventListener('click', () => {
   try {
-    const nombre = prompt('Nombre del procedimiento (obligatorio):');
-    if (!nombre?.trim()) return;
-
-    const codigo = prompt('Código (opcional):') || '';
-    const tipo = prompt('Tipo (ej: ambulatorio) (opcional):') || 'ambulatorio';
-    const valorBaseRaw = prompt('Valor base (opcional, ej 250000):') || '';
-    const valorBase = valorBaseRaw.trim() === '' ? 0 : Number(valorBaseRaw);
-
-    await addDoc(collection(db, 'procedimientos'), {
-      nombre: nombre.trim(),
-      codigo: codigo.trim() || null,
-      tipo: tipo.trim() || 'ambulatorio',
-      valorBase: Number.isFinite(valorBase) ? valorBase : 0,
-      creadoEl: serverTimestamp(),
-      actualizadoEl: serverTimestamp()
-    });
-
-    await loadProcedimientos();
-    alert('Procedimiento creado ✅');
+    openModalProcedimientoCreate();
   } catch (err) {
-    console.error('Error creando procedimiento:', err);
-    alert('No se pudo crear el procedimiento. Revisa consola.');
+    console.error(err);
+    alert('No se pudo abrir el modal. Revisa consola.');
   }
 });
+
 
 
 /* =========================================================
