@@ -22,6 +22,8 @@ import {
   setDoc,
   writeBatch,
   addDoc,
+  deleteDoc,
+  updateDoc,
   serverTimestamp
 } from "https://www.gstatic.com/firebasejs/11.7.3/firebase-firestore.js";
 // ✅ NUEVO: Librería para generar Excel (abre en Google Sheets)
@@ -58,6 +60,13 @@ const tablaProcedimientos    = document.getElementById('tablaProcedimientos');
 // Botones “Nuevo”
 const btnNuevoProfesional   = document.getElementById('btnNuevoProfesional');
 const btnNuevoProcedimiento = document.getElementById('btnNuevoProcedimiento');
+
+const btnAdministrarRoles = document.getElementById('btnAdministrarRoles');
+
+// Clínicas (vista)
+const btnNuevaClinica   = document.getElementById('btnNuevaClinica');
+const tablaClinicas     = document.getElementById('tablaClinicas');
+
 
 const tablaProduccion        = document.getElementById('tablaProduccion');
 const tablaLiquidaciones     = document.getElementById('tablaLiquidaciones');
@@ -131,6 +140,31 @@ const mProcNombre = document.getElementById('mProcNombre');
 const mProcCodigo = document.getElementById('mProcCodigo');
 const mProcTipo = document.getElementById('mProcTipo');
 const mProcValorBase = document.getElementById('mProcValorBase');
+
+// Modal Roles
+const modalRoles = document.getElementById('modalRoles');
+const btnCerrarModalRoles = document.getElementById('btnCerrarModalRoles');
+const btnCerrarRoles = document.getElementById('btnCerrarRoles');
+const mRolNombre = document.getElementById('mRolNombre');
+const btnGuardarRol = document.getElementById('btnGuardarRol');
+const btnNuevoRol = document.getElementById('btnNuevoRol');
+const tablaRoles = document.getElementById('tablaRoles');
+const mRolesError = document.getElementById('mRolesError');
+
+// Modal Clínica
+const modalClinica = document.getElementById('modalClinica');
+const btnCerrarModalClinica = document.getElementById('btnCerrarModalClinica');
+const btnCancelarModalClinica = document.getElementById('btnCancelarModalClinica');
+const btnGuardarModalClinica = document.getElementById('btnGuardarModalClinica');
+
+const mClinicaTitle = document.getElementById('modalClinicaTitle');
+const mClinicaSubtitle = document.getElementById('modalClinicaSubtitle');
+const mClinicaError = document.getElementById('mClinicaError');
+
+const mClinicaCodigo = document.getElementById('mClinicaCodigo');
+const mClinicaNombre = document.getElementById('mClinicaNombre');
+const mClinicaEstado = document.getElementById('mClinicaEstado');
+
 
 
 
@@ -288,13 +322,24 @@ function closeAllModals() {
 
   if (modalProfesional) modalProfesional.style.display = 'none';
   if (modalProcedimiento) modalProcedimiento.style.display = 'none';
+  if (modalRoles) modalRoles.style.display = 'none';
+  if (modalClinica) modalClinica.style.display = 'none';
 
   if (modalOverlay) modalOverlay.style.display = 'none';
   lockScroll(false);
 
   showError(mProfError, '');
   showError(mProcError, '');
+  showError(mRolesError, '');
+  showError(mClinicaError, '');
 }
+
+btnCerrarModalRoles?.addEventListener('click', closeAllModals);
+btnCerrarRoles?.addEventListener('click', closeAllModals);
+
+btnCerrarModalClinica?.addEventListener('click', closeAllModals);
+btnCancelarModalClinica?.addEventListener('click', closeAllModals);
+
 
 function onlyDigits(v='') {
   return v.toString().replace(/[^\d]/g,'');
@@ -581,6 +626,163 @@ function openModalProcedimientoCreate() {
   setTimeout(() => mProcNombre?.focus(), 50);
 }
 
+/* =========================================================
+   ROLES (MODAL ADMIN)
+   - Crear / Editar / Eliminar (ELIMINACIÓN REAL)
+   ========================================================= */
+
+const rolesUIState = {
+  mode: 'create',   // 'create' | 'edit'
+  editId: null
+};
+
+function openModalRoles() {
+  modalState.open = 'roles';
+  openOverlay();
+
+  if (modalProfesional) modalProfesional.style.display = 'none';
+  if (modalProcedimiento) modalProcedimiento.style.display = 'none';
+  if (modalClinica) modalClinica.style.display = 'none';
+
+  modalRoles.style.display = 'block';
+
+  rolesUIState.mode = 'create';
+  rolesUIState.editId = null;
+  mRolNombre.value = '';
+  showError(mRolesError, '');
+
+  loadRolesTable();
+  setTimeout(() => mRolNombre?.focus(), 50);
+}
+
+btnAdministrarRoles?.addEventListener('click', () => {
+  try { openModalRoles(); } catch(e){ console.error(e); alert('No se pudo abrir roles.'); }
+});
+
+btnNuevoRol?.addEventListener('click', () => {
+  rolesUIState.mode = 'create';
+  rolesUIState.editId = null;
+  mRolNombre.value = '';
+  showError(mRolesError, '');
+  mRolNombre?.focus();
+});
+
+async function loadRolesTable() {
+  try {
+    const snap = await getDocs(collection(db, 'roles'));
+    const rows = [];
+    snap.forEach(d => rows.push({ id: d.id, ...d.data() }));
+
+    rows.sort((a,b) => (a.nombre || '').localeCompare((b.nombre || ''), 'es'));
+
+    if (!rows.length) {
+      tablaRoles.innerHTML = `<p style="font-size:13px;color:var(--muted);">Aún no hay roles.</p>`;
+      return;
+    }
+
+    const html = rows.map(r => `
+      <tr>
+        <td>${r.nombre || '—'}</td>
+        <td class="text-right">
+          <button class="btn btn-soft" data-action="edit-role" data-id="${r.id}">Editar</button>
+          <button class="btn btn-soft" data-action="del-role" data-id="${r.id}">Eliminar</button>
+        </td>
+      </tr>
+    `).join('');
+
+    tablaRoles.innerHTML = `
+      <table>
+        <thead>
+          <tr>
+            <th>Rol</th>
+            <th class="text-right">Acciones</th>
+          </tr>
+        </thead>
+        <tbody>${html}</tbody>
+      </table>
+    `;
+  } catch (err) {
+    console.error(err);
+    tablaRoles.innerHTML = `<p style="color:#e11d48;font-size:13px;">Error cargando roles.</p>`;
+  }
+}
+
+tablaRoles?.addEventListener('click', async (e) => {
+  const btn = e.target.closest('button[data-action]');
+  if (!btn) return;
+
+  const action = btn.dataset.action;
+  const id = btn.dataset.id;
+
+  try {
+    if (action === 'edit-role') {
+      const snap = await getDoc(doc(db, 'roles', id));
+      if (!snap.exists()) return alert('Rol no encontrado.');
+      const data = snap.data();
+
+      rolesUIState.mode = 'edit';
+      rolesUIState.editId = id;
+      mRolNombre.value = data.nombre || '';
+      mRolNombre?.focus();
+      return;
+    }
+
+    if (action === 'del-role') {
+      // Validación mínima: si está siendo usado en profesionales, ideal bloquear.
+      // (Si quieres, luego agregamos check real por query antes de borrar)
+      const ok = confirm('¿Eliminar este rol definitivamente? Esta acción no se puede deshacer.');
+      if (!ok) return;
+
+      await deleteDoc(doc(db, 'roles', id));
+
+      // IMPORTANTE: refrescar caches para que el modal profesional no quede con roles viejos
+      modalState.cacheRoles = [];
+      await ensureRolesClinicasLoaded();
+      await loadRolesTable();
+      await loadProfesionales(); // para que se refresque vista
+      return;
+    }
+  } catch (err) {
+    console.error(err);
+    alert('Error ejecutando acción. Revisa consola.');
+  }
+});
+
+btnGuardarRol?.addEventListener('click', async () => {
+  try {
+    showError(mRolesError, '');
+    const nombre = (mRolNombre.value || '').trim();
+    if (!nombre) { showError(mRolesError, 'El nombre del rol es obligatorio.'); return; }
+
+    if (rolesUIState.mode === 'create') {
+      // ID automático (limpio, no depende del nombre)
+      await addDoc(collection(db, 'roles'), {
+        nombre,
+        creadoEl: serverTimestamp(),
+        actualizadoEl: serverTimestamp()
+      });
+    } else {
+      await updateDoc(doc(db, 'roles', rolesUIState.editId), {
+        nombre,
+        actualizadoEl: serverTimestamp()
+      });
+    }
+
+    rolesUIState.mode = 'create';
+    rolesUIState.editId = null;
+    mRolNombre.value = '';
+
+    modalState.cacheRoles = []; // invalida cache
+    await ensureRolesClinicasLoaded();
+    await loadRolesTable();
+    await loadProfesionales(); // refresca tabla (rol principal se resuelve)
+  } catch (err) {
+    console.error(err);
+    showError(mRolesError, 'No se pudo guardar el rol. Revisa consola.');
+  }
+});
+
+
 btnGuardarModalProc?.addEventListener('click', async () => {
   try {
     showError(mProcError, '');
@@ -658,7 +860,8 @@ onAuthStateChanged(auth, user => {
     loadHomeData();
     loadProfesionales();
     loadProcedimientos();
-    loadLiquidaciones(); // estado inicial
+    loadClinicas();
+    loadLiquidaciones();
   } else {
     // Mostrar login
     loginShell.style.display = 'flex';
@@ -953,6 +1156,231 @@ btnNuevoProcedimiento?.addEventListener('click', () => {
   }
 });
 
+/* =========================================================
+   CLÍNICAS (VISTA + MODAL)
+   - Código numérico C001, C002... (docId)
+   ========================================================= */
+
+const clinicaUIState = {
+  mode: 'create',   // 'create' | 'edit'
+  editId: null
+};
+
+async function loadClinicas() {
+  try {
+    const snap = await getDocs(collection(db, 'clinicas'));
+    const rows = [];
+    snap.forEach(d => rows.push({ id: d.id, ...d.data() }));
+
+    // Orden: primero por nombre, luego por id
+    rows.sort((a,b) => (a.nombre || a.id).localeCompare((b.nombre || b.id), 'es'));
+
+    if (!rows.length) {
+      tablaClinicas.innerHTML = `<p style="font-size:13px;color:var(--muted);">Aún no hay clínicas.</p>`;
+      return;
+    }
+
+    const htmlRows = rows.map(c => `
+      <tr>
+        <td>${c.id || '—'}</td>
+        <td>${c.nombre || '—'}</td>
+        <td>${c.estado || 'activa'}</td>
+        <td class="text-right">
+          <button class="btn btn-soft" data-action="edit-cli" data-id="${c.id}">Editar</button>
+          <button class="btn btn-soft" data-action="toggle-cli" data-id="${c.id}">
+            ${(c.estado === 'inactiva') ? 'Activar' : 'Desactivar'}
+          </button>
+        </td>
+      </tr>
+    `).join('');
+
+    tablaClinicas.innerHTML = `
+      <table>
+        <thead>
+          <tr>
+            <th>Código</th>
+            <th>Clínica</th>
+            <th>Estado</th>
+            <th class="text-right">Acciones</th>
+          </tr>
+        </thead>
+        <tbody>${htmlRows}</tbody>
+      </table>
+    `;
+  } catch (err) {
+    console.error(err);
+    tablaClinicas.innerHTML = `<p style="color:#e11d48;font-size:13px;">Error al cargar clínicas.</p>`;
+  }
+}
+
+async function getNextClinicaCodigo() {
+  // Lee todas y busca el mayor C### existente
+  const snap = await getDocs(collection(db, 'clinicas'));
+  let max = 0;
+
+  snap.forEach(d => {
+    const id = d.id || '';
+    const m = /^C(\d{3})$/.exec(id);
+    if (m) max = Math.max(max, Number(m[1]));
+  });
+
+  const next = String(max + 1).padStart(3, '0');
+  return `C${next}`;
+}
+
+function openModalClinicaCreate(codigoSugerido) {
+  modalState.open = 'clinica';
+  clinicaUIState.mode = 'create';
+  clinicaUIState.editId = null;
+
+  openOverlay();
+  if (modalProfesional) modalProfesional.style.display = 'none';
+  if (modalProcedimiento) modalProcedimiento.style.display = 'none';
+  if (modalRoles) modalRoles.style.display = 'none';
+
+  modalClinica.style.display = 'block';
+
+  mClinicaTitle.textContent = 'Nueva clínica';
+  mClinicaSubtitle.textContent = 'Crear una nueva clínica';
+
+  mClinicaCodigo.disabled = false;
+  mClinicaCodigo.value = codigoSugerido || 'C001';
+  mClinicaNombre.value = '';
+  mClinicaEstado.value = 'activa';
+  showError(mClinicaError, '');
+
+  setTimeout(() => mClinicaNombre?.focus(), 50);
+}
+
+async function openModalClinicaEdit(id) {
+  modalState.open = 'clinica';
+  clinicaUIState.mode = 'edit';
+  clinicaUIState.editId = id;
+
+  openOverlay();
+  if (modalProfesional) modalProfesional.style.display = 'none';
+  if (modalProcedimiento) modalProcedimiento.style.display = 'none';
+  if (modalRoles) modalRoles.style.display = 'none';
+
+  modalClinica.style.display = 'block';
+
+  const snap = await getDoc(doc(db, 'clinicas', id));
+  if (!snap.exists()) {
+    showError(mClinicaError, 'No se encontró la clínica.');
+    return;
+  }
+  const data = snap.data();
+
+  mClinicaTitle.textContent = 'Editar clínica';
+  mClinicaSubtitle.textContent = `Código: ${id}`;
+
+  // En editar no cambiamos docId
+  mClinicaCodigo.value = id;
+  mClinicaCodigo.disabled = true;
+
+  mClinicaNombre.value = data.nombre || '';
+  mClinicaEstado.value = data.estado || 'activa';
+  showError(mClinicaError, '');
+}
+
+btnNuevaClinica?.addEventListener('click', async () => {
+  try {
+    const next = await getNextClinicaCodigo();
+    openModalClinicaCreate(next);
+  } catch (err) {
+    console.error(err);
+    alert('No se pudo generar el código de clínica.');
+  }
+});
+
+tablaClinicas?.addEventListener('click', async (e) => {
+  const btn = e.target.closest('button[data-action]');
+  if (!btn) return;
+
+  const action = btn.dataset.action;
+  const id = btn.dataset.id;
+
+  try {
+    if (action === 'edit-cli') {
+      await openModalClinicaEdit(id);
+      return;
+    }
+
+    if (action === 'toggle-cli') {
+      const ref = doc(db, 'clinicas', id);
+      const snap = await getDoc(ref);
+      if (!snap.exists()) return alert('Clínica no encontrada.');
+      const estado = snap.data().estado || 'activa';
+      const nuevo = (estado === 'inactiva') ? 'activa' : 'inactiva';
+      await setDoc(ref, { estado: nuevo, actualizadoEl: serverTimestamp() }, { merge: true });
+
+      // refrescar caches para el modal profesional
+      modalState.cacheClinicas = [];
+      await ensureRolesClinicasLoaded();
+
+      await loadClinicas();
+      await loadProfesionales();
+      return;
+    }
+  } catch (err) {
+    console.error(err);
+    alert('Error ejecutando acción. Revisa consola.');
+  }
+});
+
+btnGuardarModalClinica?.addEventListener('click', async () => {
+  try {
+    showError(mClinicaError, '');
+
+    const codigo = (mClinicaCodigo.value || '').trim().toUpperCase();
+    const nombre = (mClinicaNombre.value || '').trim();
+    const estado = (mClinicaEstado.value || 'activa').trim();
+
+    if (!/^C\d{3}$/.test(codigo)) {
+      showError(mClinicaError, 'Código inválido. Debe ser formato C001.');
+      return;
+    }
+    if (!nombre) {
+      showError(mClinicaError, 'Nombre de clínica es obligatorio.');
+      return;
+    }
+
+    if (clinicaUIState.mode === 'create') {
+      // Validar que no exista
+      const exists = await getDoc(doc(db, 'clinicas', codigo));
+      if (exists.exists()) {
+        showError(mClinicaError, 'Ese código ya existe. Usa otro.');
+        return;
+      }
+      await setDoc(doc(db, 'clinicas', codigo), {
+        id: codigo,
+        codigo,
+        nombre,
+        estado,
+        creadoEl: serverTimestamp(),
+        actualizadoEl: serverTimestamp()
+      }, { merge: true });
+    } else {
+      // Edit
+      await updateDoc(doc(db, 'clinicas', clinicaUIState.editId), {
+        nombre,
+        estado,
+        actualizadoEl: serverTimestamp()
+      });
+    }
+
+    // refrescar caches para el modal profesional
+    modalState.cacheClinicas = [];
+    await ensureRolesClinicasLoaded();
+
+    closeAllModals();
+    await loadClinicas();
+    await loadProfesionales();
+  } catch (err) {
+    console.error(err);
+    showError(mClinicaError, 'No se pudo guardar. Revisa consola.');
+  }
+});
 
 
 /* =========================================================
