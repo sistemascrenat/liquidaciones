@@ -23,6 +23,10 @@ import {
   addDoc,
   serverTimestamp
 } from "https://www.gstatic.com/firebasejs/11.7.3/firebase-firestore.js";
+// ✅ NUEVO: Librería para generar Excel (abre en Google Sheets)
+// (Formato .xlsx con pestañas, sin depender de Google API)
+import * as XLSX from "https://cdn.jsdelivr.net/npm/xlsx@0.18.5/+esm";
+
 
 
 
@@ -107,6 +111,103 @@ function setActiveNav(targetView) {
     const v = item.getAttribute('data-view');
     item.classList.toggle('active', v === targetView);
   });
+}
+
+/* =========================================================
+   2.1) PLANTILLA MODELO (XLSX con pestañas)
+   ========================================================= */
+
+const btnDescargarPlantilla = document.getElementById('btnDescargarPlantilla');
+
+btnDescargarPlantilla?.addEventListener('click', () => {
+  try {
+    descargarPlantillaModelo();
+  } catch (err) {
+    console.error(err);
+    alert('No se pudo generar la plantilla. Revisa consola.');
+  }
+});
+
+function descargarPlantillaModelo() {
+  // 1) Creamos libro
+  const wb = XLSX.utils.book_new();
+
+  // 2) Pestaña: Profesionales
+  // Columnas alineadas con tu parser parseProfesionalesCsv()
+  const profesionalesHeaders = [[
+    "rut",
+    "nombreProfesional",
+    "razonSocial",
+    "giro",
+    "direccion",
+    "rolPrincipal",
+    "rolesSecundarios",   // separados por | (ej: Anestesia|Ayudante)
+    "clinicas",           // separados por | (ej: Rennat|Santa Maria)
+    "tieneDescuento",     // SI/NO
+    "descuentoMonto",
+    "descuentoRazon",
+    "estado"              // activo/inactivo
+  ]];
+
+  const wsProfesionales = XLSX.utils.aoa_to_sheet(profesionalesHeaders);
+  XLSX.utils.sheet_add_aoa(wsProfesionales, [[
+    "16128922-1",
+    "Ignacio Pastor",
+    "",
+    "",
+    "",
+    "Cirujano",
+    "Ayudante|Anestesia",
+    "Clinica Rennat|Clinica X",
+    "NO",
+    "0",
+    "",
+    "activo"
+  ]], { origin: "A2" });
+
+  XLSX.utils.book_append_sheet(wb, wsProfesionales, "Profesionales");
+
+  // 3) Pestaña: Roles
+  const rolesHeaders = [["rol"]];
+  const wsRoles = XLSX.utils.aoa_to_sheet(rolesHeaders);
+  XLSX.utils.sheet_add_aoa(wsRoles, [["Cirujano"], ["Anestesia"], ["Ayudante"]], { origin: "A2" });
+  XLSX.utils.book_append_sheet(wb, wsRoles, "Roles");
+
+  // 4) Pestaña: Clínicas
+  const clinicasHeaders = [["clinica"]];
+  const wsClinicas = XLSX.utils.aoa_to_sheet(clinicasHeaders);
+  XLSX.utils.sheet_add_aoa(wsClinicas, [["Clínica Rennat"], ["Clínica X"]], { origin: "A2" });
+  XLSX.utils.book_append_sheet(wb, wsClinicas, "Clínicas");
+
+  // 5) Pestaña: Tarifas
+  // Columnas alineadas con tu importTarifasCsv()
+  const tarifasHeaders = [[
+    "clinica",
+    "cirugia",
+    "precioTotal",
+    "derechosPabellon",
+    "hmq",
+    "insumos"
+  ]];
+  const wsTarifas = XLSX.utils.aoa_to_sheet(tarifasHeaders);
+  XLSX.utils.sheet_add_aoa(wsTarifas, [[
+    "Clínica Rennat",
+    "Artroscopia de rodilla",
+    "2500000",
+    "400000",
+    "900000",
+    "200000"
+  ]], { origin: "A2" });
+  XLSX.utils.book_append_sheet(wb, wsTarifas, "Tarifas");
+
+  // 6) Descarga
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, "0");
+  const d = String(now.getDate()).padStart(2, "0");
+  const filename = `Plantilla_ClinicaRennat_${y}-${m}-${d}.xlsx`;
+
+  XLSX.writeFile(wb, filename);
 }
 
 /* =========================================================
