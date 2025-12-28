@@ -62,6 +62,7 @@ const btnNuevoProfesional   = document.getElementById('btnNuevoProfesional');
 const btnNuevoProcedimiento = document.getElementById('btnNuevoProcedimiento');
 
 const btnAdministrarRoles = document.getElementById('btnAdministrarRoles');
+const btnExportProfesionales = document.getElementById('btnExportProfesionales');
 
 // Clínicas (vista)
 const btnNuevaClinica   = document.getElementById('btnNuevaClinica');
@@ -246,7 +247,7 @@ function descargarPlantillaModelo() {
     "rolesSecundarios",   // separados por | (ej: Anestesia|Ayudante)
     "clinicas",           // separados por | (ej: Rennat|Santa Maria)
     "tieneDescuento",     // SI/NO
-    "descuentoMonto",
+    "descuentoUF",
     "descuentoRazon",
     "estado"              // activo/inactivo
   ]];
@@ -262,7 +263,7 @@ function descargarPlantillaModelo() {
     "Ayudante|Anestesia",
     "Clinica Rennat|Clinica X",
     "NO",
-    "0",
+    "0,5",
     "",
     "activo"
   ]], { origin: "A2" });
@@ -405,6 +406,20 @@ function parseMoneyInput(v='') {
 function formatMoneyCLP(n=0) {
   return (Number(n)||0).toLocaleString('es-CL');
 }
+
+/* ================== UF HELPERS (DESCUENTO) ================== */
+function parseUFInput(v='') {
+  // permite "0,5" o "0.5"
+  const s = (v || '').toString().trim().replace(',', '.');
+  const n = Number(s);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function formatUF(n=0) {
+  const x = Number(n) || 0;
+  return x.toLocaleString('es-CL', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+/* ================== FIN UF HELPERS ================== */
 
 // Cerrar por click fuera (overlay)
 modalOverlay?.addEventListener('click', (e) => {
@@ -551,7 +566,9 @@ async function openModalProfesionalCreate() {
 
   renderSelectRolPrincipal(null);
   renderChecklist(mProfRolesSec, modalState.cacheRoles, []);
-  renderChecklist(mProfClinicas, modalState.cacheClinicas, []);
+  // ✅ por defecto: TODAS las clínicas marcadas
+  const allClinicasIds = (modalState.cacheClinicas || []).map(c => c.id);
+  renderChecklist(mProfClinicas, modalState.cacheClinicas, allClinicasIds);
 
   mProfEstado.value = 'activo';
   mProfTieneDesc.checked = false;
@@ -606,13 +623,26 @@ async function openModalProfesionalEdit(rutId) {
   mProfGiro.value = data.giro || '';
   mProfDireccion.value = data.direccion || '';
 
+  // ✅ nuevos campos (si existen en HTML)
+   const el = (id) => document.getElementById(id);
+   
+   el('mProfTipoPersona')    && (el('mProfTipoPersona').value = data.tipoPersona || 'natural');
+   el('mProfCorreoPersonal') && (el('mProfCorreoPersonal').value = data.correoPersonal || '');
+   el('mProfTelefono')       && (el('mProfTelefono').value = data.telefono || '');
+   
+   el('mProfRutEmpresa')      && (el('mProfRutEmpresa').value = data.rutEmpresa || '');
+   el('mProfCorreoEmpresa')   && (el('mProfCorreoEmpresa').value = data.correoEmpresa || '');
+   el('mProfDireccionEmpresa')&& (el('mProfDireccionEmpresa').value = data.direccionEmpresa || '');
+   el('mProfCiudadEmpresa')   && (el('mProfCiudadEmpresa').value = data.ciudadEmpresa || '');
+
+
   renderSelectRolPrincipal(data.rolPrincipalId || '');
   renderChecklist(mProfRolesSec, modalState.cacheRoles, data.rolesSecundariosIds || []);
   renderChecklist(mProfClinicas, modalState.cacheClinicas, data.clinicasIds || []);
 
   mProfEstado.value = (data.estado || 'activo');
   mProfTieneDesc.checked = !!data.tieneDescuento;
-  mProfDescMonto.value = data.tieneDescuento ? formatMoneyCLP(data.descuentoMonto || 0) : '';
+  mProfDescMonto.value = data.tieneDescuento ? formatUF(data.descuentoUF || 0) : '';
   mProfDescRazon.value = data.tieneDescuento ? (data.descuentoRazon || '') : '';
 
   setTimeout(() => mProfNombre?.focus(), 50);
@@ -640,25 +670,52 @@ btnGuardarModalProf?.addEventListener('click', async () => {
 
     // Descuento
     const tieneDescuento = !!mProfTieneDesc.checked;
-    const descuentoMonto = tieneDescuento ? parseMoneyInput(mProfDescMonto.value) : 0;
+    const descuentoUF = tieneDescuento ? parseUFInput(mProfDescMonto.value) : 0;
     const descuentoRazon = tieneDescuento ? (mProfDescRazon.value || '').trim() : '';
 
+    // ✅ campos opcionales (si existen en el DOM, los leemos; si no, quedan null)
+    const el = (id) => document.getElementById(id);
+   
+    const mProfTipoPersona     = el('mProfTipoPersona');     // select natural/juridica
+    const mProfCorreoPersonal  = el('mProfCorreoPersonal');
+    const mProfTelefono        = el('mProfTelefono');
+   
+    const mProfRutEmpresa      = el('mProfRutEmpresa');
+    const mProfCorreoEmpresa   = el('mProfCorreoEmpresa');
+    const mProfDireccionEmp    = el('mProfDireccionEmpresa');
+    const mProfCiudadEmp       = el('mProfCiudadEmpresa');
+   
+    const tipoPersona = (mProfTipoPersona?.value || 'natural').trim();
+   
     const patch = {
       rut: rutRaw,
       rutId: docId,
       nombreProfesional: nombre,
+   
+      // ✅ tipo persona + contacto
+      tipoPersona, // natural | juridica
+      correoPersonal: (mProfCorreoPersonal?.value || '').trim() || null,
+      telefono: (mProfTelefono?.value || '').trim() || null,
+   
+      // ✅ empresa (jurídica)
+      rutEmpresa: (mProfRutEmpresa?.value || '').trim() || null,
       razonSocial: (mProfRazon.value || '').trim() || null,
       giro: (mProfGiro.value || '').trim() || null,
+      correoEmpresa: (mProfCorreoEmpresa?.value || '').trim() || null,
+      direccionEmpresa: (mProfDireccionEmp?.value || '').trim() || null,
+      ciudadEmpresa: (mProfCiudadEmp?.value || '').trim() || null,
+   
+      // compatibilidad con campo viejo (si lo sigues usando en UI)
       direccion: (mProfDireccion.value || '').trim() || null,
+
 
       rolPrincipalId,
       rolesSecundariosIds,
       clinicasIds,
 
       tieneDescuento,
-      descuentoMonto: tieneDescuento ? descuentoMonto : 0,
+      descuentoUF: tieneDescuento ? descuentoUF : 0,
       descuentoRazon: tieneDescuento ? (descuentoRazon || null) : null,
-      descuentoMoneda: 'CLP',
 
       estado: (mProfEstado.value || 'activo'),
       actualizadoEl: serverTimestamp()
@@ -751,6 +808,83 @@ function openModalRoles() {
 btnAdministrarRoles?.addEventListener('click', () => {
   try { openModalRoles(); } catch(e){ console.error(e); alert('No se pudo abrir roles.'); }
 });
+
+/* ================== EXPORTAR PROFESIONALES (XLSX) ================== */
+btnExportProfesionales?.addEventListener('click', async () => {
+  try {
+    await exportarProfesionalesXLSX();
+  } catch (err) {
+    console.error(err);
+    alert('No se pudo exportar. Revisa consola.');
+  }
+});
+
+async function exportarProfesionalesXLSX() {
+  // Asegura caches para resolver nombres
+  await ensureRolesClinicasLoaded();
+
+  // Mapas id -> nombre
+  const rolesById = new Map(modalState.cacheRoles.map(r => [r.id, (r.nombre || r.id)]));
+  const clinById  = new Map(modalState.cacheClinicas.map(c => [c.id, (c.nombre || c.id)]));
+
+  // Leer profesionales
+  const snap = await getDocs(collection(db, 'profesionales'));
+  const profesionales = [];
+  snap.forEach(d => profesionales.push({ id: d.id, ...d.data() }));
+
+  // Armar filas
+  const rows = profesionales
+    .filter(p => !p.eliminado) // si más adelante usas soft delete
+    .map(p => {
+      const tipo = p.tipoPersona || 'natural';
+
+      const clinicasNombres = (p.clinicasIds || [])
+        .map(id => clinById.get(id) || id)
+        .join(' | ');
+
+      const rolesSecNombres = (p.rolesSecundariosIds || [])
+        .map(id => rolesById.get(id) || id)
+        .join(' | ');
+
+      return {
+        rut: p.rut || '',
+        nombreProfesional: p.nombreProfesional || '',
+        tipoPersona: tipo, // natural | juridica
+
+        correoPersonal: p.correoPersonal || '',
+        telefono: p.telefono || '',
+
+        rutEmpresa: p.rutEmpresa || '',
+        razonSocial: p.razonSocial || '',
+        giro: p.giro || '',
+        correoEmpresa: p.correoEmpresa || '',
+        direccionEmpresa: p.direccionEmpresa || '',
+        ciudadEmpresa: p.ciudadEmpresa || '',
+
+        rolPrincipal: p.rolPrincipalId ? (rolesById.get(p.rolPrincipalId) || p.rolPrincipalId) : '',
+        rolesSecundarios: rolesSecNombres,
+        clinicas: clinicasNombres,
+
+        tieneDescuento: p.tieneDescuento ? 'SI' : 'NO',
+        descuentoUF: p.tieneDescuento ? (p.descuentoUF ?? 0) : 0,
+        descuentoRazon: p.tieneDescuento ? (p.descuentoRazon || '') : '',
+
+        estado: p.estado || 'activo'
+      };
+    });
+
+  // XLSX
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.json_to_sheet(rows, { skipHeader: false });
+  XLSX.utils.book_append_sheet(wb, ws, "Profesionales");
+
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, "0");
+  const d = String(now.getDate()).padStart(2, "0");
+  XLSX.writeFile(wb, `Profesionales_ClinicaRennat_${y}-${m}-${d}.xlsx`);
+}
+/* ================== FIN EXPORTAR PROFESIONALES ================== */
 
 btnNuevoRol?.addEventListener('click', () => {
   rolesUIState.mode = 'create';
@@ -851,13 +985,20 @@ btnGuardarRol?.addEventListener('click', async () => {
     if (!nombre) { showError(mRolesError, 'El nombre del rol es obligatorio.'); return; }
 
     if (rolesUIState.mode === 'create') {
-      // ID automático (limpio, no depende del nombre)
-      await addDoc(collection(db, 'roles'), {
+      // ✅ ID determinístico (CONSISTENTE con import CSV): r_<slug>
+      const rolId = `r_${slugify(nombre)}`;
+   
+      // Si ya existe, solo actualiza nombre
+      await setDoc(doc(db, 'roles', rolId), {
+        id: rolId,
         nombre,
+        estado: 'activo',
         creadoEl: serverTimestamp(),
         actualizadoEl: serverTimestamp()
-      });
+      }, { merge: true });
+   
     } else {
+      // ✅ Edit: si cambias el nombre, NO cambiamos el ID (para no romper referencias)
       await updateDoc(doc(db, 'roles', rolesUIState.editId), {
         nombre,
         actualizadoEl: serverTimestamp()
@@ -1099,6 +1240,10 @@ async function loadHomeData() {
  */
 async function loadProfesionales() {
   try {
+    // ✅ asegura caches para resolver nombres en tabla
+    await ensureRolesClinicasLoaded();
+    const rolesById = new Map(modalState.cacheRoles.map(r => [r.id, (r.nombre || r.id)]));
+    const clinById  = new Map(modalState.cacheClinicas.map(c => [c.id, (c.nombre || c.id)]));
     const snap = await getDocs(collection(db, 'profesionales'));
     const rows = [];
     snap.forEach(d => rows.push({ id: d.id, ...d.data() }));
@@ -1112,15 +1257,24 @@ async function loadProfesionales() {
     }
 
     const htmlRows = rows.map(p => {
-      const desc = p.tieneDescuento ? `$${(p.descuentoMonto ?? 0).toLocaleString('es-CL')} (${p.descuentoRazon || '—'})` : 'No';
+      const desc = p.tieneDescuento
+        ? `${formatUF(p.descuentoUF ?? 0)} UF (${p.descuentoRazon || '—'})`
+        : 'No';
       const estado = p.estado || 'activo';
       return `
         <tr>
           <td>${p.nombreProfesional || p.nombre || '—'}</td>
           <td>${p.rut || '—'}</td>
           <td>${p.razonSocial || '—'}</td>
-          <td>${(p.clinicasIds || []).length ? (p.clinicasIds.join(', ')) : '—'}</td>
-          <td>${p.rolPrincipalId || '—'}</td>
+          <td>${(p.tipoPersona || 'natural')}</td>
+          <td>${(p.correoPersonal || p.correoEmpresa || '—')}</td>
+          <td>${(p.telefono || '—')}</td>
+          <td>${
+            (p.clinicasIds || []).length
+              ? (p.clinicasIds.map(id => clinById.get(id) || id).join(', '))
+              : '—'
+          }</td>
+          <td>${p.rolPrincipalId ? (rolesById.get(p.rolPrincipalId) || p.rolPrincipalId) : '—'}</td>
           <td>${desc}</td>
           <td>${estado}</td>
           <td class="text-right">
@@ -1140,6 +1294,9 @@ async function loadProfesionales() {
             <th>Nombre</th>
             <th>RUT</th>
             <th>Razón social</th>
+            <th>Tipo</th>
+            <th>Correo</th>
+            <th>Teléfono</th>
             <th>Clínicas</th>
             <th>Rol principal</th>
             <th>Descuento</th>
@@ -1678,13 +1835,22 @@ function parseProfesionalesCsv(text) {
   }
 
   const idxRazon = H('razonSocial');
+  const idxTipo = H('tipoPersona');
+  const idxCorreoP = H('correoPersonal');
+  const idxTel = H('telefono');
+   
+  const idxRutEmp = H('rutEmpresa');
+  const idxCorreoE = H('correoEmpresa');
+  const idxDirEmp = H('direccionEmpresa');
+  const idxCiudadEmp = H('ciudadEmpresa');
+
   const idxGiro = H('giro');
   const idxDir = H('direccion');
   const idxRolP = H('rolPrincipal');
   const idxRolS = H('rolesSecundarios');
   const idxClin = H('clinicas');
   const idxTD = H('tieneDescuento');
-  const idxDM = H('descuentoMonto');
+  const idxDUF = H('descuentoUF'); // ✅ UF (única)
   const idxDR = H('descuentoRazon');
   const idxEstado = H('estado');
 
@@ -1697,7 +1863,8 @@ function parseProfesionalesCsv(text) {
     if (!rut || !nombreProfesional) continue;
 
     const tieneDescuento = ((parts[idxTD] || 'NO').trim().toUpperCase() === 'SI');
-    const descuentoMonto = tieneDescuento ? (Number((parts[idxDM] || '0').toString().replace(/[^\d]/g, '')) || 0) : 0;
+    const rawUF = (idxDUF >= 0 ? (parts[idxDUF] || '0') : '0').toString().trim().replace(',', '.');
+    const descuentoUF = tieneDescuento ? (Number(rawUF) || 0) : 0;
     const descuentoRazon = tieneDescuento ? ((parts[idxDR] || '').trim()) : '';
 
     const parseList = (v) => (v || '')
@@ -1709,13 +1876,20 @@ function parseProfesionalesCsv(text) {
       rut,
       nombreProfesional,
       razonSocial: idxRazon >= 0 ? (parts[idxRazon] || '').trim() : '',
+      tipoPersona: idxTipo >= 0 ? ((parts[idxTipo] || 'natural').trim().toLowerCase()) : 'natural',
+      correoPersonal: idxCorreoP >= 0 ? (parts[idxCorreoP] || '').trim() : '',
+      telefono: idxTel >= 0 ? (parts[idxTel] || '').trim() : '',
+      rutEmpresa: idxRutEmp >= 0 ? (parts[idxRutEmp] || '').trim() : '',
+      correoEmpresa: idxCorreoE >= 0 ? (parts[idxCorreoE] || '').trim() : '',
+      direccionEmpresa: idxDirEmp >= 0 ? (parts[idxDirEmp] || '').trim() : '',
+      ciudadEmpresa: idxCiudadEmp >= 0 ? (parts[idxCiudadEmp] || '').trim() : '',
       giro: idxGiro >= 0 ? (parts[idxGiro] || '').trim() : '',
       direccion: idxDir >= 0 ? (parts[idxDir] || '').trim() : '',
       rolPrincipal: idxRolP >= 0 ? (parts[idxRolP] || '').trim() : '',
       rolesSecundarios: idxRolS >= 0 ? parseList(parts[idxRolS]) : [],
       clinicas: idxClin >= 0 ? parseList(parts[idxClin]) : [],
       tieneDescuento,
-      descuentoMonto,
+      descuentoUF,
       descuentoRazon,
       estado: idxEstado >= 0 ? ((parts[idxEstado] || 'activo').trim().toLowerCase()) : 'activo'
     });
@@ -1817,9 +1991,48 @@ btnImportProfesionales?.addEventListener('click', async () => {
         const docRef = doc(db, 'profesionales', id);
 
         try {
+         // Roles (IDs determinísticos)
          const rolPrincipalId = row.rolPrincipal ? `r_${slugify(row.rolPrincipal)}` : null;
          const rolesSecundariosIds = (row.rolesSecundarios || []).map(x => `r_${slugify(x)}`);
-         const clinicasIds = (row.clinicas || []).map(x => `c_${slugify(x)}`);
+         
+         // Clínicas: resolver por nombre -> C### (y crear si no existe)
+         const clinicasIds = [];
+         if ((row.clinicas || []).length) {
+           // cargar clínicas actuales y mapear nombre -> id
+           const snapCli = await getDocs(collection(db, 'clinicas'));
+           const existentes = [];
+           snapCli.forEach(d => existentes.push({ id: d.id, ...d.data() }));
+         
+           const normName = (s='') => s.toString().trim().toLowerCase()
+             .normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+         
+           const byNombre = new Map();
+           for (const c of existentes) if (c.nombre) byNombre.set(normName(c.nombre), c.id);
+         
+           for (const nombreCli of row.clinicas) {
+             const key = normName(nombreCli);
+             let idCli = byNombre.get(key);
+         
+             if (!idCli) {
+               // crear nueva C###
+               idCli = await getNextClinicaCodigo();
+               await setDoc(doc(db, 'clinicas', idCli), {
+                 id: idCli,
+                 codigo: idCli,
+                 nombre: nombreCli,
+                 estado: 'activa',
+                 creadoEl: serverTimestamp(),
+                 actualizadoEl: serverTimestamp()
+               }, { merge: true });
+               byNombre.set(key, idCli);
+               // también invalida cache por si abres modal después
+               modalState.cacheClinicas = [];
+             }
+         
+             clinicasIds.push(idCli);
+           }
+         }
+
          
          await setDoc(docRef, {
            rut: row.rut,
@@ -1834,9 +2047,8 @@ btnImportProfesionales?.addEventListener('click', async () => {
            clinicasIds,
          
            tieneDescuento: !!row.tieneDescuento,
-           descuentoMonto: row.tieneDescuento ? (row.descuentoMonto || 0) : 0,
+           descuentoUF: row.tieneDescuento ? (row.descuentoUF || 0) : 0,
            descuentoRazon: row.tieneDescuento ? (row.descuentoRazon || null) : null,
-           descuentoMoneda: 'CLP',
          
            estado: (row.estado || 'activo'),
            actualizadoEl: serverTimestamp()
@@ -1891,29 +2103,42 @@ btnImportRoles?.addEventListener('click', async () => {
       const text = e.target.result;
       const { rows } = parseCsv(text);
 
-      const cleanRows = rows
-        .map(r => ({ rol: (r.rol || r.Rol || '').trim() }))
-        .filter(r => r.rol);
+      // Acepta columna: rol / Rol
+      const cleanNames = rows
+        .map(r => (r.rol || r.Rol || '').trim())
+        .filter(Boolean);
 
-      if (!cleanRows.length) throw new Error('CSV vacío o sin columna "rol".');
+      if (!cleanNames.length) throw new Error('CSV vacío o sin columna "rol".');
 
-      const batch = writeBatch(db);
-      let count = 0;
+      let creados = 0;
+      let actualizados = 0;
 
-      for (const r of cleanRows) {
-        const rolId = `r_${slugify(r.rol)}`;
-        batch.set(doc(db, 'roles', rolId), {
+      for (const nombre of cleanNames) {
+        const rolId = `r_${slugify(nombre)}`;
+
+        // Upsert rol (ID determinístico)
+        await setDoc(doc(db, 'roles', rolId), {
           id: rolId,
-          nombre: r.rol,
+          nombre,
           estado: 'activo',
-          actualizadoEl: new Date()
+          actualizadoEl: serverTimestamp()
         }, { merge: true });
-        count++;
+
+        // No distinguimos perfecto create/update sin leer antes,
+        // pero para UI esto es suficiente.
+        actualizados++;
       }
 
-      await batch.commit();
-      importRolesResultado.textContent = `Roles importados/actualizados: ${count}.`;
+      importRolesResultado.textContent =
+        `Roles importados/actualizados: ${actualizados}.`;
       importRolesResultado.style.color = 'var(--ink)';
+
+      // refrescar caches
+      modalState.cacheRoles = [];
+      await ensureRolesClinicasLoaded();
+
+      await loadRolesTable();
+      await loadProfesionales();
 
     } catch (err) {
       console.error(err);
@@ -1929,6 +2154,7 @@ btnImportRoles?.addEventListener('click', async () => {
 
   reader.readAsText(file, 'utf-8');
 });
+
 
 /* ================== IMPORTAR CLÍNICAS DESDE CSV ================== */
 btnImportClinicas?.addEventListener('click', async () => {
@@ -1948,31 +2174,66 @@ btnImportClinicas?.addEventListener('click', async () => {
       const text = e.target.result;
       const { rows } = parseCsv(text);
 
-      const cleanRows = rows
-        .map(r => ({
-          clinica: (r.clinica || r.Clinica || r['Clínica'] || '').trim()
-        }))
-        .filter(r => r.clinica);
+      const cleanNames = rows
+        .map(r => (r.clinica || r.Clinica || r['Clínica'] || '').trim())
+        .filter(Boolean);
 
-      if (!cleanRows.length) throw new Error('CSV vacío o sin columna "clinica".');
+      if (!cleanNames.length) throw new Error('CSV vacío o sin columna "clinica".');
 
-      const batch = writeBatch(db);
-      let count = 0;
+      // 1) cargar clínicas existentes y mapear por nombre normalizado -> C###
+      const snap = await getDocs(collection(db, 'clinicas'));
+      const existentes = [];
+      snap.forEach(d => existentes.push({ id: d.id, ...d.data() }));
 
-      for (const r of cleanRows) {
-        const clinicaId = `c_${slugify(r.clinica)}`;
-        batch.set(doc(db, 'clinicas', clinicaId), {
-          id: clinicaId,
-          nombre: r.clinica,
-          estado: 'activa',
-          actualizadoEl: new Date()
-        }, { merge: true });
-        count++;
+      const normName = (s='') => s.toString().trim().toLowerCase()
+        .normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+
+      const byNombre = new Map();
+      for (const c of existentes) {
+        if (c.nombre) byNombre.set(normName(c.nombre), c.id);
       }
 
-      await batch.commit();
-      importClinicasResultado.textContent = `Clínicas importadas/actualizadas: ${count}.`;
+      let creadas = 0;
+      let actualizadas = 0;
+
+      for (const nombre of cleanNames) {
+        const key = normName(nombre);
+        const foundId = byNombre.get(key);
+
+        if (foundId) {
+          await setDoc(doc(db, 'clinicas', foundId), {
+            nombre,
+            estado: 'activa',
+            actualizadoEl: serverTimestamp()
+          }, { merge: true });
+          actualizadas++;
+          continue;
+        }
+
+        const next = await getNextClinicaCodigo(); // C### siguiente
+        await setDoc(doc(db, 'clinicas', next), {
+          id: next,
+          codigo: next,
+          nombre,
+          estado: 'activa',
+          creadoEl: serverTimestamp(),
+          actualizadoEl: serverTimestamp()
+        }, { merge: true });
+
+        byNombre.set(key, next);
+        creadas++;
+      }
+
+      importClinicasResultado.textContent =
+        `Clínicas importadas. Nuevas: ${creadas}, actualizadas: ${actualizadas}.`;
       importClinicasResultado.style.color = 'var(--ink)';
+
+      // refrescar caches para el modal profesional
+      modalState.cacheClinicas = [];
+      await ensureRolesClinicasLoaded();
+
+      await loadClinicas();
+      await loadProfesionales();
 
     } catch (err) {
       console.error(err);
