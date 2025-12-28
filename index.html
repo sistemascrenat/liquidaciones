@@ -403,7 +403,61 @@
           <label>Dirección</label>
           <input id="mProfDireccion" type="text" placeholder="Opcional">
         </div>
-
+        
+        <!-- ✅ NUEVO: Tipo persona + contacto -->
+        <div class="grid-2">
+          <div class="form-field">
+            <label>Tipo de persona *</label>
+            <select id="mProfTipoPersona" class="badge">
+              <option value="natural">Persona natural</option>
+              <option value="juridica">Persona jurídica</option>
+            </select>
+            <div class="hint">Define cómo se paga y qué datos se requieren.</div>
+          </div>
+        
+          <div class="form-field">
+            <label>Correo personal</label>
+            <input id="mProfCorreoPersonal" type="email" placeholder="correo@ejemplo.com">
+          </div>
+        </div>
+        
+        <div class="grid-2">
+          <div class="form-field">
+            <label>Teléfono</label>
+            <input id="mProfTelefono" type="text" placeholder="+56 9 1234 5678">
+          </div>
+          <div class="form-field"></div>
+        </div>
+        
+        <!-- ✅ NUEVO: Datos empresa (solo si es persona jurídica) -->
+        <div id="empresaFields">
+          <hr class="modal-hr">
+        
+          <div class="grid-2">
+            <div class="form-field">
+              <label>RUT empresa</label>
+              <input id="mProfRutEmpresa" type="text" placeholder="76.123.456-7">
+            </div>
+        
+            <div class="form-field">
+              <label>Correo empresa</label>
+              <input id="mProfCorreoEmpresa" type="email" placeholder="pagos@empresa.cl">
+            </div>
+          </div>
+        
+          <div class="grid-2">
+            <div class="form-field">
+              <label>Dirección empresa</label>
+              <input id="mProfDireccionEmpresa" type="text" placeholder="Calle, número">
+            </div>
+        
+            <div class="form-field">
+              <label>Ciudad</label>
+              <input id="mProfCiudadEmpresa" type="text" placeholder="Santiago">
+            </div>
+          </div>
+        </div>
+        
         <hr class="modal-hr">
 
         <div class="grid-2">
@@ -446,8 +500,8 @@
           </div>
 
           <div class="form-field">
-            <label>Monto descuento (CLP)</label>
-            <input id="mProfDescMonto" type="text" placeholder="0">
+            <label>Monto descuento (UF)</label>
+            <input id="mProfDescMonto" type="text" placeholder="0,00">
           </div>
         </div>
 
