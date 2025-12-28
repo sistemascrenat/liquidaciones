@@ -172,6 +172,22 @@ const mClinicaEstado = document.getElementById('mClinicaEstado');
    2) HELPERS GENERALES
    ========================================================= */
 
+/* =========================================================
+   DOCUMENTACIÓN RÁPIDA (para mantenimiento)
+   ---------------------------------------------------------
+   - Helpers UI: showView / setActiveNav
+   - Helpers dinero: onlyDigits / parseMoneyInput / formatMoneyCLP
+   - Overlay/modales: openOverlay / closeAllModals
+   - Cache: ensureRolesClinicasLoaded (roles + clinicas)
+   - CRUD: profesionales / procedimientos / roles / clinicas
+   - Importadores: parseProfesionalesCsv / parseCsv / slugify / moneyToNumber
+   ========================================================= */
+
+/**
+ * Devuelve el texto del período actual en formato "Mes Año"
+ * Ej: "Diciembre 2025"
+ * Usado en la pill del header al iniciar sesión.
+ */
 function getCurrentPeriodoText() {
   const now = new Date();
   const meses = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio',
@@ -179,10 +195,19 @@ function getCurrentPeriodoText() {
   return `${meses[now.getMonth()]} ${now.getFullYear()}`;
 }
 
+/**
+ * Activa una vista (section.view) por id y oculta las demás.
+ * @param {string} id - id de la sección (ej: "view-home")
+ * Usado por el menú lateral.
+ */
 function showView(id) {
   views.forEach(v => v.classList.toggle('active', v.id === id));
 }
 
+/**
+ * Marca como activo el item del sidebar asociado a targetView.
+ * @param {string} targetView - id de la vista (ej: "view-home")
+ */
 function setActiveNav(targetView) {
   navItems.forEach(item => {
     const v = item.getAttribute('data-view');
@@ -301,22 +326,39 @@ const modalState = {
   cacheClinicas: []   // [{id,nombre}]
 };
 
+/**
+ * Bloquea/desbloquea scroll del body mientras un modal está abierto.
+ * @param {boolean} lock
+ */
 function lockScroll(lock) {
   document.body.style.overflow = lock ? 'hidden' : '';
 }
 
+/**
+ * Muestra/oculta un mensaje de error en un elemento del DOM.
+ * @param {HTMLElement} el - contenedor del error
+ * @param {string} msg - mensaje (si es vacío, se oculta)
+ */
 function showError(el, msg) {
   if (!el) return;
   el.textContent = msg || '';
   el.style.display = msg ? 'block' : 'none';
 }
 
+/**
+ * Abre el overlay (fondo oscuro) y bloquea el scroll.
+ * Nota: NO muestra un modal específico; solo el overlay.
+ */
 function openOverlay() {
   if (!modalOverlay) return;
   modalOverlay.style.display = 'flex';
   lockScroll(true);
 }
 
+/**
+ * Cierra overlay + todos los modales, y limpia errores.
+ * Se llama desde: botones cancelar/cerrar, click fuera, tecla Escape.
+ */
 function closeAllModals() {
   modalState.open = null;
 
@@ -340,15 +382,26 @@ btnCancelarModalRoles?.addEventListener('click', closeAllModals);
 btnCerrarModalClinica?.addEventListener('click', closeAllModals);
 btnCancelarModalClinica?.addEventListener('click', closeAllModals);
 
-
+/**
+ * Deja solo números en un string.
+ * @param {string} v
+ * @returns {string}
+ */
 function onlyDigits(v='') {
   return v.toString().replace(/[^\d]/g,'');
 }
 
+/**
+ * Convierte un input monetario en número entero (CLP).
+ * Ej: "1.200.000" => 1200000
+ */
 function parseMoneyInput(v='') {
   return Number(onlyDigits(v)) || 0;
 }
 
+/**
+ * Formatea un número en formato CLP (locale es-CL).
+ */
 function formatMoneyCLP(n=0) {
   return (Number(n)||0).toLocaleString('es-CL');
 }
@@ -372,6 +425,11 @@ btnCancelarModalProf?.addEventListener('click', closeAllModals);
 btnCerrarModalProc?.addEventListener('click', closeAllModals);
 btnCancelarModalProc?.addEventListener('click', closeAllModals);
 
+/**
+ * Carga roles y clínicas desde Firestore si no están en cache.
+ * Esto evita llamar a Firestore muchas veces al abrir modales.
+ * Se usa para poblar select/checkboxes del modal de Profesional.
+ */
 async function ensureRolesClinicasLoaded() {
   // Roles
   if (!modalState.cacheRoles.length) {
@@ -393,6 +451,10 @@ async function ensureRolesClinicasLoaded() {
   }
 }
 
+/**
+ * Renderiza el select de Rol Principal usando modalState.cacheRoles.
+ * @param {string|null} selectedId - id a seleccionar por defecto
+ */
 function renderSelectRolPrincipal(selectedId=null) {
   if (!mProfRolPrincipal) return;
   mProfRolPrincipal.innerHTML = '';
@@ -410,6 +472,12 @@ function renderSelectRolPrincipal(selectedId=null) {
   mProfRolPrincipal.value = selectedId || '';
 }
 
+/**
+ * Renderiza una lista de checkboxes en un contenedor.
+ * @param {HTMLElement} containerEl
+ * @param {Array} items - items con {id, nombre}
+ * @param {Array<string>} selectedIds - ids preseleccionados
+ */
 function renderChecklist(containerEl, items, selectedIds=[]) {
   if (!containerEl) return;
   const set = new Set(selectedIds || []);
@@ -441,6 +509,10 @@ function renderChecklist(containerEl, items, selectedIds=[]) {
   }
 }
 
+/**
+ * Lee los checkboxes marcados dentro de un contenedor.
+ * @returns {Array<string>}
+ */
 function getCheckedValues(containerEl) {
   if (!containerEl) return [];
   return Array.from(containerEl.querySelectorAll('input[type="checkbox"]'))
@@ -448,6 +520,13 @@ function getCheckedValues(containerEl) {
     .map(x => x.value);
 }
 
+
+/**
+ * Abre modal profesional en modo CREATE.
+ * - Carga roles/clinicas
+ * - Limpia campos
+ * - Muestra modalProfesional
+ */
 async function openModalProfesionalCreate() {
   await ensureRolesClinicasLoaded();
 
@@ -484,6 +563,13 @@ async function openModalProfesionalCreate() {
   setTimeout(() => mProfRut?.focus(), 50);
 }
 
+/**
+ * Abre modal profesional en modo EDIT.
+ * @param {string} rutId - docId en profesionales (rut normalizado)
+ * - Carga roles/clinicas
+ * - Lee Firestore profesionales/{rutId}
+ * - Rellena campos
+ */
 async function openModalProfesionalEdit(rutId) {
   await ensureRolesClinicasLoaded();
 
@@ -603,7 +689,9 @@ mProfTieneDesc?.addEventListener('change', () => {
   }
 });
 
-
+/**
+ * Abre modal procedimiento en modo CREATE y limpia campos.
+ */
 function openModalProcedimientoCreate() {
   modalState.open = 'proc';
   modalState.procMode = 'create';
@@ -636,6 +724,11 @@ const rolesUIState = {
   editId: null
 };
 
+/**
+ * Abre modal Roles (admin).
+ * - Pone estado create
+ * - Carga tabla roles (loadRolesTable)
+ */
 function openModalRoles() {
   modalState.open = 'roles';
   openOverlay();
@@ -667,6 +760,9 @@ btnNuevoRol?.addEventListener('click', () => {
   mRolNombre?.focus();
 });
 
+/**
+ * Carga roles desde Firestore y dibuja tabla con acciones Editar/Eliminar.
+ */
 async function loadRolesTable() {
   try {
     const snap = await getDocs(collection(db, 'roles'));
@@ -885,7 +981,10 @@ navItems.forEach(item => {
 /* =========================================================
    5) MÓDULO PERÍODO (SELECTS MES)
    ========================================================= */
-
+/**
+ * Inicializa selects de mes para Producción y Liquidaciones.
+ * Rellena valores AAAA-MM y selecciona el mes actual.
+ */
 function initSelectsPeriodo() {
   const now = new Date();
   const year = now.getFullYear();
@@ -913,7 +1012,11 @@ function initSelectsPeriodo() {
 /* =========================================================
    6) MÓDULO HOME (KPIs + ÚLTIMAS LIQUIDACIONES)
    ========================================================= */
-
+/**
+ * Carga KPIs de Home y últimas 5 liquidaciones.
+ * - Cuenta profesionales y procedimientos
+ * - Lista últimas liquidaciones
+ */
 async function loadHomeData() {
   try {
     // Total profesionales
@@ -990,7 +1093,10 @@ async function loadHomeData() {
 /* =========================================================
    7) MÓDULO PROFESIONALES (LISTADO BÁSICO)
    ========================================================= */
-
+/**
+ * Carga la tabla de profesionales desde Firestore.
+ * Incluye botones: Editar / Activar-Desactivar.
+ */
 async function loadProfesionales() {
   try {
     const snap = await getDocs(collection(db, 'profesionales'));
@@ -1098,7 +1204,9 @@ btnNuevoProfesional?.addEventListener('click', async () => {
 /* =========================================================
    8) MÓDULO PROCEDIMIENTOS (LISTADO BÁSICO)
    ========================================================= */
-
+/**
+ * Carga la tabla de procedimientos desde Firestore.
+ */
 async function loadProcedimientos() {
   try {
     const snap = await getDocs(collection(db, 'procedimientos'));
@@ -1166,6 +1274,9 @@ const clinicaUIState = {
   editId: null
 };
 
+/**
+ * Carga clínicas desde Firestore y dibuja tabla con acciones.
+ */
 async function loadClinicas() {
   try {
     const snap = await getDocs(collection(db, 'clinicas'));
@@ -1213,6 +1324,10 @@ async function loadClinicas() {
   }
 }
 
+/**
+ * Busca el mayor C### existente en clinicas y devuelve el siguiente.
+ * Ej: si existe C009 => devuelve C010
+ */
 async function getNextClinicaCodigo() {
   // Lee todas y busca el mayor C### existente
   const snap = await getDocs(collection(db, 'clinicas'));
@@ -1228,6 +1343,10 @@ async function getNextClinicaCodigo() {
   return `C${next}`;
 }
 
+/**
+ * Abre modal clínica en modo CREATE.
+ * @param {string} codigoSugerido - ej "C005"
+ */
 function openModalClinicaCreate(codigoSugerido) {
   modalState.open = 'clinica';
   clinicaUIState.mode = 'create';
@@ -1252,6 +1371,10 @@ function openModalClinicaCreate(codigoSugerido) {
   setTimeout(() => mClinicaNombre?.focus(), 50);
 }
 
+/**
+ * Abre modal clínica en modo EDIT.
+ * @param {string} id - docId existente ej "C001"
+ */
 async function openModalClinicaEdit(id) {
   modalState.open = 'clinica';
   clinicaUIState.mode = 'edit';
@@ -1391,6 +1514,10 @@ btnRefrescarProduccion?.addEventListener('click', () => {
   loadProduccion();
 });
 
+/**
+ * Carga datos de producción (stub por ahora).
+ * Ideal: filtrar por periodo seleccionado.
+ */
 async function loadProduccion() {
   tablaProduccion.innerHTML = `<p style="font-size:13px;color:var(--muted);">
     Cargando producción...
@@ -1444,7 +1571,9 @@ async function loadProduccion() {
 /* =========================================================
    10) MÓDULO LIQUIDACIONES (LECTURA + BOTÓN CALCULAR)
    ========================================================= */
-
+/**
+ * Carga la tabla de liquidaciones desde Firestore.
+ */
 async function loadLiquidaciones() {
   tablaLiquidaciones.innerHTML = `<p style="font-size:13px;color:var(--muted);">
     Cargando liquidaciones...
@@ -1509,6 +1638,9 @@ btnCalcularLiquidaciones?.addEventListener('click', async () => {
 /* ================== IMPORTAR PROFESIONALES DESDE CSV ================== */
 
 // Normaliza RUT para usarlo como ID de documento (sin puntos, guión ni espacios, en mayúsculas)
+/**
+ * Normaliza RUT para usarlo como docId (sin puntos ni guión).
+ */
 function normalizaRut(rutRaw = '') {
   return rutRaw
     .toString()
@@ -1520,6 +1652,12 @@ function normalizaRut(rutRaw = '') {
 }
 
 // Parsea un CSV simple a objetos { rol, rut, razonSocial, nombre }
+/**
+ * Parse específico para CSV de Profesionales:
+ * - Detecta delimitador ; o ,
+ * - Soporta listas separadas por |
+ * - Requiere columnas rut y nombreProfesional
+ */
 function parseProfesionalesCsv(text) {
   const lines = text
     .split(/\r?\n/)
@@ -1586,7 +1724,9 @@ function parseProfesionalesCsv(text) {
   return rows;
 }
 
-
+/**
+ * Convierte texto en un slug seguro para IDs.
+ */
 function slugify(text = '') {
   return text
     .toString()
@@ -1597,6 +1737,9 @@ function slugify(text = '') {
     .replace(/^_+|_+$/g, '');
 }
 
+/**
+ * Parse CSV genérico: primera línea headers, resto filas.
+ */
 function parseCsv(text) {
   const lines = text
     .split(/\r?\n/)
@@ -1618,6 +1761,10 @@ function parseCsv(text) {
   return { headers, rows };
 }
 
+/**
+ * Convierte valores con $/puntos/comas a número entero.
+ * Útil para importaciones de tarifas.
+ */
 function moneyToNumber(v) {
   if (v == null) return 0;
   return Number(
