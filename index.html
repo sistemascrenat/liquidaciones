@@ -371,6 +371,14 @@
       <div class="modal-body">
         <div class="grid-2">
           <div class="form-field">
+            <label>Tipo de persona *</label>
+            <select id="mProfTipoPersona" class="badge">
+              <option value="natural">Persona Natural</option>
+              <option value="juridica">Persona Jurídica</option>
+            </select>
+          </div>
+          
+          <div class="form-field">
             <label>RUT *</label>
             <input id="mProfRut" type="text" placeholder="16128922-1">
             <div class="hint">Se usa como ID (normalizado). No se recomienda cambiarlo al editar.</div>
@@ -399,17 +407,7 @@
           <input id="mProfDireccion" type="text" placeholder="Opcional">
         </div>
         
-        <!-- ✅ NUEVO: Tipo persona + contacto -->
-        <div class="grid-2">
-          <div class="form-field">
-            <label>Tipo de persona *</label>
-            <select id="mProfTipoPersona" class="badge">
-              <option value="natural">Persona natural</option>
-              <option value="juridica">Persona jurídica</option>
-            </select>
-            <div class="hint">Define cómo se paga y qué datos se requieren.</div>
-          </div>
-        
+        <div class="grid-2">     
           <div class="form-field">
             <label>Correo personal</label>
             <input id="mProfCorreoPersonal" type="email" placeholder="correo@ejemplo.com">
