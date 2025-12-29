@@ -2196,10 +2196,6 @@ btnImportProfesionales?.addEventListener('click', async () => {
          // Roles (IDs determinísticos)
          const rolPrincipalId = row.rolPrincipal ? `r_${slugify(row.rolPrincipal)}` : null;
          const rolesSecundariosIds = (row.rolesSecundarios || []).map(x => `r_${slugify(x)}`);
-         
-         // Clínicas: resolver por nombre -> C### (y crear si no existe)
-         // ✅ Default pedido: si el CSV NO trae clínicas => asignar TODAS las clínicas activas
-         let clinicasIds = [];
      
          // ===============================
          // Clínicas: resolver por nombre -> ID usando precarga (byNombre / activasIds)
