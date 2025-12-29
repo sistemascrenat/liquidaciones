@@ -1300,36 +1300,42 @@ async function loadProfesionales() {
       
       const visibles = filtrarProfesionales(profesionalesCache, profSearch?.value || '');
       const htmlRows = visibles.map(p => {
-      const desc = p.tieneDescuento
-        ? `${formatUF(p.descuentoUF ?? 0)} UF (${p.descuentoRazon || '—'})`
-        : 'No';
-      const estado = p.estado || 'activo';
-      return `
-        <tr>
-          <td>${p.nombreProfesional || p.nombre || '—'}</td>
-          <td>${p.rut || '—'}</td>
+        const tipo = (p.tipoPersona || 'natural').toLowerCase();   // ✅ define tipo
+        const isJ  = (tipo === 'juridica');                        // ✅ define isJ
       
-          <td>${isJ ? (p.rutEmpresa || '—') : '—'}</td>
-          <td>${isJ ? (p.razonSocial || '—') : '—'}</td>
+        const desc = p.tieneDescuento
+          ? `${formatUF(p.descuentoUF ?? 0)} UF (${p.descuentoRazon || '—'})`
+          : 'No';
       
-          <td>${tipo}</td>
-          <td>${(p.correoPersonal || p.correoEmpresa || '—')}</td>
-          <td>${(p.telefono || '—')}</td>
+        const estado = p.estado || 'activo';
       
-          <td>${p.rolPrincipalId ? (rolesById.get(p.rolPrincipalId) || p.rolPrincipalId) : '—'}</td>
-          <td>${desc}</td>
-          <td>${estado}</td>
+        return `
+          <tr>
+            <td>${p.nombreProfesional || p.nombre || '—'}</td>
+            <td>${p.rut || '—'}</td>
       
-          <td class="text-right">
-            <button class="btn btn-soft" data-action="edit-prof" data-id="${p.rutId || p.id}">Editar</button>
-            <button class="btn btn-soft" data-action="toggle-prof" data-id="${p.rutId || p.id}">
-              ${estado === 'inactivo' ? 'Activar' : 'Desactivar'}
-            </button>
-            <button class="btn btn-soft" data-action="del-prof" data-id="${p.rutId || p.id}">Eliminar</button>
-          </td>
-        </tr>
-`;
-    }).join('');
+            <td>${isJ ? (p.rutEmpresa || '—') : '—'}</td>
+            <td>${isJ ? (p.razonSocial || '—') : '—'}</td>
+      
+            <td>${tipo}</td>
+            <td>${(p.correoPersonal || p.correoEmpresa || '—')}</td>
+            <td>${(p.telefono || '—')}</td>
+      
+            <td>${p.rolPrincipalId ? (rolesById.get(p.rolPrincipalId) || p.rolPrincipalId) : '—'}</td>
+            <td>${desc}</td>
+            <td>${estado}</td>
+      
+            <td class="text-right">
+              <button class="btn btn-soft" data-action="edit-prof" data-id="${p.rutId || p.id}">Editar</button>
+              <button class="btn btn-soft" data-action="toggle-prof" data-id="${p.rutId || p.id}">
+                ${estado === 'inactivo' ? 'Activar' : 'Desactivar'}
+              </button>
+              <button class="btn btn-soft" data-action="del-prof" data-id="${p.rutId || p.id}">Eliminar</button>
+            </td>
+          </tr>
+        `;
+      }).join('');
+
 
     tablaProfesionales.innerHTML = `
       <table>
