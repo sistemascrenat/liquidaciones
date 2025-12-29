@@ -536,6 +536,72 @@ tr:nth-child(even) td {
   }
 }
 
+/* ===========================
+   BUSCADOR PROFESIONALES — FIX FOCUS / BORDE MARCADO
+   Pegar al FINAL de estilo.css
+=========================== */
+
+/* wrapper visual */
+.searchbar-wrap{
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--card);
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.08); /* flotante suave */
+  display:flex;
+  align-items:center;
+  gap:8px;
+  padding: 10px 12px;
+}
+
+/* input: que no herede estilos agresivos de inputs globales */
+.searchbar-input{
+  border: none !important;
+  outline: none !important;
+  box-shadow: none !important;
+  background: transparent;
+  width: 100%;
+  font-size: 14px;
+}
+
+/* evita el borde/outline duro al hacer focus (incluye focus-visible) */
+.searchbar-wrap:focus-within{
+  border-color: var(--border);            /* NO oscurecer */
+  box-shadow: 0 8px 22px rgba(15, 23, 42, 0.10); /* leve aumento */
+}
+
+/* por si tienes estilos globales tipo .form-field input:focus */
+.searchbar-input:focus,
+.searchbar-input:focus-visible{
+  outline: none !important;
+  box-shadow: none !important;
+}
+
+/* icono */
+.searchbar-icon{
+  opacity: .75;
+}
+
+/* botón X */
+.searchbar-clear{
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  opacity: .55;
+  padding: 6px 10px;
+  border-radius: 10px;
+}
+.searchbar-clear:hover{
+  opacity: .9;
+  background: rgba(15, 23, 42, 0.06);
+}
+
+/* versión "pro" un poco más larga (opcional) */
+.searchbar-wrap--pro{
+  width: min(520px, 52vw);
+}
+@media (max-width: 900px){
+  .searchbar-wrap--pro{ width: 100%; }
+}
 
 @media (max-width: 800px) {
   .app-shell {
