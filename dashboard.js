@@ -1378,7 +1378,7 @@ tablaProfesionales?.addEventListener('click', async (e) => {
       if (action === 'del-prof') {
         const ok = confirm(
           '¿Eliminar profesional DEFINITIVAMENTE?\n' +
-          'Esto borra el registro de Firestore y NO se puede deshacer.'
+          'Esto borra el registro de la Base de DAtos y NO se puede recuperar.'
         );
         if (!ok) return;
       
