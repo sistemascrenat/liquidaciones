@@ -713,6 +713,8 @@ btnGuardarModalProf?.addEventListener('click', async () => {
     const mProfCiudadEmp       = el('mProfCiudadEmpresa');
    
     const tipoPersona = (mProfTipoPersona?.value || 'natural').trim();
+
+    const isJuridica = (tipoPersona === 'juridica');
    
     const patch = {
       rut: rutRaw,
@@ -720,17 +722,16 @@ btnGuardarModalProf?.addEventListener('click', async () => {
       nombreProfesional: nombre,
    
       // ✅ tipo persona + contacto
-      tipoPersona, // natural | juridica
+      tipoPersona,
+   
       correoPersonal: (mProfCorreoPersonal?.value || '').trim() || null,
       telefono: (mProfTelefono?.value || '').trim() || null,
    
-      // ✅ empresa (jurídica)
-      rutEmpresa: (mProfRutEmpresa?.value || '').trim() || null,
-      razonSocial: (mProfRazon.value || '').trim() || null,
-      giro: (mProfGiro.value || '').trim() || null,
-      correoEmpresa: (mProfCorreoEmpresa?.value || '').trim() || null,
-      direccionEmpresa: (mProfDireccionEmp?.value || '').trim() || null,
-      ciudadEmpresa: (mProfCiudadEmp?.value || '').trim() || null,
+      // Empresa: solo si es jurídica; si es natural, lo dejamos en null para no ensuciar datos
+      rutEmpresa: isJuridica ? ((mProfRutEmpresa?.value || '').trim() || null) : null,
+      correoEmpresa: isJuridica ? ((mProfCorreoEmpresa?.value || '').trim() || null) : null,
+      direccionEmpresa: isJuridica ? ((mProfDireccionEmp?.value || '').trim() || null) : null,
+      ciudadEmpresa: isJuridica ? ((mProfCiudadEmp?.value || '').trim() || null) : null,
    
       // compatibilidad con campo viejo (si lo sigues usando en UI)
       direccion: (mProfDireccion.value || '').trim() || null,
@@ -1293,8 +1294,8 @@ async function loadProfesionales() {
       return;
     }
 
-    const visibles = rows.filter(p => !p.eliminado);
-    const htmlRows = rows.map(p => {
+      const visibles = rows.filter(p => !p.eliminado);
+      const htmlRows = visibles.map(p => {
       const desc = p.tieneDescuento
         ? `${formatUF(p.descuentoUF ?? 0)} UF (${p.descuentoRazon || '—'})`
         : 'No';
@@ -2335,7 +2336,13 @@ btnImportTarifas?.addEventListener('click', async () => {
       const text = e.target.result;
       const { rows } = parseCsv(text);
 
-      const cleanRows = rows.map(r => {
+      // Normalizador (para comparar nombres)
+      const normName = (s='') => (s ?? '')
+        .toString().trim().toLowerCase()
+        .normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+
+      // 1) Limpieza / normalización de filas
+      const cleanRows = (rows || []).map(r => {
         const clinica = (r.clinica || r.Clinica || r['Clínica'] || '').trim();
         const cirugia = (r.cirugia || r.Cirugia || r['Cirugía'] || r['Cirugías'] || '').trim();
 
@@ -2349,10 +2356,22 @@ btnImportTarifas?.addEventListener('click', async () => {
 
       if (!cleanRows.length) throw new Error('CSV vacío o sin columnas mínimas (clinica, cirugia).');
 
+      // 2) Deduplicación dentro del mismo CSV (clínica+cirugía)
+      const seen = new Set();
+      const dedupRows = [];
+      for (const r of cleanRows) {
+        const key = `${normName(r.clinica)}__${normName(r.cirugia)}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        dedupRows.push(r);
+      }
+
+      // 3) Preparar batch + commit parcial
       let batch = writeBatch(db);
       let ops = 0;
 
       const commitIfNeeded = async () => {
+        // Seguridad: mantener margen bajo el máximo
         if (ops >= 450) {
           await batch.commit();
           batch = writeBatch(db);
@@ -2360,82 +2379,112 @@ btnImportTarifas?.addEventListener('click', async () => {
         }
       };
 
+      // 4) Cache de clínicas (1 sola lectura)
+      importTarifasResultado.textContent = `Leyendo clínicas… (cache)`;
+      const snapCliInit = await getDocs(collection(db, 'clinicas'));
+      const clinicaByNombre = new Map(); // nombreNormalizado -> C###
+      const clinicaById = new Set();     // C### existentes
+
+      snapCliInit.forEach(d => {
+        const data = d.data() || {};
+        clinicaById.add(d.id);
+        if (data.nombre) clinicaByNombre.set(normName(data.nombre), d.id);
+      });
+
       let upsertProc = 0;
       let upsertTar = 0;
+      let createdClinicas = 0;
 
-      for (const r of cleanRows) {
-         // ✅ Clínica SIEMPRE con docId C###
-         // - Busca por nombre normalizado en "clinicas"
-         // - Si no existe, crea nueva C###
-         const normName = (s='') => s.toString().trim().toLowerCase()
-           .normalize('NFD').replace(/[\u0300-\u036f]/g,'');
-         
-         let clinicaId = null;
-         
-         // (pequeño lookup en Firestore; si luego quieres optimizar, armamos cache fuera del loop)
-         const snapCli = await getDocs(collection(db, 'clinicas'));
-         const existentes = [];
-         snapCli.forEach(d => existentes.push({ id: d.id, ...d.data() }));
-         const byNombre = new Map();
-         for (const c of existentes) if (c.nombre) byNombre.set(normName(c.nombre), c.id);
-         
-         clinicaId = byNombre.get(normName(r.clinica));
-         
-         if (!clinicaId) {
-           clinicaId = await getNextClinicaCodigo(); // C###
-           batch.set(doc(db, 'clinicas', clinicaId), {
-             id: clinicaId,
-             codigo: clinicaId,
-             nombre: r.clinica,
-             estado: 'activa',
-             creadoEl: serverTimestamp(),
-             actualizadoEl: serverTimestamp()
-           }, { merge: true });
-           ops++; await commitIfNeeded();
-         }
-         
-         const procedimientoId = `p_${slugify(r.cirugia)}`;
-         const tarifaId = `t_${clinicaId}__${procedimientoId}`;
+      importTarifasResultado.textContent = `Importando… (${dedupRows.length} filas)`;
 
+      for (const r of dedupRows) {
+        // ✅ Resolver clinicaId
+        // - Si viene "C001" => usar directo
+        // - Si viene nombre => buscar en cache por nombre normalizado
+        let clinicaId = null;
+        const rawClin = (r.clinica || '').trim();
 
+        if (/^C\d{3}$/i.test(rawClin)) {
+          clinicaId = rawClin.toUpperCase();
 
+          // (Opcional pero útil) Si viene C### y no existe, la creamos con nombre = C###
+          if (!clinicaById.has(clinicaId)) {
+            batch.set(doc(db, 'clinicas', clinicaId), {
+              id: clinicaId,
+              codigo: clinicaId,
+              nombre: clinicaId, // placeholder; luego puedes editar desde UI
+              estado: 'activa',
+              creadoEl: serverTimestamp(),
+              actualizadoEl: serverTimestamp()
+            }, { merge: true });
+            ops++; createdClinicas++; await commitIfNeeded();
+            clinicaById.add(clinicaId);
+          }
+        } else {
+          // Nombre de clínica
+          clinicaId = clinicaByNombre.get(normName(rawClin)) || null;
 
-        // procedimiento
+          if (!clinicaId) {
+            clinicaId = await getNextClinicaCodigo(); // C###
+            batch.set(doc(db, 'clinicas', clinicaId), {
+              id: clinicaId,
+              codigo: clinicaId,
+              nombre: rawClin,
+              estado: 'activa',
+              creadoEl: serverTimestamp(),
+              actualizadoEl: serverTimestamp()
+            }, { merge: true });
+            ops++; createdClinicas++; await commitIfNeeded();
+
+            // Actualiza cache
+            clinicaByNombre.set(normName(rawClin), clinicaId);
+            clinicaById.add(clinicaId);
+          }
+        }
+
+        // IDs de docs
+        const procedimientoId = `p_${slugify(r.cirugia)}`;
+        const tarifaId = `t_${clinicaId}__${procedimientoId}`;
+
+        // procedimiento (upsert)
         batch.set(doc(db, 'procedimientos', procedimientoId), {
           id: procedimientoId,
           nombre: r.cirugia,
           tipo: 'ambulatorio',
-          actualizadoEl: new Date()
+          actualizadoEl: serverTimestamp()
         }, { merge: true });
         ops++; upsertProc++; await commitIfNeeded();
 
-        // tarifa cruce
+        // tarifa cruce (upsert)
         batch.set(doc(db, 'tarifas', tarifaId), {
           id: tarifaId,
           clinicaId,
-          clinicaNombre: r.clinica,
+          clinicaNombre: (/^C\d{3}$/i.test(rawClin)) ? null : rawClin, // si venía C###, no inventamos nombre real
           procedimientoId,
           procedimientoNombre: r.cirugia,
           precioTotal: r.precioTotal || 0,
           derechosPabellon: r.derechosPabellon || 0,
           hmq: r.hmq || 0,
           insumos: r.insumos || 0,
-          actualizadoEl: new Date()
+          actualizadoEl: serverTimestamp()
         }, { merge: true });
         ops++; upsertTar++; await commitIfNeeded();
       }
 
+      // Commit final
       if (ops > 0) await batch.commit();
 
       importTarifasResultado.textContent =
-        `Listo. Procedimientos upsert: ${upsertProc}. Tarifas upsert: ${upsertTar}.`;
+        `Listo ✅ Clínicas creadas: ${createdClinicas}. ` +
+        `Procedimientos upsert: ${upsertProc}. Tarifas upsert: ${upsertTar}.`;
       importTarifasResultado.style.color = 'var(--ink)';
 
+      // recarga
       loadProcedimientos();
 
     } catch (err) {
       console.error(err);
-      importTarifasResultado.textContent = 'Error: ' + (err.message || err);
+      importTarifasResultado.textContent = 'Error: ' + (err?.message || err);
       importTarifasResultado.style.color = '#e11d48';
     }
   };
@@ -2447,6 +2496,7 @@ btnImportTarifas?.addEventListener('click', async () => {
 
   reader.readAsText(file, 'utf-8');
 });
+
 
 
 
