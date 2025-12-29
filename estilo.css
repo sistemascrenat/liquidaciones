@@ -434,6 +434,66 @@ tr:nth-child(even) td {
   color: var(--muted);
 }
 
+/* =========================
+   Header Profesionales (1 línea)
+========================= */
+.card-header--pro{
+  align-items: center;
+  gap: 12px;
+}
+
+.card-header-left{
+  min-width: 220px; /* asegura que el título no se achique tanto */
+}
+
+.card-header-actions{
+  flex: 1;                 /* botones ocupan el centro */
+  justify-content: center; /* quedan centrados */
+  flex-wrap: nowrap;       /* 🔥 clave: evita que bajen (desktop) */
+}
+
+.card-header-right{
+  min-width: 320px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+.searchbar-wrap--pro{
+  max-width: 360px;  /* más “pro” y compacto en header */
+}
+
+.searchbar-hint--right{
+  text-align: right;
+  margin-top: 6px;
+}
+
+/* Responsive: en pantallas chicas se apila bonito */
+@media (max-width: 980px){
+  .card-header--pro{
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .card-header-left{
+    min-width: unset;
+  }
+  .card-header-actions{
+    justify-content: flex-start;
+    flex-wrap: wrap; /* en móvil sí permitimos wrap */
+  }
+  .card-header-right{
+    min-width: unset;
+    align-items: stretch;
+  }
+  .searchbar-wrap--pro{
+    max-width: 100%;
+  }
+  .searchbar-hint--right{
+    text-align: left;
+  }
+}
+
+
 @media (max-width: 800px) {
   .app-shell {
     grid-template-columns: 1fr;
