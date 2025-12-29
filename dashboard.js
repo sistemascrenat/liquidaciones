@@ -535,6 +535,15 @@ function getCheckedValues(containerEl) {
     .map(x => x.value);
 }
 
+// helper de UI para mostrar/ocultar “empresaFields”
+function applyTipoPersonaUI() {
+  const tipoSel = document.getElementById('mProfTipoPersona');
+  const boxEmp  = document.getElementById('empresaFields');
+  if (!tipoSel || !boxEmp) return;
+
+  const tipo = (tipoSel.value || 'natural').trim();
+  boxEmp.style.display = (tipo === 'juridica') ? 'block' : 'none';
+}
 
 /**
  * Abre modal profesional en modo CREATE.
@@ -574,6 +583,21 @@ async function openModalProfesionalCreate() {
   mProfTieneDesc.checked = false;
   mProfDescMonto.value = '';
   mProfDescRazon.value = '';
+
+  // ✅ NUEVO: defaults tipo persona + campos nuevos
+  const el = (id) => document.getElementById(id);
+  el('mProfTipoPersona') && (el('mProfTipoPersona').value = 'natural');
+  el('mProfCorreoPersonal') && (el('mProfCorreoPersonal').value = '');
+  el('mProfTelefono') && (el('mProfTelefono').value = '');
+
+  el('mProfRutEmpresa') && (el('mProfRutEmpresa').value = '');
+  el('mProfCorreoEmpresa') && (el('mProfCorreoEmpresa').value = '');
+  el('mProfDireccionEmpresa') && (el('mProfDireccionEmpresa').value = '');
+  el('mProfCiudadEmpresa') && (el('mProfCiudadEmpresa').value = '');
+
+  applyTipoPersonaUI();
+  el('mProfTipoPersona')?.addEventListener('change', applyTipoPersonaUI);
+
 
   showError(mProfError, '');
 
@@ -644,6 +668,9 @@ async function openModalProfesionalEdit(rutId) {
   mProfTieneDesc.checked = !!data.tieneDescuento;
   mProfDescMonto.value = data.tieneDescuento ? formatUF(data.descuentoUF || 0) : '';
   mProfDescRazon.value = data.tieneDescuento ? (data.descuentoRazon || '') : '';
+
+  applyTipoPersonaUI();
+  document.getElementById('mProfTipoPersona')?.addEventListener('change', applyTipoPersonaUI);
 
   setTimeout(() => mProfNombre?.focus(), 50);
 }
@@ -724,6 +751,16 @@ btnGuardarModalProf?.addEventListener('click', async () => {
     // Si es create, ponemos creadoEl si no existía
     if (modalState.profMode === 'create') {
       patch.creadoEl = serverTimestamp();
+    }
+
+    // ✅ Validación mínima por tipo persona
+    if (tipoPersona === 'juridica') {
+      const rutEmp = (mProfRutEmpresa?.value || '').trim();
+      const razon = (mProfRazon.value || '').trim();
+      if (!rutEmp && !razon) {
+        showError(mProfError, 'Si es Persona jurídica, ingresa al menos RUT empresa o Razón social.');
+        return;
+      }
     }
 
     await setDoc(doc(db, 'profesionales', docId), patch, { merge: true });
@@ -1256,6 +1293,7 @@ async function loadProfesionales() {
       return;
     }
 
+    const visibles = rows.filter(p => !p.eliminado);
     const htmlRows = rows.map(p => {
       const desc = p.tieneDescuento
         ? `${formatUF(p.descuentoUF ?? 0)} UF (${p.descuentoRazon || '—'})`
@@ -1282,7 +1320,8 @@ async function loadProfesionales() {
             <button class="btn btn-soft" data-action="toggle-prof" data-id="${p.rutId || p.id}">
               ${estado === 'inactivo' ? 'Activar' : 'Desactivar'}
             </button>
-          </td>
+            <button class="btn btn-soft" data-action="del-prof" data-id="${p.rutId || p.id}">Eliminar</button>
+         </td>
         </tr>
       `;
     }).join('');
@@ -1335,6 +1374,23 @@ tablaProfesionales?.addEventListener('click', async (e) => {
       await openModalProfesionalEdit(rutId);
       return;
     }
+
+      if (action === 'del-prof') {
+      const ok = confirm('¿Eliminar profesional? (Se marcará como eliminado e inactivo. No se borra histórico).');
+      if (!ok) return;
+
+      const ref = doc(db, 'profesionales', rutId);
+      await setDoc(ref, {
+        eliminado: true,
+        eliminadoEl: serverTimestamp(),
+        estado: 'inactivo',
+        actualizadoEl: serverTimestamp()
+      }, { merge: true });
+
+      await loadProfesionales();
+      return;
+    }
+
 
     // Si llega aquí, es una acción no soportada
     console.warn('Acción no soportada en tablaProfesionales:', action);
@@ -1996,19 +2052,26 @@ btnImportProfesionales?.addEventListener('click', async () => {
          const rolesSecundariosIds = (row.rolesSecundarios || []).map(x => `r_${slugify(x)}`);
          
          // Clínicas: resolver por nombre -> C### (y crear si no existe)
-         const clinicasIds = [];
+         // ✅ Default pedido: si el CSV NO trae clínicas => asignar TODAS las clínicas activas
+         let clinicasIds = [];
+         
+         // cargar clínicas actuales 1 vez (para este profesional) y mapear nombre -> id
+         const snapCli = await getDocs(collection(db, 'clinicas'));
+         const existentes = [];
+         snapCli.forEach(d => existentes.push({ id: d.id, ...d.data() }));
+         
+         const normName = (s='') => s.toString().trim().toLowerCase()
+           .normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+         
+         const byNombre = new Map();
+         for (const c of existentes) if (c.nombre) byNombre.set(normName(c.nombre), c.id);
+         
+         const activasIds = existentes
+           .filter(c => (c.estado || 'activa') === 'activa')
+           .map(c => c.id);
+         
          if ((row.clinicas || []).length) {
-           // cargar clínicas actuales y mapear nombre -> id
-           const snapCli = await getDocs(collection(db, 'clinicas'));
-           const existentes = [];
-           snapCli.forEach(d => existentes.push({ id: d.id, ...d.data() }));
-         
-           const normName = (s='') => s.toString().trim().toLowerCase()
-             .normalize('NFD').replace(/[\u0300-\u036f]/g,'');
-         
-           const byNombre = new Map();
-           for (const c of existentes) if (c.nombre) byNombre.set(normName(c.nombre), c.id);
-         
+           // respetar clínicas del CSV
            for (const nombreCli of row.clinicas) {
              const key = normName(nombreCli);
              let idCli = byNombre.get(key);
@@ -2025,12 +2088,15 @@ btnImportProfesionales?.addEventListener('click', async () => {
                  actualizadoEl: serverTimestamp()
                }, { merge: true });
                byNombre.set(key, idCli);
-               // también invalida cache por si abres modal después
                modalState.cacheClinicas = [];
+               activasIds.push(idCli);
              }
          
              clinicasIds.push(idCli);
            }
+         } else {
+           // ✅ default: todas las clínicas activas
+           clinicasIds = [...activasIds];
          }
 
          
@@ -2298,18 +2364,41 @@ btnImportTarifas?.addEventListener('click', async () => {
       let upsertTar = 0;
 
       for (const r of cleanRows) {
-        const clinicaId = `c_${slugify(r.clinica)}`;
-        const procedimientoId = `p_${slugify(r.cirugia)}`;
-        const tarifaId = `t_${clinicaId}__${procedimientoId}`;
+         // ✅ Clínica SIEMPRE con docId C###
+         // - Busca por nombre normalizado en "clinicas"
+         // - Si no existe, crea nueva C###
+         const normName = (s='') => s.toString().trim().toLowerCase()
+           .normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+         
+         let clinicaId = null;
+         
+         // (pequeño lookup en Firestore; si luego quieres optimizar, armamos cache fuera del loop)
+         const snapCli = await getDocs(collection(db, 'clinicas'));
+         const existentes = [];
+         snapCli.forEach(d => existentes.push({ id: d.id, ...d.data() }));
+         const byNombre = new Map();
+         for (const c of existentes) if (c.nombre) byNombre.set(normName(c.nombre), c.id);
+         
+         clinicaId = byNombre.get(normName(r.clinica));
+         
+         if (!clinicaId) {
+           clinicaId = await getNextClinicaCodigo(); // C###
+           batch.set(doc(db, 'clinicas', clinicaId), {
+             id: clinicaId,
+             codigo: clinicaId,
+             nombre: r.clinica,
+             estado: 'activa',
+             creadoEl: serverTimestamp(),
+             actualizadoEl: serverTimestamp()
+           }, { merge: true });
+           ops++; await commitIfNeeded();
+         }
+         
+         const procedimientoId = `p_${slugify(r.cirugia)}`;
+         const tarifaId = `t_${clinicaId}__${procedimientoId}`;
 
-        // clínica
-        batch.set(doc(db, 'clinicas', clinicaId), {
-          id: clinicaId,
-          nombre: r.clinica,
-          estado: 'activa',
-          actualizadoEl: new Date()
-        }, { merge: true });
-        ops++; await commitIfNeeded();
+
+
 
         // procedimiento
         batch.set(doc(db, 'procedimientos', procedimientoId), {
