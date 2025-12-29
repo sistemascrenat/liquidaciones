@@ -460,7 +460,7 @@ tr:nth-child(even) td {
 }
 
 .searchbar-wrap--pro{
-  max-width: 360px;  /* más “pro” y compacto en header */
+  max-width: 1020px;  /* más “pro” y compacto en header */
 }
 
 .searchbar-hint--right{
