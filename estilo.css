@@ -585,7 +585,7 @@ tr:nth-child(even) td {
 
 /* ✅ Buscador más angosto y alineado (desktop) */
 .searchbar-wrap--pro{
-  width: 520px;         /* <-- AJUSTA AQUÍ (ej: 480 / 520 / 560) */
+  width: 560px;         /* <-- AJUSTA AQUÍ (ej: 480 / 520 / 560) */
   max-width: 100%;
   margin: 0 auto;       /* centra dentro del espacio disponible */
 }
