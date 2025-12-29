@@ -544,6 +544,10 @@ function applyTipoPersonaUI() {
   boxEmp.style.display = (tipo === 'juridica') ? 'block' : 'none';
 }
 
+// ✅ Listener único (evita listeners duplicados al abrir/cerrar modal muchas veces)
+const tipoPersonaSel = document.getElementById('mProfTipoPersona');
+tipoPersonaSel?.addEventListener('change', applyTipoPersonaUI);
+
 /**
  * Abre modal profesional en modo CREATE.
  * - Carga roles/clinicas
@@ -594,8 +598,7 @@ async function openModalProfesionalCreate() {
   el('mProfDireccionEmpresa') && (el('mProfDireccionEmpresa').value = '');
   el('mProfCiudadEmpresa') && (el('mProfCiudadEmpresa').value = '');
 
-  applyTipoPersonaUI();
-  el('mProfTipoPersona')?.addEventListener('change', applyTipoPersonaUI);
+  applyTipoPersonaUI();   
 
 
   showError(mProfError, '');
@@ -669,7 +672,6 @@ async function openModalProfesionalEdit(rutId) {
   mProfDescRazon.value = data.tieneDescuento ? (data.descuentoRazon || '') : '';
 
   applyTipoPersonaUI();
-  document.getElementById('mProfTipoPersona')?.addEventListener('change', applyTipoPersonaUI);
 
   setTimeout(() => mProfNombre?.focus(), 50);
 }
@@ -1200,8 +1202,11 @@ function initSelectsPeriodo() {
  */
 async function loadHomeData() {
   try {
-    // Total profesionales
-    const profSnap = await getDocs(collection(db, 'profesionales'));
+    // Total profesionales activos
+    const profSnap = await getDocs(query(
+      collection(db, 'profesionales'),
+      where('estado', '==', 'activo')
+    ));
     const totalProfesionales = profSnap.size;
 
     // Total procedimientos
@@ -2223,6 +2228,18 @@ btnImportProfesionales?.addEventListener('click', async () => {
            rut: row.rut,
            rutId: id,
            nombreProfesional: row.nombreProfesional,
+         
+           // ✅ NUEVO: campos persona/contacto desde CSV
+           tipoPersona: (row.tipoPersona || 'natural'),
+           correoPersonal: row.correoPersonal || null,
+           telefono: row.telefono || null,
+         
+           // Empresa (si viene)
+           rutEmpresa: row.rutEmpresa || null,
+           correoEmpresa: row.correoEmpresa || null,
+           direccionEmpresa: row.direccionEmpresa || null,
+           ciudadEmpresa: row.ciudadEmpresa || null,
+         
            razonSocial: row.razonSocial || null,
            giro: row.giro || null,
            direccion: row.direccion || null,
