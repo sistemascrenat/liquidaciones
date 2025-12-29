@@ -143,13 +143,15 @@
         </div>
 
         <div class="card">
+          <!-- ✅ SOLO CAMBIÉ ESTE HEADER (estructura correcta en 1 línea): -->
           <div class="card-header card-header--pro">
             <!-- IZQUIERDA: Título -->
             <div class="card-header-left">
               <div class="card-title">Listado de profesionales</div>
             </div>
-        
-            <div class="card-header-left">
+
+            <!-- CENTRO: Buscador (más largo) -->
+            <div class="card-header-center">
               <div class="searchbar-wrap searchbar-wrap--pro">
                 <span class="searchbar-icon" aria-hidden="true">🔎</span>
                 <input
@@ -159,26 +161,35 @@
                   placeholder="Buscar profesional…"
                   autocomplete="off"
                 />
-                <button id="profSearchClear" class="searchbar-clear" type="button" title="Limpiar" aria-label="Limpiar">
+                <button
+                  id="profSearchClear"
+                  class="searchbar-clear"
+                  type="button"
+                  title="Limpiar"
+                  aria-label="Limpiar"
+                >
                   ✕
                 </button>
               </div>
 
+              <!-- Hint (se mantiene) -->
+              <div id="profSearchHint" class="searchbar-hint searchbar-hint--right"></div>
+            </div>
+
+            <!-- DERECHA: Botones -->
+            <div class="card-header-right">
               <div class="card-actions card-header-actions">
                 <button class="btn btn-soft" id="btnAdministrarRoles">Administrar roles</button>
                 <button class="btn btn-soft" id="btnExportProfesionales">Exportar Listado</button>
                 <button class="btn btn-primary" id="btnNuevoProfesional">+ Nuevo profesional</button>
               </div>
-        
-              <div id="profSearchHint" class="searchbar-hint searchbar-hint--right"></div>
             </div>
           </div>
-        
+
           <div id="tablaProfesionales">
             <!-- Tabla generada por JS -->
           </div>
         </div>
-
       </section>
 
       <!-- PROCEDIMIENTOS -->
@@ -209,7 +220,7 @@
           <div class="view-title">Clínicas</div>
           <div class="view-subtitle">Listado y administración de clínicas.</div>
         </div>
-      
+
         <div class="card">
           <div class="card-header">
             <div>
@@ -219,13 +230,12 @@
               <button class="btn btn-primary" id="btnNuevaClinica">+ Nueva clínica</button>
             </div>
           </div>
-      
+
           <div id="tablaClinicas">
             <!-- Tabla generada por JS -->
           </div>
         </div>
       </section>
-
 
       <!-- PRODUCCIÓN -->
       <section id="view-produccion" class="view">
@@ -290,21 +300,18 @@
           </div>
 
           <div id="configContent">
-          
             <!-- NUEVO: Plantilla modelo -->
             <div style="margin-top:10px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
               <button id="btnDescargarPlantilla" class="btn btn-soft">
                 ⬇️ Descargar plantilla modelo (Google Sheets)
               </button>
-              <span style="font-size:12px;color:var(--muted);">
-              </span>
+              <span style="font-size:12px;color:var(--muted);"></span>
             </div>
-          
+
             <hr style="margin:16px 0;border:none;border-top:1px solid var(--border);" />
-          
+
             <!-- IMPORTAR PROFESIONALES DESDE CSV -->
             <div>
-
               <div style="font-weight:600;font-size:14px;margin-bottom:4px;">
                 Importar profesionales desde CSV
               </div>
@@ -315,13 +322,13 @@
                 <button id="btnImportProfesionales" class="btn btn-primary">
                   Importar profesionales
                 </button>
-                <span style="font-size:12px;color:var(--muted);">
-                </span>
+                <span style="font-size:12px;color:var(--muted);"></span>
               </div>
 
               <div id="importProfResultado" style="margin-top:8px;font-size:12px;"></div>
             </div>
           </div>
+
           <hr style="margin:16px 0;border:none;border-top:1px solid var(--border);" />
 
           <!-- IMPORTAR ROLES DESDE CSV -->
@@ -329,48 +336,47 @@
             <div style="font-weight:600;font-size:14px;margin-bottom:4px;">
               Importar roles desde CSV
             </div>
-          
+
             <input type="file" id="fileRoles" accept=".csv" />
-          
+
             <div style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
               <button id="btnImportRoles" class="btn btn-primary">Importar roles</button>
             </div>
-          
+
             <div id="importRolesResultado" style="margin-top:8px;font-size:12px;"></div>
           </div>
-          
+
           <!-- IMPORTAR CLÍNICAS DESDE CSV -->
           <div>
             <div style="font-weight:600;font-size:14px;margin-bottom:4px;">
               Importar clínicas desde CSV
             </div>
-          
+
             <input type="file" id="fileClinicas" accept=".csv" />
-          
+
             <div style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
               <button id="btnImportClinicas" class="btn btn-primary">Importar clínicas</button>
             </div>
-          
+
             <div id="importClinicasResultado" style="margin-top:8px;font-size:12px;"></div>
           </div>
-          
+
           <hr style="margin:16px 0;border:none;border-top:1px solid var(--border);" />
-          
+
           <!-- IMPORTAR PROCEDIMIENTOS + TARIFAS DESDE CSV -->
           <div>
             <div style="font-weight:600;font-size:14px;margin-bottom:4px;">
               Importar procedimientos + tarifas (por clínica) desde CSV
             </div>
-         
+
             <input type="file" id="fileTarifas" accept=".csv" />
-          
+
             <div style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
               <button id="btnImportTarifas" class="btn btn-primary">Importar procedimientos + tarifas</button>
             </div>
-          
+
             <div id="importTarifasResultado" style="margin-top:8px;font-size:12px;"></div>
           </div>
-
         </div>
       </section>
     </main>
@@ -391,13 +397,14 @@
       </div>
 
       <div class="modal-body">
-         <div class="form-field">
-            <label>Tipo de persona *</label>
-            <select id="mProfTipoPersona" class="badge">
-              <option value="natural">Persona Natural</option>
-              <option value="juridica">Persona Jurídica</option>
-            </select>
-          </div>
+        <div class="form-field">
+          <label>Tipo de persona *</label>
+          <select id="mProfTipoPersona" class="badge">
+            <option value="natural">Persona Natural</option>
+            <option value="juridica">Persona Jurídica</option>
+          </select>
+        </div>
+
         <div class="grid-2">
           <div class="form-field">
             <label>RUT *</label>
@@ -414,14 +421,14 @@
           <label>Comentarios</label>
           <input id="mProfDireccion" type="text" placeholder="Opcional">
         </div>
-      
-        <div class="grid-2">     
+
+        <div class="grid-2">
           <div class="form-field">
             <label>Correo personal</label>
             <input id="mProfCorreoPersonal" type="email" placeholder="correo@ejemplo.com">
           </div>
         </div>
-        
+
         <div class="grid-2">
           <div class="form-field">
             <label>Teléfono</label>
@@ -429,17 +436,17 @@
           </div>
           <div class="form-field"></div>
         </div>
-        
+
         <!-- ✅ NUEVO: Datos empresa (solo si es persona jurídica) -->
         <div id="empresaFields">
           <hr class="modal-hr">
-        
+
           <div class="grid-2">
             <div class="form-field">
               <label>Razón social</label>
               <input id="mProfRazon" type="text" placeholder="Opcional">
             </div>
-  
+
             <div class="form-field">
               <label>Giro</label>
               <input id="mProfGiro" type="text" placeholder="Opcional">
@@ -449,26 +456,26 @@
               <label>RUT empresa</label>
               <input id="mProfRutEmpresa" type="text" placeholder="76.123.456-7">
             </div>
-        
+
             <div class="form-field">
               <label>Correo Empresa</label>
               <input id="mProfCorreoEmpresa" type="email" placeholder="pagos@empresa.cl">
             </div>
           </div>
-        
+
           <div class="grid-2">
             <div class="form-field">
               <label>Dirección Empresa</label>
               <input id="mProfDireccionEmpresa" type="text" placeholder="Calle, número">
             </div>
-        
+
             <div class="form-field">
               <label>Ciudad</label>
               <input id="mProfCiudadEmpresa" type="text" placeholder="Santiago">
             </div>
           </div>
         </div>
-        
+
         <hr class="modal-hr">
 
         <div class="grid-2">
@@ -576,8 +583,6 @@
       </div>
     </div>
 
-
-    <!-- Modal Roles -->
     <!-- Modal Roles (UNIFORME) -->
     <div id="modalRoles" class="modal" role="dialog" aria-modal="true" aria-labelledby="modalRolesTitle" style="display:none;">
       <div class="modal-header">
@@ -587,33 +592,32 @@
         </div>
         <button type="button" class="modal-close" id="btnCerrarModalRoles" aria-label="Cerrar">✕</button>
       </div>
-  
+
       <div class="modal-body">
         <div class="grid-2">
           <div class="form-field">
             <label>Nombre del rol *</label>
             <input id="mRolNombre" type="text" placeholder="Ej: Cirujano">
           </div>
-  
+
           <div class="form-field">
             <label>&nbsp;</label>
             <div class="hint">Usa “Nuevo” para limpiar y “Guardar” para crear/actualizar.</div>
           </div>
         </div>
-  
+
         <div id="mRolesError" class="modal-error" style="display:none;"></div>
-  
+
         <hr class="modal-hr">
-  
+
         <div id="tablaRoles">
           <!-- Tabla roles por JS -->
         </div>
       </div>
-  
-      <!-- ✅ Footer estándar como los otros modales -->
+
       <div class="modal-footer" style="justify-content:space-between;">
         <button type="button" class="btn btn-soft" id="btnNuevoRol">Nuevo</button>
-  
+
         <div style="display:flex;gap:10px;">
           <button type="button" class="btn btn-soft" id="btnCancelarModalRoles">Cancelar</button>
           <button type="button" class="btn btn-primary" id="btnGuardarRol">Guardar</button>
@@ -621,7 +625,6 @@
       </div>
     </div>
 
-  
     <!-- Modal Clínica -->
     <div id="modalClinica" class="modal" role="dialog" aria-modal="true" aria-labelledby="modalClinicaTitle" style="display:none;">
       <div class="modal-header">
@@ -631,7 +634,7 @@
         </div>
         <button type="button" class="modal-close" id="btnCerrarModalClinica" aria-label="Cerrar">✕</button>
       </div>
-    
+
       <div class="modal-body">
         <div class="grid-2">
           <div class="form-field">
@@ -639,13 +642,13 @@
             <input id="mClinicaCodigo" type="text" placeholder="C001">
             <div class="hint">Formato: C + 3 dígitos. Se propone automáticamente.</div>
           </div>
-    
+
           <div class="form-field">
             <label>Nombre *</label>
             <input id="mClinicaNombre" type="text" placeholder="Ej: Clínica Rennat">
           </div>
         </div>
-    
+
         <div class="grid-2">
           <div class="form-field">
             <label>Estado</label>
@@ -656,17 +659,16 @@
           </div>
           <div class="form-field"></div>
         </div>
-    
+
         <div id="mClinicaError" class="modal-error" style="display:none;"></div>
       </div>
-    
+
       <div class="modal-footer">
         <button type="button" class="btn btn-soft" id="btnCancelarModalClinica">Cancelar</button>
         <button type="button" class="btn btn-primary" id="btnGuardarModalClinica">Guardar</button>
       </div>
     </div>
   </div>
-
 
   <!-- ===== Estilos rápidos del modal (si no quieres tocar estilo.css aún) ===== -->
   <style>
@@ -741,4 +743,3 @@
   <script type="module" src="./dashboard.js"></script>
 </body>
 </html>
-
