@@ -373,22 +373,65 @@ tr:nth-child(even) td {
 .searchbar-wrap{
   position: relative;
   width: 100%;
-  max-width: 860px;           /* ✅ más largo que antes */
+  max-width: 860px;
   margin: 0;
 }
 
+/* input ocupa todo */
 .searchbar-input{
   width: 100%;
   height: 44px;
-  padding: 0 44px 0 42px;     /* espacio para lupa y para botón X */
+  padding: 0 52px 0 42px;   /* ✅ deja espacio para el botón dentro del input */
   border-radius: 14px;
+}
+
+/* botón “dentro” del input */
+.searchbar-clear{
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  width: 34px;
+  height: 34px;
+
+  border-radius: 12px;
   border: 1px solid var(--border);
   background: #fff;
-  color: var(--ink);
-  outline: none;
-  box-shadow: 0 10px 22px rgba(2, 6, 23, .06);
-  transition: box-shadow .15s ease, border-color .15s ease, transform .15s ease;
+
+  font-size: 16px;
+  line-height: 1;
+  padding: 0;
+
+  cursor: pointer;
 }
+
+/* El segundo bloque (donde está el buscador + botones) debe crecer */
+.card-header--pro > .card-header-left:last-child{
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+}
+
+/* buscador grande */
+.searchbar-wrap--pro{
+  flex: 1;               /* ✅ hace que sea realmente largo */
+  max-width: none;       /* ✅ quita el tope */
+  min-width: 720px;      /* ✅ aprox 3x del chico (ajusta si quieres) */
+}
+
+/* botones a la derecha */
+.card-header-actions{
+  flex: 0 0 auto;
+  margin-left: auto;
+  flex-wrap: nowrap;
+}
+
 
 .searchbar-input::placeholder{
   color: var(--muted);
@@ -411,17 +454,22 @@ tr:nth-child(even) td {
 }
 
 .searchbar-clear{
-  position: absolute;
-  right: 10px;
-  top: 50%;
-  transform: translateY(-50%);
-  width: 28px;
-  height: 28px;
-  border-radius: 10px;
+  display: flex;                 /* ✅ CLAVE */
+  align-items: center;           /* ✅ centra vertical */
+  justify-content: center;       /* ✅ centra horizontal */
+
+  width: 36px;
+  height: 36px;
+
   border: 1px solid var(--border);
-  background: rgba(2, 6, 23, .02);
+  background: #fff;
+  border-radius: 10px;
+
+  font-size: 16px;
+  line-height: 1;                /* evita desplazamientos raros */
+  padding: 0;
+
   cursor: pointer;
-  display: none; /* se muestra solo si hay texto */
 }
 
 .searchbar-clear:hover{
