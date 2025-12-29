@@ -540,8 +540,8 @@ function applyTipoPersonaUI() {
   const boxEmp  = document.getElementById('empresaFields');
   if (!tipoSel || !boxEmp) return;
 
-  const tipo = (tipoSel.value || 'Natural').trim();
-  boxEmp.style.display = (tipo === 'Empresa') ? 'block' : 'none';
+  const tipo = (tipoSel.value || 'natural').trim();
+  boxEmp.style.display = (tipo === 'juridica') ? 'block' : 'none';
 }
 
 /**
@@ -585,7 +585,7 @@ async function openModalProfesionalCreate() {
 
   // ✅ NUEVO: defaults tipo persona + campos nuevos
   const el = (id) => document.getElementById(id);
-  el('mProfTipoPersona') && (el('mProfTipoPersona').value = 'Natural');
+  el('mProfTipoPersona') && (el('mProfTipoPersona').value = 'natural');
   el('mProfCorreoPersonal') && (el('mProfCorreoPersonal').value = '');
   el('mProfTelefono') && (el('mProfTelefono').value = '');
 
@@ -649,7 +649,7 @@ async function openModalProfesionalEdit(rutId) {
   // ✅ nuevos campos (si existen en HTML)
    const el = (id) => document.getElementById(id);
    
-   el('mProfTipoPersona')    && (el('mProfTipoPersona').value = data.tipoPersona || 'Natural');
+   el('mProfTipoPersona')    && (el('mProfTipoPersona').value = data.tipoPersona || 'natural');
    el('mProfCorreoPersonal') && (el('mProfCorreoPersonal').value = data.correoPersonal || '');
    el('mProfTelefono')       && (el('mProfTelefono').value = data.telefono || '');
    
@@ -702,7 +702,7 @@ btnGuardarModalProf?.addEventListener('click', async () => {
     // ✅ campos opcionales (si existen en el DOM, los leemos; si no, quedan null)
     const el = (id) => document.getElementById(id);
    
-    const mProfTipoPersona     = el('mProfTipoPersona');     // select Natural/Empresa
+    const mProfTipoPersona     = el('mProfTipoPersona');     // select natural/juridica
     const mProfCorreoPersonal  = el('mProfCorreoPersonal');
     const mProfTelefono        = el('mProfTelefono');
    
@@ -711,9 +711,9 @@ btnGuardarModalProf?.addEventListener('click', async () => {
     const mProfDireccionEmp    = el('mProfDireccionEmpresa');
     const mProfCiudadEmp       = el('mProfCiudadEmpresa');
    
-    const tipoPersona = (mProfTipoPersona?.value || 'Natural').trim();
+    const tipoPersona = (mProfTipoPersona?.value || 'natural').trim();
 
-    const isEmpresa = (tipoPersona === 'Empresa');
+    const isJuridica = (tipoPersona === 'juridica');
 
     const patch = {
       rut: rutRaw,
@@ -726,15 +726,15 @@ btnGuardarModalProf?.addEventListener('click', async () => {
       correoPersonal: (mProfCorreoPersonal?.value || '').trim() || null,
       telefono: (mProfTelefono?.value || '').trim() || null,
    
-      // ✅ Razón social / Giro (solo si es Empresa)
-      razonSocial: isEmpresa ? ((mProfRazon?.value || '').trim() || null) : null,
-      giro:       isEmpresa ? ((mProfGiro?.value || '').trim() || null) : null,
+      // ✅ Razón social / Giro (solo si es jurídica)
+      razonSocial: isJuridica ? ((mProfRazon?.value || '').trim() || null) : null,
+      giro:       isJuridica ? ((mProfGiro?.value || '').trim() || null) : null,
    
-      // Empresa: solo si es Empresa; si es Natural, lo dejamos en null para no ensuciar datos
-      rutEmpresa:       isEmpresa ? ((mProfRutEmpresa?.value || '').trim() || null) : null,
-      correoEmpresa:    isEmpresa ? ((mProfCorreoEmpresa?.value || '').trim() || null) : null,
-      direccionEmpresa: isEmpresa ? ((mProfDireccionEmp?.value || '').trim() || null) : null,
-      ciudadEmpresa:    isEmpresa ? ((mProfCiudadEmp?.value || '').trim() || null) : null,
+      // Empresa: solo si es jurídica; si es natural, lo dejamos en null para no ensuciar datos
+      rutEmpresa:       isJuridica ? ((mProfRutEmpresa?.value || '').trim() || null) : null,
+      correoEmpresa:    isJuridica ? ((mProfCorreoEmpresa?.value || '').trim() || null) : null,
+      direccionEmpresa: isJuridica ? ((mProfDireccionEmp?.value || '').trim() || null) : null,
+      ciudadEmpresa:    isJuridica ? ((mProfCiudadEmp?.value || '').trim() || null) : null,
    
       // compatibilidad con campo viejo (UI dice “Comentarios”)
       direccion: (mProfDireccion.value || '').trim() || null,
@@ -758,11 +758,11 @@ btnGuardarModalProf?.addEventListener('click', async () => {
     }
 
     // ✅ Validación mínima por tipo persona
-    if (tipoPersona === 'Empresa') {
+    if (tipoPersona === 'juridica') {
       const rutEmp = (mProfRutEmpresa?.value || '').trim();
       const razon = (mProfRazon.value || '').trim();
       if (!rutEmp && !razon) {
-        showError(mProfError, 'Si es Empresa, ingresa al menos RUT empresa o Razón social.');
+        showError(mProfError, 'Si es Persona jurídica, ingresa al menos RUT empresa o Razón social.');
         return;
       }
     }
@@ -876,7 +876,7 @@ async function exportarProfesionalesXLSX() {
   // Armar filas
   const rows = profesionales
     .map(p => {
-      const tipo = p.tipoPersona || 'Natural';
+      const tipo = p.tipoPersona || 'natural';
 
       const clinicasNombres = (p.clinicasIds || [])
         .map(id => clinById.get(id) || id)
@@ -889,7 +889,7 @@ async function exportarProfesionalesXLSX() {
       return {
         rut: p.rut || '',
         nombreProfesional: p.nombreProfesional || '',
-        tipoPersona: tipo, // Natural | Empresa
+        tipoPersona: tipo, // natural | juridica
 
         correoPersonal: p.correoPersonal || '',
         telefono: p.telefono || '',
@@ -1388,7 +1388,7 @@ function filtrarProfesionales(rows, q) {
   if (!tokens.length) return rows;
 
   return rows.filter(p => {
-    const tipo = (p.tipoPersona || 'Natural');
+    const tipo = (p.tipoPersona || 'natural');
     const hay = normTxt([
       p.nombreProfesional, p.nombre,
       p.rut,
@@ -1426,8 +1426,8 @@ function renderProfesionalesTable(rows, rolesById) {
   }
 
   const htmlRows = rows.map(p => {
-    const tipo = (p.tipoPersona || 'Natural').toLowerCase();
-    const isJ  = (tipo === 'Empresa');
+    const tipo = (p.tipoPersona || 'natural').toLowerCase();
+    const isJ  = (tipo === 'juridica');
 
     const desc = p.tieneDescuento
       ? `${formatUF(p.descuentoUF ?? 0)} UF (${p.descuentoRazon || '—'})`
@@ -2051,7 +2051,7 @@ function parseProfesionalesCsv(text) {
       rut,
       nombreProfesional,
       razonSocial: idxRazon >= 0 ? (parts[idxRazon] || '').trim() : '',
-      tipoPersona: idxTipo >= 0 ? ((parts[idxTipo] || 'Natural').trim().toLowerCase()) : 'Natural',
+      tipoPersona: idxTipo >= 0 ? ((parts[idxTipo] || 'natural').trim().toLowerCase()) : 'natural',
       correoPersonal: idxCorreoP >= 0 ? (parts[idxCorreoP] || '').trim() : '',
       telefono: idxTel >= 0 ? (parts[idxTel] || '').trim() : '',
       rutEmpresa: idxRutEmp >= 0 ? (parts[idxRutEmp] || '').trim() : '',
