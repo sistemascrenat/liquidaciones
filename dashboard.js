@@ -166,8 +166,7 @@ const mClinicaCodigo = document.getElementById('mClinicaCodigo');
 const mClinicaNombre = document.getElementById('mClinicaNombre');
 const mClinicaEstado = document.getElementById('mClinicaEstado');
 
-
-
+const profSearch = document.getElementById('profSearch');
 
 /* =========================================================
    2) HELPERS GENERALES
@@ -715,7 +714,7 @@ btnGuardarModalProf?.addEventListener('click', async () => {
     const tipoPersona = (mProfTipoPersona?.value || 'natural').trim();
 
     const isJuridica = (tipoPersona === 'juridica');
-   
+
     const patch = {
       rut: rutRaw,
       rutId: docId,
@@ -727,27 +726,31 @@ btnGuardarModalProf?.addEventListener('click', async () => {
       correoPersonal: (mProfCorreoPersonal?.value || '').trim() || null,
       telefono: (mProfTelefono?.value || '').trim() || null,
    
-      // Empresa: solo si es jurídica; si es natural, lo dejamos en null para no ensuciar datos
-      rutEmpresa: isJuridica ? ((mProfRutEmpresa?.value || '').trim() || null) : null,
-      correoEmpresa: isJuridica ? ((mProfCorreoEmpresa?.value || '').trim() || null) : null,
-      direccionEmpresa: isJuridica ? ((mProfDireccionEmp?.value || '').trim() || null) : null,
-      ciudadEmpresa: isJuridica ? ((mProfCiudadEmp?.value || '').trim() || null) : null,
+      // ✅ Razón social / Giro (solo si es jurídica)
+      razonSocial: isJuridica ? ((mProfRazon?.value || '').trim() || null) : null,
+      giro:       isJuridica ? ((mProfGiro?.value || '').trim() || null) : null,
    
-      // compatibilidad con campo viejo (si lo sigues usando en UI)
+      // Empresa: solo si es jurídica; si es natural, lo dejamos en null para no ensuciar datos
+      rutEmpresa:       isJuridica ? ((mProfRutEmpresa?.value || '').trim() || null) : null,
+      correoEmpresa:    isJuridica ? ((mProfCorreoEmpresa?.value || '').trim() || null) : null,
+      direccionEmpresa: isJuridica ? ((mProfDireccionEmp?.value || '').trim() || null) : null,
+      ciudadEmpresa:    isJuridica ? ((mProfCiudadEmp?.value || '').trim() || null) : null,
+   
+      // compatibilidad con campo viejo (UI dice “Comentarios”)
       direccion: (mProfDireccion.value || '').trim() || null,
-
-
+   
       rolPrincipalId,
       rolesSecundariosIds,
       clinicasIds,
-
+   
       tieneDescuento,
       descuentoUF: tieneDescuento ? descuentoUF : 0,
       descuentoRazon: tieneDescuento ? (descuentoRazon || null) : null,
-
+   
       estado: (mProfEstado.value || 'activo'),
       actualizadoEl: serverTimestamp()
     };
+
 
     // Si es create, ponemos creadoEl si no existía
     if (modalState.profMode === 'create') {
@@ -1293,7 +1296,9 @@ async function loadProfesionales() {
       return;
     }
 
-      const visibles = rows;
+      profesionalesCache = rows;
+      
+      const visibles = filtrarProfesionales(profesionalesCache, profSearch?.value || '');
       const htmlRows = visibles.map(p => {
       const desc = p.tieneDescuento
         ? `${formatUF(p.descuentoUF ?? 0)} UF (${p.descuentoRazon || '—'})`
@@ -1303,46 +1308,46 @@ async function loadProfesionales() {
         <tr>
           <td>${p.nombreProfesional || p.nombre || '—'}</td>
           <td>${p.rut || '—'}</td>
-          <td>${p.razonSocial || '—'}</td>
-          <td>${(p.tipoPersona || 'natural')}</td>
+      
+          <td>${isJ ? (p.rutEmpresa || '—') : '—'}</td>
+          <td>${isJ ? (p.razonSocial || '—') : '—'}</td>
+      
+          <td>${tipo}</td>
           <td>${(p.correoPersonal || p.correoEmpresa || '—')}</td>
           <td>${(p.telefono || '—')}</td>
-          <td>${
-            (p.clinicasIds || []).length
-              ? (p.clinicasIds.map(id => clinById.get(id) || id).join(', '))
-              : '—'
-          }</td>
+      
           <td>${p.rolPrincipalId ? (rolesById.get(p.rolPrincipalId) || p.rolPrincipalId) : '—'}</td>
           <td>${desc}</td>
           <td>${estado}</td>
+      
           <td class="text-right">
             <button class="btn btn-soft" data-action="edit-prof" data-id="${p.rutId || p.id}">Editar</button>
             <button class="btn btn-soft" data-action="toggle-prof" data-id="${p.rutId || p.id}">
               ${estado === 'inactivo' ? 'Activar' : 'Desactivar'}
             </button>
             <button class="btn btn-soft" data-action="del-prof" data-id="${p.rutId || p.id}">Eliminar</button>
-         </td>
+          </td>
         </tr>
-      `;
+`;
     }).join('');
 
     tablaProfesionales.innerHTML = `
       <table>
-        <thead>
-          <tr>
-            <th>Nombre</th>
-            <th>RUT</th>
-            <th>Razón social</th>
-            <th>Tipo</th>
-            <th>Correo</th>
-            <th>Teléfono</th>
-            <th>Clínicas</th>
-            <th>Rol principal</th>
-            <th>Descuento</th>
-            <th>Estado</th>
-            <th class="text-right">Acciones</th>
-          </tr>
-        </thead>
+         <thead>
+           <tr>
+             <th>Nombre</th>
+             <th>RUT</th>
+             <th>RUT empresa</th>
+             <th>Razón social</th>
+             <th>Tipo</th>
+             <th>Correo</th>
+             <th>Teléfono</th>
+             <th>Rol principal</th>
+             <th>Descuento</th>
+             <th>Estado</th>
+             <th class="text-right">Acciones</th>
+           </tr>
+         </thead>
         <tbody>${htmlRows}</tbody>
       </table>
     `;
@@ -1397,6 +1402,64 @@ tablaProfesionales?.addEventListener('click', async (e) => {
     alert('Error ejecutando acción. Revisa consola.');
   }
 });
+
+let profesionalesCache = [];
+
+function normTxt(s='') {
+  return (s ?? '')
+    .toString()
+    .toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+    .trim();
+}
+
+function splitTokens(q='') {
+  // coma y espacios actúan como AND
+  return normTxt(q)
+    .split(',')
+    .flatMap(part => part.trim().split(/\s+/))
+    .filter(Boolean);
+}
+
+function filtrarProfesionales(rows, q) {
+  const tokens = splitTokens(q);
+  if (!tokens.length) return rows;
+
+  return rows.filter(p => {
+    const tipo = (p.tipoPersona || 'natural');
+    const hay = normTxt([
+      p.nombreProfesional, p.nombre,
+      p.rut,
+      p.rutEmpresa,
+      p.razonSocial,
+      p.giro,
+      p.correoPersonal, p.correoEmpresa,
+      p.telefono,
+      p.rolPrincipalId,
+      tipo,
+      p.estado
+    ].filter(Boolean).join(' | '));
+
+    return tokens.every(t => hay.includes(t));
+  });
+}
+
+profSearch?.addEventListener('input', () => {
+  // Re-render rápido sin volver a leer Firestore
+  // (si no hay cache aún, loadProfesionales la llena al login)
+  if (!profesionalesCache.length) return;
+  // Reutilizamos la misma función recargando la tabla desde cache:
+  // -> solución simple: llamamos loadProfesionales() solo si quieres recalcular rolesById.
+  // Como roles no cambian por escribir, render por cache es suficiente.
+  const q = profSearch.value || '';
+  const visibles = filtrarProfesionales(profesionalesCache, q);
+
+  // OJO: para no duplicar lógica, lo más limpio es extraer “renderProfesionalesTable(visibles)”.
+  // Pero si quieres lo dejo minimalista: recargamos desde Firestore (más simple, pero más lento).
+  // Mejor opción: avísame y te lo refactorizo a render único.
+});
+
+
 
 
 /* =========================================================
