@@ -1378,7 +1378,7 @@ tablaProfesionales?.addEventListener('click', async (e) => {
       if (action === 'del-prof') {
         const ok = confirm(
           '¿Eliminar profesional DEFINITIVAMENTE?\n' +
-          'Esto borra el registro de la Base de DAtos y NO se puede recuperar.'
+          'Esto borra el registro de la Base de Datos y NO se puede recuperar.'
         );
         if (!ok) return;
       
