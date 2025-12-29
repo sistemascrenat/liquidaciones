@@ -196,7 +196,7 @@ main.app-main {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 22px;   /* ⬅️ MÁS AIRE */
+  margin-bottom: 32px;   /* ⬅️ MÁS AIRE */
   gap: 12px;
 }
 
