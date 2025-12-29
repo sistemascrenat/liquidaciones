@@ -375,7 +375,6 @@ tr:nth-child(even) td {
 .searchbar-wrap{
   position: relative;
   width: 100%;
-  max-width: 860px;
   margin: 0;
 }
 
@@ -423,11 +422,6 @@ tr:nth-child(even) td {
   flex-direction: column;
   align-items: stretch;
   gap: 6px;
-}
-
-.searchbar-wrap--pro{
-  flex: 1;
-  width: min(1080px, 100%);
 }
 
 /* botones a la derecha */
@@ -502,10 +496,6 @@ tr:nth-child(even) td {
 }
 
 
-.searchbar-wrap--pro{
-  max-width: 1080px;   /* ✅ 3x de 360px */
-}
-
 .searchbar-hint--right{
   text-align: right;
   margin-top: 6px;
@@ -527,9 +517,6 @@ tr:nth-child(even) td {
   .card-header-right{
     min-width: unset;
     align-items: stretch;
-  }
-  .searchbar-wrap--pro{
-    max-width: 100%;
   }
   .searchbar-hint--right{
     text-align: left;
@@ -595,12 +582,19 @@ tr:nth-child(even) td {
   background: rgba(15, 23, 42, 0.06);
 }
 
-/* versión "pro" un poco más larga (opcional) */
+
+/* ✅ Buscador más angosto y alineado (desktop) */
 .searchbar-wrap--pro{
-  width: min(520px, 52vw);
+  width: 520px;         /* <-- AJUSTA AQUÍ (ej: 480 / 520 / 560) */
+  max-width: 100%;
+  margin: 0 auto;       /* centra dentro del espacio disponible */
 }
-@media (max-width: 900px){
-  .searchbar-wrap--pro{ width: 100%; }
+
+@media (max-width: 980px){
+  .searchbar-wrap--pro{
+    width: 100%;
+    margin: 0;
+  }
 }
 
 @media (max-width: 800px) {
