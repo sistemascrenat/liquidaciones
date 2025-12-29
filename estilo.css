@@ -196,8 +196,8 @@ main.app-main {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 8px;
-  gap: 8px;
+  margin-bottom: 22px;   /* ⬅️ MÁS AIRE */
+  gap: 12px;
 }
 
 .card-title {
