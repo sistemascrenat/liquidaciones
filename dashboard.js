@@ -2183,7 +2183,9 @@ btnImportProfesionales?.addEventListener('click', async () => {
         .map(c => c.id);
 
 
-      for (const row of rows) {
+    let createdClinicas = 0;
+
+    for (const row of rows) {   
         const id = normalizaRut(row.rut);
         if (!id) {
           fail++;
@@ -2197,21 +2199,20 @@ btnImportProfesionales?.addEventListener('click', async () => {
          const rolPrincipalId = row.rolPrincipal ? `r_${slugify(row.rolPrincipal)}` : null;
          const rolesSecundariosIds = (row.rolesSecundarios || []).map(x => `r_${slugify(x)}`);
      
-         // ===============================
          // Clínicas: resolver por nombre -> ID usando precarga (byNombre / activasIds)
          // ✅ Default: si el CSV NO trae clínicas => asignar TODAS las clínicas activas
          // ===============================
          let clinicasIds = [];
          
          if ((row.clinicas || []).length) {
-           // respetar clínicas del CSV
            for (const nombreCli of row.clinicas) {
              const key = normName(nombreCli);
              let idCli = byNombre.get(key);
          
              if (!idCli) {
-               // crear nueva C###
-               idCli = await getNextClinicaCodigo();
+               // ✅ crear nueva C### SIN lecturas extra
+               idCli = nextClinicaId();
+         
                await setDoc(doc(db, 'clinicas', idCli), {
                  id: idCli,
                  codigo: idCli,
@@ -2220,53 +2221,22 @@ btnImportProfesionales?.addEventListener('click', async () => {
                  creadoEl: serverTimestamp(),
                  actualizadoEl: serverTimestamp()
                }, { merge: true });
-         
-               // 🔁 actualizar cache en memoria (para siguientes filas)
-               byNombre.set(key, idCli);
-               activasIds.push(idCli);
-         
-               // (opcional) si tú usas modalState.cacheClinicas para combos, invalídalo:
-               if (typeof modalState !== 'undefined') modalState.cacheClinicas = [];
-             }
-         
-             clinicasIds.push(idCli);
-           }
-         } else {
-           // ✅ default: todas las clínicas activas
-           clinicasIds = [...activasIds];
-         }
 
+               createdClinicas++;
          
-         if ((row.clinicas || []).length) {
-           // respetar clínicas del CSV
-           for (const nombreCli of row.clinicas) {
-             const key = normName(nombreCli);
-             let idCli = byNombre.get(key);
-         
-             if (!idCli) {
-               // crear nueva C###
-               idCli = await getNextClinicaCodigo();
-               await setDoc(doc(db, 'clinicas', idCli), {
-                 id: idCli,
-                 codigo: idCli,
-                 nombre: nombreCli,
-                 estado: 'activa',
-                 creadoEl: serverTimestamp(),
-                 actualizadoEl: serverTimestamp()
-               }, { merge: true });
+               // actualizar caches en memoria
                byNombre.set(key, idCli);
-               modalState.cacheClinicas = [];
                activasIds.push(idCli);
              }
          
              clinicasIds.push(idCli);
            }
          } else {
-           // ✅ default: todas las clínicas activas
            clinicasIds = [...activasIds];
          }
 
-         
+
+                
          await setDoc(docRef, {
            rut: row.rut,
            rutId: id,
@@ -2311,8 +2281,15 @@ btnImportProfesionales?.addEventListener('click', async () => {
         `Importación completada. OK: ${ok}, con problemas: ${fail}.`;
       importProfResultado.style.color = 'var(--ink)';
 
+      // ✅ Si se crearon clínicas nuevas, refrescar caches/vistas
+      if (createdClinicas > 0) {
+        modalState.cacheClinicas = [];
+        await ensureRolesClinicasLoaded();
+        await loadClinicas();
+      }
+      
       // Recargar tabla de profesionales para ver los datos nuevos
-      loadProfesionales();
+      await loadProfesionales();
 
     } catch (err) {
       console.error('Error en importación CSV:', err);
@@ -2495,6 +2472,20 @@ btnImportClinicas?.addEventListener('click', async () => {
   reader.readAsText(file, 'utf-8');
 });
 
+// ===============================
+// ✅ NUEVO: contador local para crear C### sin nuevas lecturas
+// ===============================
+let maxNum = 0;
+for (const c of existentes) {
+  const m = /^C(\d{3})$/.exec((c.id || '').toUpperCase());
+  if (m) maxNum = Math.max(maxNum, Number(m[1]));
+}
+const nextClinicaId = () => {
+  maxNum += 1;
+  return `C${String(maxNum).padStart(3, '0')}`;
+};
+
+
 
 /* ================== IMPORTAR PROCEDIMIENTOS + TARIFAS DESDE CSV ================== */
 btnImportTarifas?.addEventListener('click', async () => {
@@ -2568,6 +2559,19 @@ btnImportTarifas?.addEventListener('click', async () => {
         clinicaById.add(d.id);
         if (data.nombre) clinicaByNombre.set(normName(data.nombre), d.id);
       });
+      
+      // ===============================
+      // ✅ NUEVO: contador local C### basado en cache inicial (sin lecturas extra)
+      // ===============================
+      let maxNum = 0;
+      for (const id of clinicaById) {
+        const m = /^C(\d{3})$/.exec(String(id).toUpperCase());
+        if (m) maxNum = Math.max(maxNum, Number(m[1]));
+      }
+      const nextClinicaId = () => {
+        maxNum += 1;
+        return `C${String(maxNum).padStart(3, '0')}`;
+      };
 
       let upsertProc = 0;
       let upsertTar = 0;
@@ -2603,7 +2607,7 @@ btnImportTarifas?.addEventListener('click', async () => {
           clinicaId = clinicaByNombre.get(normName(rawClin)) || null;
 
           if (!clinicaId) {
-            clinicaId = await getNextClinicaCodigo(); // C###
+            clinicaId = nextClinicaId(); 
             batch.set(doc(db, 'clinicas', clinicaId), {
               id: clinicaId,
               codigo: clinicaId,
