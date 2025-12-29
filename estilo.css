@@ -438,26 +438,39 @@ tr:nth-child(even) td {
    Header Profesionales (1 línea)
 ========================= */
 .card-header--pro{
+  display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 12px;
 }
 
 .card-header-left{
-  min-width: 220px; /* asegura que el título no se achique tanto */
+  min-width: 220px;
+}
+
+/* ✅ el buscador va aquí y se expande */
+.card-header-center{
+  flex: 1;               /* ocupa el espacio disponible */
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;  /* el input toma todo el ancho */
+  gap: 6px;
+}
+
+/* ✅ botones siempre a la derecha */
+.card-header-right{
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  min-width: 420px;      /* ajusta si quieres */
 }
 
 .card-header-actions{
-  flex: 1;                 /* botones ocupan el centro */
-  justify-content: center; /* quedan centrados */
-  flex-wrap: nowrap;       /* 🔥 clave: evita que bajen (desktop) */
+  display: flex;
+  gap: 8px;
+  flex-wrap: nowrap;     /* no baja en desktop */
 }
 
-.card-header-right{
-  min-width: 320px;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-}
 
 .searchbar-wrap--pro{
   max-width: 1080px;   /* ✅ 3x de 360px */
