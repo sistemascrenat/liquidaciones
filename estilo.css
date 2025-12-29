@@ -9,6 +9,8 @@
   --card: #ffffff;
   --border: #d1d5db;
   --danger: #e11d48;
+  --panel: #ffffff;
+
 }
 
 * {
@@ -385,7 +387,7 @@ tr:nth-child(even) td {
   border-radius: 14px;
 }
 
-/* botón “dentro” del input */
+/* botón “dentro” del input (única definición) */
 .searchbar-clear{
   position: absolute;
   right: 10px;
@@ -396,33 +398,36 @@ tr:nth-child(even) td {
   align-items: center;
   justify-content: center;
 
-  width: 34px;
-  height: 34px;
+  width: 36px;
+  height: 36px;
 
-  border-radius: 12px;
+  border-radius: 10px;
   border: 1px solid var(--border);
   background: #fff;
 
-  font-size: 16px;
+  font-size: 14px;
   line-height: 1;
   padding: 0;
 
   cursor: pointer;
 }
-
-/* El segundo bloque (donde está el buscador + botones) debe crecer */
-.card-header--pro > .card-header-left:last-child{
-  flex: 1;
-  display: flex;
-  align-items: center;
-  gap: 18px;
+.searchbar-clear:hover{
+  background: rgba(2, 6, 23, .05);
 }
 
-/* buscador grande */
+
+/* El segundo bloque (donde está el buscador + botones) debe crecer */
+.card-header-center{
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+}
+
 .searchbar-wrap--pro{
-  flex: 1;               /* ✅ hace que sea realmente largo */
-  max-width: none;       /* ✅ quita el tope */
-  min-width: 720px;      /* ✅ aprox 3x del chico (ajusta si quieres) */
+  flex: 1;
+  width: min(1080px, 100%);
 }
 
 /* botones a la derecha */
@@ -451,29 +456,6 @@ tr:nth-child(even) td {
   opacity: .65;
   font-size: 16px;
   pointer-events: none;
-}
-
-.searchbar-clear{
-  display: flex;                 /* ✅ CLAVE */
-  align-items: center;           /* ✅ centra vertical */
-  justify-content: center;       /* ✅ centra horizontal */
-
-  width: 36px;
-  height: 36px;
-
-  border: 1px solid var(--border);
-  background: #fff;
-  border-radius: 10px;
-
-  font-size: 16px;
-  line-height: 1;                /* evita desplazamientos raros */
-  padding: 0;
-
-  cursor: pointer;
-}
-
-.searchbar-clear:hover{
-  background: rgba(2, 6, 23, .05);
 }
 
 .searchbar-hint{
