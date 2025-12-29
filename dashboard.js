@@ -872,7 +872,6 @@ async function exportarProfesionalesXLSX() {
 
   // Armar filas
   const rows = profesionales
-    .filter(p => !p.eliminado) // si más adelante usas soft delete
     .map(p => {
       const tipo = p.tipoPersona || 'natural';
 
@@ -1294,7 +1293,7 @@ async function loadProfesionales() {
       return;
     }
 
-      const visibles = rows.filter(p => !p.eliminado);
+      const visibles = rows;
       const htmlRows = visibles.map(p => {
       const desc = p.tieneDescuento
         ? `${formatUF(p.descuentoUF ?? 0)} UF (${p.descuentoRazon || '—'})`
@@ -1377,20 +1376,18 @@ tablaProfesionales?.addEventListener('click', async (e) => {
     }
 
       if (action === 'del-prof') {
-      const ok = confirm('¿Eliminar profesional? (Se marcará como eliminado e inactivo. No se borra histórico).');
-      if (!ok) return;
+        const ok = confirm(
+          '¿Eliminar profesional DEFINITIVAMENTE?\n' +
+          'Esto borra el registro de Firestore y NO se puede deshacer.'
+        );
+        if (!ok) return;
+      
+        await deleteDoc(doc(db, 'profesionales', rutId));
+      
+        await loadProfesionales();
+        return;
+      }
 
-      const ref = doc(db, 'profesionales', rutId);
-      await setDoc(ref, {
-        eliminado: true,
-        eliminadoEl: serverTimestamp(),
-        estado: 'inactivo',
-        actualizadoEl: serverTimestamp()
-      }, { merge: true });
-
-      await loadProfesionales();
-      return;
-    }
 
 
     // Si llega aquí, es una acción no soportada
