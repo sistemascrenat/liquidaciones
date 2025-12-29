@@ -254,8 +254,8 @@ function descargarPlantillaModelo() {
 
   const wsProfesionales = XLSX.utils.aoa_to_sheet(profesionalesHeaders);
   XLSX.utils.sheet_add_aoa(wsProfesionales, [[
-    "16128922-1",
-    "Ignacio Pastor",
+    "99999999-1",
+    "Francisco Pérez",
     "",
     "",
     "",
