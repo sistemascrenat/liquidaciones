@@ -379,8 +379,7 @@
         <div class="grid-2">
           <div class="form-field">
             <label>RUT *</label>
-            <input id="mProfRut" type="text" placeholder="16128922-1">
-            <div class="hint">Se usa como ID (normalizado). No se recomienda cambiarlo al editar.</div>
+            <input id="mProfRut" type="text" placeholder="20999777-1">
           </div>
 
           <div class="form-field">
@@ -456,7 +455,6 @@
           <div class="form-field">
             <label>Rol principal</label>
             <select id="mProfRolPrincipal" class="badge"></select>
-            <div class="hint">Se carga desde la colección <code>roles</code>.</div>
           </div>
 
           <div class="form-field">
@@ -486,9 +484,8 @@
           <div class="form-field">
             <label>
               <input id="mProfTieneDesc" type="checkbox">
-              Tiene descuento
+              Posee Descuento
             </label>
-            <div class="hint">Si está activo, se guardará monto + razón.</div>
           </div>
 
           <div class="form-field">
@@ -498,7 +495,7 @@
         </div>
 
         <div class="form-field">
-          <label>Razón descuento</label>
+          <label>Motivo del descuento</label>
           <input id="mProfDescRazon" type="text" placeholder="Opcional">
         </div>
 
@@ -515,8 +512,8 @@
     <div id="modalProcedimiento" class="modal" role="dialog" aria-modal="true" aria-labelledby="modalProcTitle" style="display:none;">
       <div class="modal-header">
         <div>
-          <div id="modalProcTitle" class="modal-title">Procedimiento</div>
-          <div id="modalProcSubtitle" class="modal-subtitle">Crear procedimiento</div>
+          <div id="modalProcTitle" class="modal-title">Procedimiento Ambulatorio</div>
+          <div id="modalProcSubtitle" class="modal-subtitle">Crear procedimiento Ambulatorio</div>
         </div>
         <button type="button" class="modal-close" id="btnCerrarModalProc" aria-label="Cerrar">✕</button>
       </div>
@@ -545,7 +542,7 @@
           </div>
 
           <div class="form-field">
-            <label>Valor base (CLP)</label>
+            <label>Valor base</label>
             <input id="mProcValorBase" type="text" placeholder="0">
           </div>
         </div>
@@ -576,7 +573,6 @@
           <div class="form-field">
             <label>Nombre del rol *</label>
             <input id="mRolNombre" type="text" placeholder="Ej: Cirujano">
-            <div class="hint">Este nombre es lo visible en el sistema.</div>
           </div>
   
           <div class="form-field">
