@@ -2161,6 +2161,28 @@ btnImportProfesionales?.addEventListener('click', async () => {
       let ok = 0;
       let fail = 0;
 
+      // ===============================
+      // Clínicas: precarga 1 sola vez (evita getDocs dentro del loop)
+      // ===============================
+      const normName = (s='') => s.toString().trim().toLowerCase()
+        .normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+      
+      const existentes = [];
+      const snapCliAll = await getDocs(collection(db, 'clinicas'));
+      snapCliAll.forEach(d => existentes.push({ id: d.id, ...d.data() }));
+      
+      // Map: nombreNormalizado -> idClinica
+      const byNombre = new Map();
+      for (const c of existentes) {
+        if (c.nombre) byNombre.set(normName(c.nombre), c.id);
+      }
+      
+      // IDs de clínicas activas (default cuando el CSV no trae clínicas)
+      const activasIds = existentes
+        .filter(c => (c.estado || 'activa') === 'activa')
+        .map(c => c.id);
+
+
       for (const row of rows) {
         const id = normalizaRut(row.rut);
         if (!id) {
@@ -2178,21 +2200,46 @@ btnImportProfesionales?.addEventListener('click', async () => {
          // Clínicas: resolver por nombre -> C### (y crear si no existe)
          // ✅ Default pedido: si el CSV NO trae clínicas => asignar TODAS las clínicas activas
          let clinicasIds = [];
+     
+         // ===============================
+         // Clínicas: resolver por nombre -> ID usando precarga (byNombre / activasIds)
+         // ✅ Default: si el CSV NO trae clínicas => asignar TODAS las clínicas activas
+         // ===============================
+         let clinicasIds = [];
          
-         // cargar clínicas actuales 1 vez (para este profesional) y mapear nombre -> id
-         const snapCli = await getDocs(collection(db, 'clinicas'));
-         const existentes = [];
-         snapCli.forEach(d => existentes.push({ id: d.id, ...d.data() }));
+         if ((row.clinicas || []).length) {
+           // respetar clínicas del CSV
+           for (const nombreCli of row.clinicas) {
+             const key = normName(nombreCli);
+             let idCli = byNombre.get(key);
          
-         const normName = (s='') => s.toString().trim().toLowerCase()
-           .normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+             if (!idCli) {
+               // crear nueva C###
+               idCli = await getNextClinicaCodigo();
+               await setDoc(doc(db, 'clinicas', idCli), {
+                 id: idCli,
+                 codigo: idCli,
+                 nombre: nombreCli,
+                 estado: 'activa',
+                 creadoEl: serverTimestamp(),
+                 actualizadoEl: serverTimestamp()
+               }, { merge: true });
          
-         const byNombre = new Map();
-         for (const c of existentes) if (c.nombre) byNombre.set(normName(c.nombre), c.id);
+               // 🔁 actualizar cache en memoria (para siguientes filas)
+               byNombre.set(key, idCli);
+               activasIds.push(idCli);
          
-         const activasIds = existentes
-           .filter(c => (c.estado || 'activa') === 'activa')
-           .map(c => c.id);
+               // (opcional) si tú usas modalState.cacheClinicas para combos, invalídalo:
+               if (typeof modalState !== 'undefined') modalState.cacheClinicas = [];
+             }
+         
+             clinicasIds.push(idCli);
+           }
+         } else {
+           // ✅ default: todas las clínicas activas
+           clinicasIds = [...activasIds];
+         }
+
          
          if ((row.clinicas || []).length) {
            // respetar clínicas del CSV
