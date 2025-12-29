@@ -1298,65 +1298,21 @@ async function loadProfesionales() {
 
       profesionalesCache = rows;
       
-      const visibles = filtrarProfesionales(profesionalesCache, profSearch?.value || '');
-      const htmlRows = visibles.map(p => {
-        const tipo = (p.tipoPersona || 'natural').toLowerCase();   // ✅ define tipo
-        const isJ  = (tipo === 'juridica');                        // ✅ define isJ
+      // Render inicial (respeta lo que haya escrito el usuario)
+      const q = profSearch?.value || '';
+      const visibles = filtrarProfesionales(profesionalesCache, q);
+      renderProfesionalesTable(visibles, rolesById);
       
-        const desc = p.tieneDescuento
-          ? `${formatUF(p.descuentoUF ?? 0)} UF (${p.descuentoRazon || '—'})`
-          : 'No';
-      
-        const estado = p.estado || 'activo';
-      
-        return `
-          <tr>
-            <td>${p.nombreProfesional || p.nombre || '—'}</td>
-            <td>${p.rut || '—'}</td>
-      
-            <td>${isJ ? (p.rutEmpresa || '—') : '—'}</td>
-            <td>${isJ ? (p.razonSocial || '—') : '—'}</td>
-      
-            <td>${tipo}</td>
-            <td>${(p.correoPersonal || p.correoEmpresa || '—')}</td>
-            <td>${(p.telefono || '—')}</td>
-      
-            <td>${p.rolPrincipalId ? (rolesById.get(p.rolPrincipalId) || p.rolPrincipalId) : '—'}</td>
-            <td>${desc}</td>
-            <td>${estado}</td>
-      
-            <td class="text-right">
-              <button class="btn btn-soft" data-action="edit-prof" data-id="${p.rutId || p.id}">Editar</button>
-              <button class="btn btn-soft" data-action="toggle-prof" data-id="${p.rutId || p.id}">
-                ${estado === 'inactivo' ? 'Activar' : 'Desactivar'}
-              </button>
-              <button class="btn btn-soft" data-action="del-prof" data-id="${p.rutId || p.id}">Eliminar</button>
-            </td>
-          </tr>
-        `;
-      }).join('');
+      // Hint + botón limpiar
+      if (profSearchHint) {
+        profSearchHint.textContent = (q.trim())
+          ? `Mostrando ${visibles.length} de ${profesionalesCache.length}.`
+          : `Total: ${profesionalesCache.length}.`;
+      }
+      if (profSearchClear) {
+        profSearchClear.style.display = (q.trim()) ? 'inline-flex' : 'none';
+      }
 
-
-    tablaProfesionales.innerHTML = `
-      <table>
-         <thead>
-           <tr>
-             <th>Nombre</th>
-             <th>RUT</th>
-             <th>RUT empresa</th>
-             <th>Razón social</th>
-             <th>Tipo</th>
-             <th>Correo</th>
-             <th>Teléfono</th>
-             <th>Rol principal</th>
-             <th>Descuento</th>
-             <th>Estado</th>
-             <th class="text-right">Acciones</th>
-           </tr>
-         </thead>
-        <tbody>${htmlRows}</tbody>
-      </table>
-    `;
   } catch (err) {
     console.error('Error cargando profesionales:', err);
     tablaProfesionales.innerHTML = `<p style="color:#e11d48;font-size:13px;">
@@ -1450,20 +1406,116 @@ function filtrarProfesionales(rows, q) {
   });
 }
 
-profSearch?.addEventListener('input', () => {
-  // Re-render rápido sin volver a leer Firestore
-  // (si no hay cache aún, loadProfesionales la llena al login)
+const profSearchClear = document.getElementById('profSearchClear');
+const profSearchHint  = document.getElementById('profSearchHint');
+
+/**
+ * Render único de la tabla de profesionales (desde un array ya filtrado)
+ * - NO lee Firestore
+ * - Usa caches de roles/clinicas ya cargados
+ */
+function renderProfesionalesTable(rows, rolesById) {
+  if (!tablaProfesionales) return;
+
+  if (!rows?.length) {
+    tablaProfesionales.innerHTML = `
+      <p style="font-size:13px;color:var(--muted);">
+        No hay resultados para tu búsqueda.
+      </p>`;
+    return;
+  }
+
+  const htmlRows = rows.map(p => {
+    const tipo = (p.tipoPersona || 'natural').toLowerCase();
+    const isJ  = (tipo === 'juridica');
+
+    const desc = p.tieneDescuento
+      ? `${formatUF(p.descuentoUF ?? 0)} UF (${p.descuentoRazon || '—'})`
+      : 'No';
+
+    const estado = p.estado || 'activo';
+
+    return `
+      <tr>
+        <td>${p.nombreProfesional || p.nombre || '—'}</td>
+        <td>${p.rut || '—'}</td>
+
+        <td>${isJ ? (p.rutEmpresa || '—') : '—'}</td>
+        <td>${isJ ? (p.razonSocial || '—') : '—'}</td>
+
+        <td>${tipo}</td>
+        <td>${(p.correoPersonal || p.correoEmpresa || '—')}</td>
+        <td>${(p.telefono || '—')}</td>
+
+        <td>${p.rolPrincipalId ? (rolesById.get(p.rolPrincipalId) || p.rolPrincipalId) : '—'}</td>
+        <td>${desc}</td>
+        <td>${estado}</td>
+
+        <td class="text-right">
+          <button class="btn btn-soft" data-action="edit-prof" data-id="${p.rutId || p.id}">Editar</button>
+          <button class="btn btn-soft" data-action="toggle-prof" data-id="${p.rutId || p.id}">
+            ${estado === 'inactivo' ? 'Activar' : 'Desactivar'}
+          </button>
+          <button class="btn btn-soft" data-action="del-prof" data-id="${p.rutId || p.id}">Eliminar</button>
+        </td>
+      </tr>
+    `;
+  }).join('');
+
+  tablaProfesionales.innerHTML = `
+    <table>
+      <thead>
+        <tr>
+          <th>Nombre</th>
+          <th>RUT</th>
+          <th>RUT empresa</th>
+          <th>Razón social</th>
+          <th>Tipo</th>
+          <th>Correo</th>
+          <th>Teléfono</th>
+          <th>Rol principal</th>
+          <th>Descuento</th>
+          <th>Estado</th>
+          <th class="text-right">Acciones</th>
+        </tr>
+      </thead>
+      <tbody>${htmlRows}</tbody>
+    </table>
+  `;
+}
+
+profSearch?.addEventListener('input', async () => {
+  // Si aún no hay cache (por ejemplo, justo al iniciar), no hacemos nada.
   if (!profesionalesCache.length) return;
-  // Reutilizamos la misma función recargando la tabla desde cache:
-  // -> solución simple: llamamos loadProfesionales() solo si quieres recalcular rolesById.
-  // Como roles no cambian por escribir, render por cache es suficiente.
+
+  // Asegura roles cacheados (por si abrieron vista antes de cargar roles)
+  await ensureRolesClinicasLoaded();
+  const rolesById = new Map(modalState.cacheRoles.map(r => [r.id, (r.nombre || r.id)]));
+
   const q = profSearch.value || '';
   const visibles = filtrarProfesionales(profesionalesCache, q);
 
-  // OJO: para no duplicar lógica, lo más limpio es extraer “renderProfesionalesTable(visibles)”.
-  // Pero si quieres lo dejo minimalista: recargamos desde Firestore (más simple, pero más lento).
-  // Mejor opción: avísame y te lo refactorizo a render único.
+  renderProfesionalesTable(visibles, rolesById);
+
+  // Hint + botón limpiar
+  if (profSearchHint) {
+    profSearchHint.textContent = (q.trim())
+      ? `Mostrando ${visibles.length} de ${profesionalesCache.length}.`
+      : `Total: ${profesionalesCache.length}.`;
+  }
+  if (profSearchClear) {
+    profSearchClear.style.display = (q.trim()) ? 'inline-flex' : 'none';
+  }
 });
+
+// Botón X (limpiar)
+profSearchClear?.addEventListener('click', async () => {
+  if (!profSearch) return;
+  profSearch.value = '';
+  profSearch.dispatchEvent(new Event('input'));
+  profSearch.focus();
+});
+
 
 
 
