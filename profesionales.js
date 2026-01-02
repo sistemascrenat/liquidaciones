@@ -475,12 +475,20 @@ function rolesMini(p){
     .map(roleNameById)
     .filter(Boolean);
 
-  const parts = [];
-  if(pri) parts.push(`ROL PRINCIPAL: <b>${escapeHtml(pri)}</b>`);
-  if(secs.length) parts.push(`OTROS ROLES: ${secs.map(x=>`<span class="pill">${escapeHtml(x)}</span>`).join(' ')}`);
+  if(!pri && !secs.length) return `<span class="muted">—</span>`;
 
-  if(!parts.length) return `<span class="muted">—</span>`;
-  return parts.join(' <span class="dot">·</span> ');
+  const priHtml = pri ? `<b>${escapeHtml(pri)}</b>` : `<span class="muted">—</span>`;
+  const secsHtml = secs.length
+    ? secs.map(x=> `<b>${escapeHtml(x)}</b>`).join(' · ')
+    : `<span class="muted">—</span>`;
+
+  return `
+    <span class="mini">
+      🧩 <span class="muted">ROL PRINCIPAL:</span> ${priHtml}
+      <span class="dot">·</span>
+      <span class="muted">ROLES SECUNDARIOS:</span> ${secsHtml}
+    </span>
+  `;
 }
 
 function descuentoMini(p){
