@@ -37,10 +37,12 @@ const state = {
     clinicaId: null,
     tipoPaciente: 'particular',
     // data
+    precio: 0,      // 👈 NUEVO: valor impuesto / venta
     hmqPorRol: {},  // {roleId: montoNumber}
     dp: 0,
     ins: 0
   }
+
 };
 
 const $ = (id)=> document.getElementById(id);
@@ -196,20 +198,24 @@ async function loadAll(){
         for (const tipoPaciente of Object.keys(pacientes)) {
           const nodo = pacientes[tipoPaciente] || {};
           const honorarios = (nodo.honorarios && typeof nodo.honorarios === 'object') ? nodo.honorarios : {};
+          const precio = Number(nodo.precio ?? 0) || 0; // 👈 NUEVO
           const dp = Number(nodo.derechosPabellon ?? 0) || 0;
           const ins = Number(nodo.insumos ?? 0) || 0;
-
+          
           const hmq = sumHmq(honorarios);
-          const total = hmq + dp + ins;
-          const hasAny = (hmq > 0) || (dp > 0) || (ins > 0);
-
+          const costo = hmq + dp + ins;            // 👈 costo real
+          const utilidad = (precio || 0) - costo;  // 👈 utilidad
+          const hasAny = (precio > 0) || (hmq > 0) || (dp > 0) || (ins > 0);
+          
           arr.push({
             id: `${clinicaId}_${(tipoPaciente||'').toLowerCase()}`,
             clinicaId,
             clinicaNombre: state.clinicasMap.get(clinicaId) || clinicaId || '(Sin clínica)',
             tipoPaciente: (tipoPaciente || '').toLowerCase(),
-            honorarios, // 👈 clave para export y para re-editar sin re-leer doc
-            hmq, dp, ins, total,
+            honorarios,
+            precio, // 👈
+            hmq, dp, ins,
+            costo, utilidad, // 👈
             hasAny
           });
         }
@@ -322,12 +328,29 @@ function tarifaChips(p){
   const chips = shown.map(t=>{
     const clin = t.clinicaNombre || t.clinicaId || 'CLÍNICA';
     const pac = (t.tipoPaciente || '').toUpperCase();
+  
+    const precio = Number(t.precio || 0) || 0;
+    const utilidad = Number(t.utilidad || 0) || 0;
+  
+    // Si no hay precio, lo tratamos como pendiente (aunque existan costos)
+    if(precio <= 0){
+      return `
+        <span class="pill" title="${escapeHtml(clin)} · ${escapeHtml(pac)}">
+          ${escapeHtml(clin)} · ${escapeHtml(pac)} · <b>PRECIO: PENDIENTE</b>
+        </span>
+      `;
+    }
+  
+    const utilTxt = `Utilidad: ${clp(utilidad)}`;
+  
     return `
-      <span class="pill" title="${escapeHtml(clin)} · ${escapeHtml(pac)}">
-        ${escapeHtml(clin)} · ${escapeHtml(pac)} · <b>${clp(t.total)}</b>
+      <span class="pill" title="${escapeHtml(clin)} · ${escapeHtml(pac)} · ${escapeHtml(utilTxt)}">
+        ${escapeHtml(clin)} · ${escapeHtml(pac)} · <b>${clp(precio)}</b>
+        <span class="muted" style="margin-left:8px;">(${escapeHtml(utilTxt)})</span>
       </span>
     `;
   }).join(' ');
+
 
   const more = rest > 0 ? ` <span class="pill">+${rest}</span>` : '';
 
@@ -563,22 +586,45 @@ function computeTarTotals(){
   const hmq = sumHmq(state.activeTar.hmqPorRol);
   const dp = Number(state.activeTar.dp || 0) || 0;
   const ins = Number(state.activeTar.ins || 0) || 0;
-  const total = hmq + dp + ins;
-
+  const costo = hmq + dp + ins;
+  
+  const precio = Number(state.activeTar.precio || 0) || 0;
+  const utilidad = precio - costo;
+  
   if($('hmqPill')) $('hmqPill').textContent = `HMQ: ${clp(hmq)}`;
-
+  
   $('tarTotales').innerHTML = `
     HMQ: <b>${clp(hmq)}</b><br/>
     DP: <b>${clp(dp)}</b><br/>
     INS: <b>${clp(ins)}</b><br/>
-    TOTAL: <b>${clp(total)}</b>
+    COSTO TOTAL: <b>${clp(costo)}</b><br/>
+    <div style="height:6px;"></div>
+    PRECIO: <b>${precio > 0 ? clp(precio) : '—'}</b>
   `;
-
+  
   const clinId = state.activeTar.clinicaId || '';
   const clinName = state.clinicasMap.get(clinId) || clinId || '(Clínica)';
   const tp = tipoPacienteLabel(state.activeTar.tipoPaciente);
+  
+  if(precio > 0){
+    $('tarResumen').textContent = `${clinName} · ${tp} · Precio ${clp(precio)} · Costo ${clp(costo)}`;
+  } else {
+    $('tarResumen').textContent = `${clinName} · ${tp} · Precio: PENDIENTE · Costo ${clp(costo)}`;
+  }
+  
+  // Utilidad + margen
+  if($('tarUtilidad')){
+    $('tarUtilidad').textContent = (precio > 0) ? `${clp(utilidad)}` : '—';
+  }
+  if($('tarMargen')){
+    if(precio > 0){
+      const margen = (utilidad / precio) * 100;
+      $('tarMargen').textContent = `Margen: ${margen.toFixed(1)}%`;
+    } else {
+      $('tarMargen').textContent = '';
+    }
+  }
 
-  $('tarResumen').textContent = `${clinName} · ${tp} · ${clp(total)}`;
 
   if($('tarHint')){
     $('tarHint').textContent =
@@ -608,8 +654,10 @@ async function loadTarifarioIntoState(procId, clinicaId, tipoPaciente){
     if (nodo){
       const honorarios = (nodo.honorarios && typeof nodo.honorarios === 'object') ? nodo.honorarios : {};
       state.activeTar.hmqPorRol = { ...honorarios };
+      state.activeTar.precio = Number(nodo.precio ?? 0) || 0; // 👈 NUEVO
       state.activeTar.dp = Number(nodo.derechosPabellon ?? 0) || 0;
       state.activeTar.ins = Number(nodo.insumos ?? 0) || 0;
+
     }
   }
 
@@ -620,9 +668,11 @@ async function loadTarifarioIntoState(procId, clinicaId, tipoPaciente){
     inp.value = (n > 0) ? clp(n) : '';
   });
 
-  // dp/ins
+  // precio / dp / ins
+  $('tarPrecio').value = (state.activeTar.precio > 0) ? clp(state.activeTar.precio) : '';
   $('tarDP').value = (state.activeTar.dp > 0) ? clp(state.activeTar.dp) : '';
   $('tarINS').value = (state.activeTar.ins > 0) ? clp(state.activeTar.ins) : '';
+
 
   computeTarTotals();
 }
@@ -643,9 +693,11 @@ function openTarModal(proc){
   state.activeTar.procId = proc.id;
   state.activeTar.clinicaId = firstClin;
   state.activeTar.tipoPaciente = 'particular';
+  state.activeTar.precio = 0; // 👈
   state.activeTar.hmqPorRol = {};
   state.activeTar.dp = 0;
   state.activeTar.ins = 0;
+
 
   // wire money inputs roles
   $('tarRolesList').querySelectorAll('input[data-role-money]').forEach(inp=>{
@@ -656,11 +708,16 @@ function openTarModal(proc){
     });
   });
 
+  wireMoneyInput($('tarPrecio'), (n)=>{
+    state.activeTar.precio = Number(n || 0) || 0;
+    computeTarTotals();
+  });
+  
   wireMoneyInput($('tarDP'), (n)=>{
     state.activeTar.dp = Number(n || 0) || 0;
     computeTarTotals();
   });
-
+  
   wireMoneyInput($('tarINS'), (n)=>{
     state.activeTar.ins = Number(n || 0) || 0;
     computeTarTotals();
@@ -705,6 +762,7 @@ async function saveTarifario(){
     if(n > 0) honorarios[k] = n;
   }
 
+  const precio = Number(state.activeTar.precio || 0) || 0;
   const dp = Number(state.activeTar.dp || 0) || 0;
   const ins = Number(state.activeTar.ins || 0) || 0;
 
@@ -713,6 +771,7 @@ async function saveTarifario(){
   // escribir SOLO la rama, sin pisar el resto del doc
   await updateDoc(procRef, {
     [`tarifas.${clinicaId}.pacientes.${tipoPaciente}`]: {
+      precio, // 👈 NUEVO
       honorarios,
       derechosPabellon: dp,
       insumos: ins,
@@ -750,6 +809,7 @@ function plantillaCSV(){
     'codigo','nombre','estado',
     'rolesIds',
     'clinicaId','tipoPaciente',
+    'precio',      // 👈
     'dp','ins',
     ...roleCols
   ];
@@ -761,6 +821,7 @@ function plantillaCSV(){
     rolesIds: 'r_cirujano|r_anestesista|r_arsenalera|r_asistente_cirujano|r_ayudante_1|r_ayudante_2',
     clinicaId: 'C002',
     tipoPaciente: 'particular',
+    precio: '4500000',
     dp: '1760500',
     ins: '924630'
   };
@@ -783,10 +844,10 @@ function exportCSV(){
     'codigo','nombre','estado',
     'rolesIds',
     'clinicaId','clinicaNombre','tipoPaciente',
-    'dp','ins','hmq_total','total',
+    'precio', 'costo', 'utilidad',   // 👈
+    'dp','ins','hmq_total',
     ...roleCols
   ];
-
   const items = [];
 
   for(const p of state.all){
@@ -816,8 +877,10 @@ function exportCSV(){
       const hmq_total = sumHmq(honorarios);
       const dp = Number(t.dp ?? 0) || 0;
       const ins = Number(t.ins ?? 0) || 0;
-      const total = hmq_total + dp + ins;
-
+      const costo = hmq_total + dp + ins;
+      const precio = Number(t.precio || 0) || 0;
+      const utilidad = precio - costo;
+      
       const row = {
         codigo: p.codigo,
         nombre: p.nombre,
@@ -826,10 +889,12 @@ function exportCSV(){
         clinicaId: t.clinicaId,
         clinicaNombre: t.clinicaNombre || '',
         tipoPaciente: t.tipoPaciente,
+        precio: String(precio),
+        costo: String(costo),
+        utilidad: String(utilidad),
         dp: String(dp),
         ins: String(ins),
-        hmq_total: String(hmq_total),
-        total: String(total)
+        hmq_total: String(hmq_total)
       };
 
       for(const r of state.rolesCatalog){
@@ -864,6 +929,7 @@ async function importCSV(file){
     rolesIds: idx('rolesids'),
     clinicaId: idx('clinicaid'),
     tipoPaciente: idx('tipopaciente'),
+    precio: idx('precio'), // 👈
     dp: idx('dp'),
     ins: idx('ins')
   };
@@ -914,6 +980,7 @@ async function importCSV(file){
     const tipoPaciente = (cleanReminder(I.tipoPaciente>=0 ? row[I.tipoPaciente] : '') || '').toLowerCase();
 
     if(clinicaId && tipoPaciente){
+      const precio = Number(cleanReminder(I.precio>=0 ? row[I.precio] : '0') || 0) || 0;
       const dp = Number(cleanReminder(I.dp>=0 ? row[I.dp] : '0') || 0) || 0;
       const ins = Number(cleanReminder(I.ins>=0 ? row[I.ins] : '0') || 0) || 0;
 
@@ -930,6 +997,7 @@ async function importCSV(file){
 
       await updateDoc(procRef, {
         [`tarifas.${clinicaId}.pacientes.${tipoPaciente}`]: {
+          precio, // 👈
           honorarios,
           derechosPabellon: dp,
           insumos: ins,
