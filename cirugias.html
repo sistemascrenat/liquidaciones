@@ -164,10 +164,15 @@
 
             <div class="grid" style="grid-template-columns: 1fr; gap:10px;">
               <div>
+                <label>Precio (valor impuesto)</label>
+                <input id="tarPrecio" inputmode="numeric" placeholder="0"/>
+              </div>
+            
+              <div>
                 <label>Derechos de pabellón</label>
                 <input id="tarDP" inputmode="numeric" placeholder="0"/>
               </div>
-
+            
               <div>
                 <label>Insumos</label>
                 <input id="tarINS" inputmode="numeric" placeholder="0"/>
@@ -185,6 +190,13 @@
               <div class="mini muted" style="margin-bottom:6px;">Resumen</div>
               <div id="tarResumen" style="font-weight:900;"></div>
             </div>
+            
+            <div class="card" style="padding:12px; border-radius:14px;">
+              <div class="mini muted" style="margin-bottom:6px;">Utilidad</div>
+              <div id="tarUtilidad" style="font-weight:900;"></div>
+              <div class="mini muted" id="tarMargen" style="margin-top:6px;"></div>
+            </div>
+
             
           </section>
         </div>
