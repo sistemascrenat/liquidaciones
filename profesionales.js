@@ -540,7 +540,7 @@ function profEmpresaBlock(p){
   if(isJ && p.nombreProfesional){
     subLines.push(`<span>PROFESIONAL: <b>${escapeHtml(p.nombreProfesional)}</b></span>`);
   }
-  subLines.push(`<span>${escapeHtml(labelTipoEstado(p))}</span>`);
+  subLines.push(`<span>${labelTipoEstado(p)}</span>`);
 
   return `
     <div class="cellBlock">
