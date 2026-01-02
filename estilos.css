@@ -209,3 +209,58 @@ th{
   display:none;
 }
 .toast.show{display:block}
+
+/* =========================
+   MODAL (Profesionales)
+========================= */
+.modalOverlay{
+  position:fixed;
+  inset:0;
+  background: rgba(15,23,42,.55);
+  display:none;
+  align-items:center;
+  justify-content:center;
+  padding:16px;
+  z-index:999;
+}
+.modalOverlay.show{ display:flex; }
+
+.modalCard{
+  width:min(980px, 100%);
+  max-height: calc(100vh - 32px);
+  overflow:auto;
+  background: var(--panel);
+  border: 1px solid rgba(0,0,0,.10);
+  box-shadow: var(--shadow);
+  border-radius: var(--radius);
+  padding:16px;
+}
+
+.modalHead{
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:12px;
+}
+
+.modalTitle{
+  font-size:18px;
+  font-weight:900;
+}
+
+/* rolesWrap ya existe, pero para el modal se ve mejor así */
+.rolesWrap{
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px;
+  padding:10px;
+  border:1px solid rgba(0,0,0,.08);
+  border-radius:14px;
+  background:#fafafa;
+}
+
+.roleCheck{
+  display:inline-flex;
+  align-items:center;
+  gap:8px;
+}
