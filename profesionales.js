@@ -9,6 +9,8 @@ import { db } from './firebase-init.js';
 import { requireAuth } from './auth.js';
 import { setActiveNav, toast, wireLogout } from './ui.js';
 import { cleanReminder, toUpperSafe, parseCSV, toCSV } from './utils.js';
+import { loadSidebar } from './layout.js';
+
 
 import {
   collection, getDocs, setDoc, deleteDoc,
@@ -821,7 +823,10 @@ requireAuth({
   onUser: async (user)=>{
     state.user = user;
     $('who').textContent = `Conectado: ${user.email}`;
+
+    loadSidebar('profesionales');
     setActiveNav('profesionales');
+    
     wireLogout();
 
     // Modal
