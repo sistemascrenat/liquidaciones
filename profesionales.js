@@ -463,10 +463,15 @@ async function removeProfesional(rutId){
    Paint table
 ========================= */
 function labelTipoEstado(p){
-  const t = (p.tipoPersona || 'natural');
-  const e = (p.estado || 'activo');
-  return `${t} · ${e}`;
+  const t = (p.tipoPersona || '').toString().toLowerCase();
+  const tipo = (t === 'juridica')
+    ? 'PERSONA JURÍDICA'
+    : 'PERSONA NATURAL';
+
+  const est = (p.estado || 'activo').toString().toLowerCase(); // activo / inactivo
+  return `${tipo} · ${est}`;
 }
+
 
 function rolesMini(p){
   const pri = p.rolPrincipalId ? roleNameById(p.rolPrincipalId) : '';
@@ -484,7 +489,7 @@ function rolesMini(p){
 
   return `
     <span class="mini">
-      🧩 <span class="muted">ROL PRINCIPAL:</span> ${priHtml}
+      <span class="muted">ROL PRINCIPAL:</span> ${priHtml}
       <span class="dot">·</span>
       <span class="muted">ROLES SECUNDARIOS:</span> ${secsHtml}
     </span>
@@ -520,7 +525,7 @@ function rutBlock(p){
   const a = [];
   a.push(`<div class="mono"><b>${escapeHtml(p.rut || '')}</b></div>`);
   if(p.tipoPersona === 'juridica' && p.rutEmpresa){
-    a.push(`<div class="mini mono">Emp: <b>${escapeHtml(p.rutEmpresa)}</b></div>`);
+    a.push(`<div class="mini mono">Rut Empresa: <b>${escapeHtml(p.rutEmpresa)}</b></div>`);
   }
   return a.join('');
 }
@@ -542,7 +547,7 @@ function profEmpresaBlock(p){
         ${subLines.join('<span class="dot">·</span>')}
       </div>
       <div class="mini" style="margin-top:6px;">
-        🧩 ${rolesMini(p)}
+        ${rolesMini(p)}
       </div>
       <div class="mini" style="margin-top:6px;">
         ${descuentoMini(p)}
