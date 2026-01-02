@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Clínica Rennat – Cirugías</title>
+  <link rel="icon" type="image/png" href="logoCR.png">
+  <link rel="stylesheet" href="estilos.css"/>
+</head>
+<body>
+  <div class="container">
+    <!-- SIDEBAR común -->
+    <div id="sidebar-slot"></div>
+
+    <!-- MAIN -->
+    <main class="main">
+      <div class="topbar">
+        <div>
+          <div class="h1">Cirugías</div>
+          <div class="muted" id="who"></div>
+        </div>
+        <div class="badge" id="count">0 cirugías</div>
+      </div>
+
+      <!-- TOOLBAR -->
+      <section class="card" style="margin-bottom:14px;">
+        <div class="actions" style="gap:10px;">
+          <button class="btn primary" id="btnCrear">+ Crear Nueva Cirugía</button>
+
+          <span style="flex:1"></span>
+
+          <input
+            id="buscador"
+            placeholder="Buscar (código PC0001, nombre, rol, clínica). Coma=AND, guión=OR"
+            style="max-width:520px;"
+          />
+        </div>
+      </section>
+
+      <!-- TABLE -->
+      <section class="card">
+        <div class="tableWrap">
+          <table class="simpleTable">
+            <thead>
+              <tr>
+                <th style="min-width:170px;">Código</th>
+                <th style="min-width:420px;">Cirugía</th>
+                <th style="min-width:300px;">Roles</th>
+                <th style="min-width:160px;">Clínicas</th>
+                <th style="min-width:140px;">Estado</th>
+                <th style="width:160px;">Acciones</th>
+              </tr>
+            </thead>
+            <tbody id="tbody"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div id="toast" class="toast"></div>
+
+  <!-- MODAL: Crear / Editar cirugía -->
+  <div id="modalBackdrop" class="modalBackdrop" style="display:none;">
+    <div class="modalCard" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+      <div class="modalHead">
+        <div>
+          <div class="h1" id="modalTitle" style="margin:0;font-size:18px;">Crear cirugía</div>
+          <div class="muted" id="modalSub" style="font-size:12px;margin-top:2px;"></div>
+        </div>
+        <button class="iconBtn" id="btnModalClose" type="button" aria-label="Cerrar" title="Cerrar">✖️</button>
+      </div>
+
+      <div class="modalBody">
+        <div class="grid">
+          <div>
+            <label>Código (PC0001)</label>
+            <input id="codigo" placeholder="PC0001"/>
+          </div>
+
+          <div>
+            <label>Estado</label>
+            <select id="estado">
+              <option value="activa">Activa</option>
+              <option value="inactiva">Inactiva</option>
+            </select>
+          </div>
+
+          <div style="grid-column:1/-1;">
+            <label>Nombre de la cirugía</label>
+            <input id="nombre" placeholder="Ej: Apendicectomía"/>
+          </div>
+        </div>
+
+        <hr style="border:none;border-top:1px solid rgba(0,0,0,.08);margin:14px 0;"/>
+
+        <div>
+          <label>Roles (catálogo)</label>
+          <div id="rolesWrap" class="rolesWrap"></div>
+          <div class="mini" style="margin-top:8px;">
+            * Aquí solo definimos <b>qué roles aplican</b> a la cirugía. Los precios se editan en “Tarifario”.
+          </div>
+        </div>
+      </div>
+
+      <div class="modalFoot">
+        <button class="btn" id="btnModalCancelar" type="button">Cancelar</button>
+        <span style="flex:1"></span>
+        <button class="btn primary" id="btnModalGuardar" type="button">Guardar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Tarifario -->
+  <div id="tarBackdrop" class="modalBackdrop" style="display:none;">
+    <div class="modalCard" role="dialog" aria-modal="true" aria-labelledby="tarTitle">
+      <div class="modalHead">
+        <div>
+          <div class="h1" id="tarTitle" style="margin:0;font-size:18px;">Tarifario</div>
+          <div class="muted" id="tarSub" style="font-size:12px;margin-top:2px;"></div>
+        </div>
+        <button class="iconBtn" id="btnTarClose" type="button" aria-label="Cerrar" title="Cerrar">✖️</button>
+      </div>
+
+      <div class="modalBody">
+        <div class="grid" style="grid-template-columns: 1fr 1fr; gap:12px;">
+          <div>
+            <label>Clínica</label>
+            <select id="selClinica"></select>
+          </div>
+          <div>
+            <label>Indicador</label>
+            <div class="mini" id="tarHint" style="padding:10px 12px;border:1px solid rgba(0,0,0,.08);border-radius:12px;background:#fafafa;">
+              Selecciona una clínica para editar precios.
+            </div>
+          </div>
+        </div>
+
+        <hr style="border:none;border-top:1px solid rgba(0,0,0,.08);margin:14px 0;"/>
+
+        <div class="tableWrap">
+          <table class="simpleTable" style="min-width:860px;">
+            <thead>
+              <tr>
+                <th style="min-width:280px;">Rol</th>
+                <th style="min-width:190px;">Particular</th>
+                <th style="min-width:190px;">Isapre</th>
+                <th style="min-width:190px;">Fonasa</th>
+              </tr>
+            </thead>
+            <tbody id="tarBody"></tbody>
+          </table>
+        </div>
+
+        <div class="mini" style="margin-top:10px;">
+          * Valores fijos. Puede quedar vacío (pendiente).
+        </div>
+      </div>
+
+      <div class="modalFoot">
+        <button class="btn" id="btnTarCancelar" type="button">Cerrar</button>
+        <span style="flex:1"></span>
+        <button class="btn primary" id="btnTarGuardar" type="button">Guardar tarifario</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Sidebar común -->
+  <script type="module" src="layout.js"></script>
+  <!-- Página -->
+  <script type="module" src="cirugias.js"></script>
+</body>
+</html>
