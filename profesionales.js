@@ -1,341 +1,169 @@
 // profesionales.js
-// Profesionales: CRUD + buscar + importar/exportar CSV
-// Firestore: colección "profesionales"
-// Roles: selector múltiple desde colección "roles"
+// Gestión de profesionales (CRUD) — alineado con dashboard viejo:
+// - tipoPersona natural/juridica + datos empresa
+// - descuentos UF + razón
+// - clínicas asignadas (checklist, default: todas activas al crear)
+// - listado con buscador, hint, limpiar
+// - editar / activar-desactivar / eliminar
+// - NO incluye administración/selección de roles (eso queda para otro módulo)
 
-import { db } from './firebase-init.js';
-import { requireAuth } from './auth.js';
-import { setActiveNav, toast, wireLogout } from './ui.js';
-import { cleanReminder, toUpperSafe, parseCSV, toCSV } from './utils.js';
+import { app, auth, db } from './firebase-init.js';
+import {
+  onAuthStateChanged,
+  signOut
+} from "https://www.gstatic.com/firebasejs/11.7.3/firebase-auth.js";
 
 import {
-  collection, getDocs, addDoc, updateDoc, deleteDoc,
-  doc, serverTimestamp
-} from 'https://www.gstatic.com/firebasejs/11.7.3/firebase-firestore.js';
+  collection,
+  getDocs,
+  getDoc,
+  doc,
+  setDoc,
+  deleteDoc,
+  query,
+  where,
+  serverTimestamp
+} from "https://www.gstatic.com/firebasejs/11.7.3/firebase-firestore.js";
+
+/* =========================
+   DOM
+========================= */
+const pillUser = document.getElementById('pillUser');
+const btnLogout = document.getElementById('btnLogout');
+
+const btnNuevoProfesional = document.getElementById('btnNuevoProfesional');
+
+const tablaProfesionales = document.getElementById('tablaProfesionales');
+
+const profSearch = document.getElementById('profSearch');
+const profSearchClear = document.getElementById('profSearchClear');
+const profSearchHint = document.getElementById('profSearchHint');
+
+const modalOverlay = document.getElementById('modalOverlay');
+const modalProfesional = document.getElementById('modalProfesional');
+
+const btnCerrarModalProf = document.getElementById('btnCerrarModalProf');
+const btnCancelarModalProf = document.getElementById('btnCancelarModalProf');
+const btnGuardarModalProf = document.getElementById('btnGuardarModalProf');
+
+const mProfTitle = document.getElementById('modalProfTitle');
+const mProfSubtitle = document.getElementById('modalProfSubtitle');
+const mProfError = document.getElementById('mProfError');
+
+const mProfRut = document.getElementById('mProfRut');
+const mProfNombre = document.getElementById('mProfNombre');
+
+const mProfTipoPersona = document.getElementById('mProfTipoPersona');
+const mProfEstado = document.getElementById('mProfEstado');
+
+const mProfCorreoPersonal = document.getElementById('mProfCorreoPersonal');
+const mProfTelefono = document.getElementById('mProfTelefono');
+
+const mProfDireccion = document.getElementById('mProfDireccion');
+
+const empresaFields = document.getElementById('empresaFields');
+const mProfRutEmpresa = document.getElementById('mProfRutEmpresa');
+const mProfRazon = document.getElementById('mProfRazon');
+const mProfGiro = document.getElementById('mProfGiro');
+const mProfCorreoEmpresa = document.getElementById('mProfCorreoEmpresa');
+const mProfDireccionEmpresa = document.getElementById('mProfDireccionEmpresa');
+const mProfCiudadEmpresa = document.getElementById('mProfCiudadEmpresa');
+
+const mProfClinicas = document.getElementById('mProfClinicas');
+
+const mProfTieneDesc = document.getElementById('mProfTieneDesc');
+const mProfDescMonto = document.getElementById('mProfDescMonto');
+const mProfDescRazon = document.getElementById('mProfDescRazon');
 
 /* =========================
    State
 ========================= */
 const state = {
   user: null,
-
-  // profesionales
-  all: [],        // [{id, tipoPersona, nombre, rut, email, telefono, direccion, giro, contactoEmpresa, roles[]}]
-  editId: null,
-  q: '',
-
-  // catálogo roles (desde Firestore)
-  rolesCatalog: [] // [{id, nombre}]
+  profesionalesCache: [],
+  cacheClinicas: [], // [{id,nombre,estado}]
+  modal: {
+    mode: 'create', // create|edit
+    docId: null
+  }
 };
 
-const $ = (id)=> document.getElementById(id);
+/* =========================
+   Helpers
+========================= */
+function showError(el, msg) {
+  if (!el) return;
+  el.textContent = msg || '';
+  el.style.display = msg ? 'block' : 'none';
+}
 
-function normalize(s=''){
+function lockScroll(lock) {
+  document.body.style.overflow = lock ? 'hidden' : '';
+}
+
+function openOverlay() {
+  modalOverlay.style.display = 'flex';
+  lockScroll(true);
+}
+
+function closeAllModals() {
+  modalOverlay.style.display = 'none';
+  modalProfesional.style.display = 'none';
+  lockScroll(false);
+  showError(mProfError, '');
+}
+
+modalOverlay?.addEventListener('click', (e) => {
+  if (e.target === modalOverlay) closeAllModals();
+});
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && modalOverlay?.style.display === 'flex') closeAllModals();
+});
+
+btnCerrarModalProf?.addEventListener('click', closeAllModals);
+btnCancelarModalProf?.addEventListener('click', closeAllModals);
+
+btnLogout?.addEventListener('click', async () => {
+  await signOut(auth);
+});
+
+// Normaliza RUT para usarlo como docId
+function normalizaRut(rutRaw = '') {
+  return rutRaw
+    .toString()
+    .trim()
+    .replace(/\./g, '')
+    .replace(/-/g, '')
+    .replace(/\s+/g, '')
+    .toUpperCase();
+}
+
+function normTxt(s='') {
   return (s ?? '')
     .toString()
-    .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
     .toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
     .trim();
 }
 
-function uniq(arr){
-  return [...new Set((arr || []).filter(Boolean))];
+function splitTokens(q='') {
+  return normTxt(q)
+    .split(',')
+    .flatMap(part => part.trim().split(/\s+/))
+    .filter(Boolean);
 }
 
-function rolesToText(roles){
-  const xs = Array.isArray(roles) ? roles : (roles ? [roles] : []);
-  return xs.filter(Boolean).join(' | ');
+function parseUFInput(v='') {
+  // permite "0,5" o "0.5"
+  const s = (v || '').toString().trim().replace(',', '.');
+  const n = Number(s);
+  return Number.isFinite(n) ? n : 0;
 }
 
-function parseRolesCell(v){
-  const raw = (v ?? '').toString().trim();
-  if(!raw) return [];
-  // permite separar por |, ; o ,
-  return uniq(
-    raw.split('|')
-      .flatMap(x=> x.split(';'))
-      .flatMap(x=> x.split(','))
-      .map(x=> toUpperSafe(cleanReminder(x)))
-      .filter(Boolean)
-  );
-}
-
-function rowMatches(p, q){
-  if(!q) return true;
-  const hay = normalize([
-    p.nombre, p.rut, p.email,
-    (p.roles || []).join(' ')
-  ].join(' '));
-  return hay.includes(q);
-}
-
-/* =========================
-   Firestore refs
-========================= */
-const colProfesionales = collection(db, 'profesionales');
-const colRoles = collection(db, 'roles');
-
-/* =========================
-   Roles (catálogo) UI
-========================= */
-function paintRolesPicker(){
-  const wrap = $('rolesWrap');
-  wrap.innerHTML = '';
-
-  if(!state.rolesCatalog.length){
-    wrap.innerHTML = `
-      <div class="muted">
-        No hay roles creados. Ve a <b>Roles</b> para crear el primero.
-      </div>
-    `;
-    return;
-  }
-
-  for(const r of state.rolesCatalog){
-    const id = `role_${r.id}`;
-    const label = document.createElement('label');
-    label.className = 'roleCheck';
-
-    label.innerHTML = `
-      <input type="checkbox" id="${id}" data-role="${escapeHtml(r.nombre)}"/>
-      <span class="pill">${escapeHtml(r.nombre)}</span>
-    `;
-    wrap.appendChild(label);
-  }
-}
-
-function getSelectedRoles(){
-  const wrap = $('rolesWrap');
-  const checks = wrap.querySelectorAll('input[type="checkbox"][data-role]');
-  const out = [];
-  checks.forEach(ch=>{
-    if(ch.checked){
-      out.push(toUpperSafe(ch.getAttribute('data-role') || ''));
-    }
-  });
-  return uniq(out);
-}
-
-function setSelectedRoles(rolesArr){
-  const wanted = new Set((rolesArr || []).map(x=>toUpperSafe(x)));
-  const wrap = $('rolesWrap');
-  const checks = wrap.querySelectorAll('input[type="checkbox"][data-role]');
-  checks.forEach(ch=>{
-    const v = toUpperSafe(ch.getAttribute('data-role') || '');
-    ch.checked = wanted.has(v);
-  });
-}
-
-/* =========================
-   Loaders
-========================= */
-async function loadRoles(){
-  const snap = await getDocs(colRoles);
-  const out = [];
-  snap.forEach(d=>{
-    const x = d.data() || {};
-    const nombre = toUpperSafe(cleanReminder(x.nombre));
-    if(!nombre) return;
-    out.push({ id: d.id, nombre });
-  });
-  // orden alfabético
-  out.sort((a,b)=> normalize(a.nombre).localeCompare(normalize(b.nombre)));
-  state.rolesCatalog = out;
-  paintRolesPicker();
-}
-
-async function loadAll(){
-  const snap = await getDocs(colProfesionales);
-  const out = [];
-
-  snap.forEach(d=>{
-    const x = d.data() || {};
-
-    // ✅ Compatibilidad nombre/razón social (tu problema actual)
-    const tipoInferido =
-      cleanReminder(x.tipoPersona) ||
-      (x.razonSocial || x.nombreEmpresa || x.razon_social || x.giro || x.contactoEmpresa ? 'JURIDICA' : 'NATURAL');
-
-    const nombreInferido =
-      cleanReminder(x.nombre) ||
-      cleanReminder(x.razonSocial) ||
-      cleanReminder(x.nombreEmpresa) ||
-      cleanReminder(x.razon_social) ||
-      '';
-
-    // ✅ Compatibilidad rol antiguo (string) vs roles nuevo (array)
-    const roles =
-      Array.isArray(x.roles) ? x.roles.map(r=>toUpperSafe(cleanReminder(r))) :
-      (x.rol ? [toUpperSafe(cleanReminder(x.rol))] : []);
-
-    out.push({
-      id: d.id,
-      tipoPersona: (tipoInferido || 'NATURAL'),
-      nombre: cleanReminder(nombreInferido),
-      rut: cleanReminder(x.rut),
-      email: cleanReminder(x.email),
-      telefono: cleanReminder(x.telefono),
-      direccion: cleanReminder(x.direccion),
-      giro: cleanReminder(x.giro),
-      contactoEmpresa: cleanReminder(x.contactoEmpresa),
-      roles: uniq(roles).filter(Boolean)
-    });
-  });
-
-  out.sort((a,b)=> normalize(a.nombre).localeCompare(normalize(b.nombre)));
-  state.all = out;
-  paint();
-}
-
-/* =========================
-   Save / Delete
-========================= */
-async function saveProfesional(){
-  const nombre = cleanReminder($('nombre').value);
-  const rut    = cleanReminder($('rut').value);
-  const email  = cleanReminder($('email').value);
-  const telefono = cleanReminder($('telefono').value);
-  const direccion = cleanReminder($('direccion').value);
-  const giro = cleanReminder($('giro').value);
-  const contactoEmpresa = cleanReminder($('contactoEmpresa').value);
-  const tipoPersona = toUpperSafe($('tipoPersona').value || 'NATURAL');
-
-  const roles = getSelectedRoles();
-
-  if(!nombre){
-    toast('Falta nombre / razón social');
-    $('nombre').focus();
-    return;
-  }
-
-  // Si no hay roles creados aún, permitimos guardar igual,
-  // pero avisamos (para no trabarte el flujo).
-  if(!roles.length && state.rolesCatalog.length){
-    toast('Selecciona al menos 1 rol');
-    return;
-  }
-
-  const payload = {
-    tipoPersona,
-    nombre,
-    rut,
-    email,
-    telefono,
-    direccion,
-    giro,
-    contactoEmpresa,
-
-    // nuevo estándar
-    roles,
-
-    // opcional: mantener rol legacy por compatibilidad (toma el primero)
-    rol: roles[0] || '',
-
-    updatedAt: serverTimestamp(),
-    updatedBy: state.user?.email || ''
-  };
-
-  if(state.editId){
-    await updateDoc(doc(db,'profesionales',state.editId), payload);
-    toast('Profesional actualizado');
-  }else{
-    payload.createdAt = serverTimestamp();
-    payload.createdBy = state.user?.email || '';
-    await addDoc(colProfesionales, payload);
-    toast('Profesional creado');
-  }
-
-  clearForm();
-  await loadAll();
-}
-
-async function removeProfesional(id){
-  const p = state.all.find(x=>x.id===id);
-  const ok = confirm(`¿Eliminar profesional?\n\n${p?.nombre || ''}`);
-  if(!ok) return;
-  await deleteDoc(doc(db,'profesionales',id));
-  toast('Eliminado');
-  await loadAll();
-}
-
-/* =========================
-   UI helpers
-========================= */
-function clearForm(){
-  state.editId = null;
-  $('nombre').value = '';
-  $('rut').value = '';
-  $('email').value = '';
-  $('telefono').value = '';
-  $('direccion').value = '';
-  $('giro').value = '';
-  $('contactoEmpresa').value = '';
-  $('tipoPersona').value = 'NATURAL';
-
-  setSelectedRoles([]);
-
-  $('btnGuardar').textContent = 'Guardar profesional';
-}
-
-function setForm(p){
-  state.editId = p.id;
-
-  $('nombre').value = p.nombre || '';
-  $('rut').value = p.rut || '';
-  $('email').value = p.email || '';
-  $('telefono').value = p.telefono || '';
-  $('direccion').value = p.direccion || '';
-  $('giro').value = p.giro || '';
-  $('contactoEmpresa').value = p.contactoEmpresa || '';
-  $('tipoPersona').value = (p.tipoPersona || 'NATURAL');
-
-  setSelectedRoles(p.roles || []);
-
-  $('btnGuardar').textContent = 'Actualizar profesional';
-  $('nombre').focus();
-}
-
-function paint(){
-  const q = state.q;
-  const rows = state.all.filter(p=>rowMatches(p,q));
-
-  $('count').textContent = `${rows.length} profesional${rows.length===1?'':'es'}`;
-
-  const tb = $('tbody');
-  tb.innerHTML = '';
-
-  for(const p of rows){
-    const tr = document.createElement('tr');
-
-    const rolesHtml = (p.roles || []).length
-      ? (p.roles || []).map(r=> `<span class="pill">${escapeHtml(r)}</span>`).join(' ')
-      : `<span class="muted">—</span>`;
-
-    tr.innerHTML = `
-      <td><b>${escapeHtml(p.nombre)}</b></td>
-      <td>${escapeHtml(p.rut || '')}</td>
-      <td>${escapeHtml(p.email || '')}</td>
-      <td>${rolesHtml}</td>
-      <td></td>
-    `;
-
-    const td = tr.children[4];
-
-    const btnEdit = document.createElement('button');
-    btnEdit.className = 'btn';
-    btnEdit.textContent = 'Editar';
-    btnEdit.addEventListener('click', ()=> setForm(p));
-
-    const btnDel = document.createElement('button');
-    btnDel.className = 'btn danger';
-    btnDel.textContent = 'Eliminar';
-    btnDel.addEventListener('click', ()=> removeProfesional(p.id));
-
-    td.appendChild(btnEdit);
-    td.appendChild(btnDel);
-
-    tb.appendChild(tr);
-  }
+function formatUF(n=0) {
+  const x = Number(n) || 0;
+  return x.toLocaleString('es-CL', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 function escapeHtml(s=''){
@@ -347,156 +175,507 @@ function escapeHtml(s=''){
     .replaceAll("'","&#039;");
 }
 
+function applyTipoPersonaUI() {
+  const tipo = (mProfTipoPersona?.value || 'natural').trim().toLowerCase();
+  const isJ = (tipo === 'juridica');
+  empresaFields.style.display = isJ ? 'block' : 'none';
+}
+
+mProfTipoPersona?.addEventListener('change', applyTipoPersonaUI);
+
+// UX: al destildar descuento, limpia campos
+mProfTieneDesc?.addEventListener('change', () => {
+  if (!mProfTieneDesc.checked) {
+    mProfDescMonto.value = '';
+    mProfDescRazon.value = '';
+  }
+});
+
+// Checklist genérico
+function renderChecklist(containerEl, items, selectedIds=[]) {
+  if (!containerEl) return;
+  const set = new Set(selectedIds || []);
+  containerEl.innerHTML = '';
+
+  if (!items.length) {
+    containerEl.innerHTML = `<div style="font-size:12px;color:var(--muted);">No hay clínicas cargadas.</div>`;
+    return;
+  }
+
+  for (const it of items) {
+    const id = it.id;
+    const label = it.nombre || it.id;
+
+    const row = document.createElement('label');
+    row.className = 'check-row';
+
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.value = id;
+    cb.checked = set.has(id);
+
+    const span = document.createElement('span');
+    span.textContent = label;
+
+    row.appendChild(cb);
+    row.appendChild(span);
+    containerEl.appendChild(row);
+  }
+}
+
+function getCheckedValues(containerEl) {
+  if (!containerEl) return [];
+  return Array.from(containerEl.querySelectorAll('input[type="checkbox"]'))
+    .filter(x => x.checked)
+    .map(x => x.value);
+}
+
 /* =========================
-   Import / Export CSV
+   Loaders
 ========================= */
-function download(filename, text, mime='text/plain'){
-  const blob = new Blob([text], { type: mime });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  a.click();
-  setTimeout(()=> URL.revokeObjectURL(url), 1500);
+async function ensureClinicasLoaded() {
+  if (state.cacheClinicas.length) return;
+
+  const snap = await getDocs(collection(db, 'clinicas'));
+  const clin = [];
+  snap.forEach(d => clin.push({ id: d.id, ...d.data() }));
+  clin.sort((a,b) => (a.nombre || a.id).localeCompare((b.nombre || b.id), 'es'));
+
+  state.cacheClinicas = clin;
 }
 
-function exportCSV(){
-  const headers = [
-    'nombre','rut','email','telefono','direccion',
-    'tipoPersona','giro','contactoEmpresa','roles'
-  ];
-
-  const items = state.all.map(p=>({
-    nombre: p.nombre || '',
-    rut: p.rut || '',
-    email: p.email || '',
-    telefono: p.telefono || '',
-    direccion: p.direccion || '',
-    tipoPersona: p.tipoPersona || 'NATURAL',
-    giro: p.giro || '',
-    contactoEmpresa: p.contactoEmpresa || '',
-    roles: rolesToText(p.roles || [])
-  }));
-
-  const csv = toCSV(headers, items);
-  download(`profesionales_${new Date().toISOString().slice(0,10)}.csv`, csv, 'text/csv');
-  toast('CSV exportado');
+function getClinicasActivasIds() {
+  return (state.cacheClinicas || [])
+    .filter(c => (c.estado || 'activa') === 'activa')
+    .map(c => c.id);
 }
 
-function plantillaCSV(){
-  const csv = `nombre,rut,email,telefono,direccion,tipoPersona,giro,contactoEmpresa,roles
-Juan Pérez,12.345.678-9,jperez@correo.cl,+56911112222,Providencia 123,NATURAL,,,MEDICO|AUXILIAR
-Empresa Demo SPA,76.123.456-7,contacto@empresa.cl,+56933334444,Las Condes 456,JURIDICA,Salud,María Soto,MEDICO
-`;
-  download('plantilla_profesionales.csv', csv, 'text/csv');
-  toast('Plantilla descargada');
+function clinicasText(ids=[]) {
+  const byId = new Map((state.cacheClinicas || []).map(c => [c.id, (c.nombre || c.id)]));
+  return (ids || []).map(id => byId.get(id) || id).join(' | ');
 }
 
-async function importCSV(file){
-  const text = await file.text();
-  const rows = parseCSV(text);
-  if(rows.length < 2){
-    toast('CSV vacío o inválido');
+function displayNombre(p) {
+  // ✅ robusto (corrige “no está leyendo nombre / razón social”)
+  // prioriza nombreProfesional; si no, usa nombre; si es jurídica, usa razonSocial; fallback a rut
+  return (
+    p.nombreProfesional ||
+    p.nombre ||
+    p.razonSocial ||
+    p.nombreEmpresa ||
+    p.razon_social ||
+    p.rut ||
+    '—'
+  );
+}
+
+async function loadProfesionales() {
+  try {
+    await ensureClinicasLoaded();
+
+    const snap = await getDocs(collection(db, 'profesionales'));
+    const rows = [];
+    snap.forEach(d => rows.push({ id: d.id, ...d.data() }));
+
+    state.profesionalesCache = rows;
+
+    const q = profSearch?.value || '';
+    const visibles = filtrarProfesionales(rows, q);
+
+    renderProfesionalesTable(visibles);
+
+    if (profSearchHint) {
+      profSearchHint.textContent = (q.trim())
+        ? `Mostrando ${visibles.length} de ${rows.length}.`
+        : `Total: ${rows.length}.`;
+    }
+    if (profSearchClear) {
+      profSearchClear.style.display = (q.trim()) ? 'inline-flex' : 'none';
+    }
+
+  } catch (err) {
+    console.error('Error cargando profesionales:', err);
+    tablaProfesionales.innerHTML = `<p style="color:#e11d48;font-size:13px;">
+      Error al cargar profesionales. Revisa consola.
+    </p>`;
+  }
+}
+
+function filtrarProfesionales(rows, q) {
+  const tokens = splitTokens(q);
+  if (!tokens.length) return rows;
+
+  return rows.filter(p => {
+    const tipo = (p.tipoPersona || 'natural');
+    const hay = normTxt([
+      displayNombre(p),
+      p.rut, p.id, p.rutId,
+      p.rutEmpresa,
+      p.razonSocial,
+      p.giro,
+      p.correoPersonal, p.correoEmpresa,
+      p.telefono,
+      tipo,
+      p.estado,
+      // clinicas
+      clinicasText(p.clinicasIds || [])
+    ].filter(Boolean).join(' | '));
+
+    return tokens.every(t => hay.includes(t));
+  });
+}
+
+/* =========================
+   Table render
+========================= */
+function renderProfesionalesTable(rows) {
+  if (!tablaProfesionales) return;
+
+  if (!rows?.length) {
+    tablaProfesionales.innerHTML = `
+      <p style="font-size:13px;color:var(--muted);">
+        No hay resultados para tu búsqueda.
+      </p>`;
     return;
   }
 
-  const headers = rows[0].map(h=>cleanReminder(h).toLowerCase());
-  const idx = (name)=> headers.indexOf(name);
+  const htmlRows = rows.map(p => {
+    const tipo = (p.tipoPersona || 'natural').toLowerCase();
+    const isJ  = (tipo === 'juridica');
+    const estado = (p.estado || 'activo');
 
-  const iNombre = idx('nombre');
-  const iRut    = idx('rut');
-  const iEmail  = idx('email');
-  const iTel    = idx('telefono');
-  const iDir    = idx('direccion');
-  const iTipo   = idx('tipopersona');
-  const iGiro   = idx('giro');
-  const iContacto = idx('contactoempresa');
-  const iRoles  = idx('roles');
+    const desc = p.tieneDescuento
+      ? `${formatUF(p.descuentoUF ?? 0)} UF (${p.descuentoRazon || '—'})`
+      : 'No';
 
-  if(iNombre < 0){
-    toast('CSV debe incluir columna: nombre');
+    const nombre = displayNombre(p);
+    const docId = p.rutId || p.id; // en tu modelo antiguo rutId suele existir
+
+    return `
+      <tr>
+        <td>${escapeHtml(nombre)}</td>
+        <td>${escapeHtml(p.rut || '—')}</td>
+
+        <td>${isJ ? escapeHtml(p.rutEmpresa || '—') : '—'}</td>
+        <td>${isJ ? escapeHtml(p.razonSocial || '—') : '—'}</td>
+
+        <td>${escapeHtml(tipo)}</td>
+        <td>${escapeHtml(p.correoPersonal || p.correoEmpresa || '—')}</td>
+        <td>${escapeHtml(p.telefono || '—')}</td>
+
+        <td>${escapeHtml(desc)}</td>
+        <td>${escapeHtml(estado)}</td>
+
+        <td class="text-right">
+          <button class="btn btn-soft" data-action="edit-prof" data-id="${escapeHtml(docId)}">Editar</button>
+          <button class="btn btn-soft" data-action="toggle-prof" data-id="${escapeHtml(docId)}">
+            ${estado === 'inactivo' ? 'Activar' : 'Desactivar'}
+          </button>
+          <button class="btn btn-soft" data-action="del-prof" data-id="${escapeHtml(docId)}">Eliminar</button>
+        </td>
+      </tr>
+    `;
+  }).join('');
+
+  tablaProfesionales.innerHTML = `
+    <table>
+      <thead>
+        <tr>
+          <th>Nombre</th>
+          <th>RUT</th>
+          <th>RUT empresa</th>
+          <th>Razón social</th>
+          <th>Tipo</th>
+          <th>Correo</th>
+          <th>Teléfono</th>
+          <th>Descuento</th>
+          <th>Estado</th>
+          <th class="text-right">Acciones</th>
+        </tr>
+      </thead>
+      <tbody>${htmlRows}</tbody>
+    </table>
+  `;
+}
+
+tablaProfesionales?.addEventListener('click', async (e) => {
+  const btn = e.target.closest('button[data-action]');
+  if (!btn) return;
+
+  const action = btn.dataset.action;
+  const id = btn.dataset.id;
+
+  try {
+    if (action === 'edit-prof') {
+      await openModalProfesionalEdit(id);
+      return;
+    }
+
+    if (action === 'toggle-prof') {
+      const ref = doc(db, 'profesionales', id);
+      const snap = await getDoc(ref);
+      if (!snap.exists()) return alert('Profesional no encontrado.');
+
+      const estado = (snap.data().estado || 'activo');
+      const nuevoEstado = (estado === 'inactivo') ? 'activo' : 'inactivo';
+
+      await setDoc(ref, { estado: nuevoEstado, actualizadoEl: serverTimestamp() }, { merge: true });
+      await loadProfesionales();
+      return;
+    }
+
+    if (action === 'del-prof') {
+      const ok = confirm(
+        '¿Eliminar profesional DEFINITIVAMENTE?\n' +
+        'Esto borra el registro y NO se puede recuperar.'
+      );
+      if (!ok) return;
+
+      await deleteDoc(doc(db, 'profesionales', id));
+      await loadProfesionales();
+      return;
+    }
+  } catch (err) {
+    console.error(err);
+    alert('Error ejecutando acción. Revisa consola.');
+  }
+});
+
+/* =========================
+   Modal: open create/edit
+========================= */
+async function openModalProfesionalCreate() {
+  await ensureClinicasLoaded();
+
+  state.modal.mode = 'create';
+  state.modal.docId = null;
+
+  openOverlay();
+  modalProfesional.style.display = 'block';
+
+  mProfTitle.textContent = 'Nuevo profesional';
+  mProfSubtitle.textContent = 'Crear un nuevo profesional';
+  showError(mProfError, '');
+
+  // limpiar
+  mProfRut.disabled = false;
+  mProfRut.value = '';
+  mProfNombre.value = '';
+  mProfTipoPersona.value = 'natural';
+  mProfEstado.value = 'activo';
+
+  mProfCorreoPersonal.value = '';
+  mProfTelefono.value = '';
+  mProfDireccion.value = '';
+
+  mProfRutEmpresa.value = '';
+  mProfRazon.value = '';
+  mProfGiro.value = '';
+  mProfCorreoEmpresa.value = '';
+  mProfDireccionEmpresa.value = '';
+  mProfCiudadEmpresa.value = '';
+
+  // clínicas: default = todas activas
+  const activas = getClinicasActivasIds();
+  renderChecklist(mProfClinicas, state.cacheClinicas, activas);
+
+  // descuento
+  mProfTieneDesc.checked = false;
+  mProfDescMonto.value = '';
+  mProfDescRazon.value = '';
+
+  applyTipoPersonaUI();
+
+  setTimeout(() => mProfRut?.focus(), 50);
+}
+
+async function openModalProfesionalEdit(docId) {
+  await ensureClinicasLoaded();
+
+  state.modal.mode = 'edit';
+  state.modal.docId = docId;
+
+  openOverlay();
+  modalProfesional.style.display = 'block';
+
+  mProfTitle.textContent = 'Editar profesional';
+  mProfSubtitle.textContent = `ID: ${docId}`;
+  showError(mProfError, '');
+
+  const ref = doc(db, 'profesionales', docId);
+  const snap = await getDoc(ref);
+
+  if (!snap.exists()) {
+    showError(mProfError, 'No se encontró el profesional. Refresca e intenta de nuevo.');
     return;
   }
 
-  const existing = [...state.all];
+  const data = { id: snap.id, ...snap.data() };
 
-  let creates = 0, updates = 0, skipped = 0;
+  // poblar
+  mProfRut.value = data.rut || '';
+  mProfRut.disabled = true;
 
-  for(let r=1;r<rows.length;r++){
-    const row = rows[r];
+  mProfNombre.value = data.nombreProfesional || data.nombre || '';
+  mProfTipoPersona.value = (data.tipoPersona || 'natural').toLowerCase();
+  mProfEstado.value = (data.estado || 'activo');
 
-    const nombre = cleanReminder(row[iNombre] ?? '');
-    const rut    = cleanReminder(iRut>=0 ? row[iRut] : '');
-    const email  = cleanReminder(iEmail>=0 ? row[iEmail] : '');
-    const telefono = cleanReminder(iTel>=0 ? row[iTel] : '');
-    const direccion = cleanReminder(iDir>=0 ? row[iDir] : '');
-    const tipoPersona = toUpperSafe(cleanReminder(iTipo>=0 ? row[iTipo] : 'NATURAL')) || 'NATURAL';
-    const giro = cleanReminder(iGiro>=0 ? row[iGiro] : '');
-    const contactoEmpresa = cleanReminder(iContacto>=0 ? row[iContacto] : '');
-    const roles = iRoles>=0 ? parseRolesCell(row[iRoles]) : [];
+  mProfCorreoPersonal.value = data.correoPersonal || '';
+  mProfTelefono.value = data.telefono || '';
+  mProfDireccion.value = data.direccion || '';
 
-    if(!nombre){ skipped++; continue; }
+  mProfRutEmpresa.value = data.rutEmpresa || '';
+  mProfRazon.value = data.razonSocial || '';
+  mProfGiro.value = data.giro || '';
+  mProfCorreoEmpresa.value = data.correoEmpresa || '';
+  mProfDireccionEmpresa.value = data.direccionEmpresa || '';
+  mProfCiudadEmpresa.value = data.ciudadEmpresa || '';
 
-    const match = existing.find(x =>
-      (rut && x.rut && normalize(x.rut)===normalize(rut)) ||
-      (email && x.email && normalize(x.email)===normalize(email))
-    );
+  const clinicasIds = data.clinicasIds || [];
+  renderChecklist(mProfClinicas, state.cacheClinicas, clinicasIds);
 
-    const payload = {
+  mProfTieneDesc.checked = !!data.tieneDescuento;
+  mProfDescMonto.value = data.tieneDescuento ? formatUF(data.descuentoUF || 0) : '';
+  mProfDescRazon.value = data.tieneDescuento ? (data.descuentoRazon || '') : '';
+
+  applyTipoPersonaUI();
+
+  setTimeout(() => mProfNombre?.focus(), 50);
+}
+
+/* =========================
+   Modal: save
+========================= */
+btnGuardarModalProf?.addEventListener('click', async () => {
+  try {
+    showError(mProfError, '');
+
+    const rutRaw = (mProfRut.value || '').trim();
+    const rutId = normalizaRut(rutRaw);
+
+    const nombre = (mProfNombre.value || '').trim();
+
+    if (!rutId) { showError(mProfError, 'RUT inválido.'); return; }
+    if (!nombre) { showError(mProfError, 'Nombre profesional es obligatorio.'); return; }
+
+    const docId = (state.modal.mode === 'edit') ? state.modal.docId : rutId;
+
+    const tipoPersona = (mProfTipoPersona.value || 'natural').trim().toLowerCase();
+    const isJuridica = (tipoPersona === 'juridica');
+
+    const clinicasIds = getCheckedValues(mProfClinicas);
+
+    const tieneDescuento = !!mProfTieneDesc.checked;
+    const descuentoUF = tieneDescuento ? parseUFInput(mProfDescMonto.value) : 0;
+    const descuentoRazon = tieneDescuento ? (mProfDescRazon.value || '').trim() : '';
+
+    // Validación mínima jurídica
+    if (isJuridica) {
+      const rutEmp = (mProfRutEmpresa.value || '').trim();
+      const razon  = (mProfRazon.value || '').trim();
+      if (!rutEmp && !razon) {
+        showError(mProfError, 'Si es Persona jurídica, ingresa al menos RUT empresa o Razón social.');
+        return;
+      }
+    }
+
+    const patch = {
+      rut: rutRaw,
+      rutId: docId,
+
+      nombreProfesional: nombre,
+
       tipoPersona,
-      nombre, rut, email, telefono, direccion,
-      giro, contactoEmpresa,
-      roles,
-      rol: roles[0] || '',
-      updatedAt: serverTimestamp(),
-      updatedBy: state.user?.email || ''
+
+      correoPersonal: (mProfCorreoPersonal.value || '').trim() || null,
+      telefono: (mProfTelefono.value || '').trim() || null,
+
+      // empresa (solo si jurídica)
+      rutEmpresa:       isJuridica ? ((mProfRutEmpresa.value || '').trim() || null) : null,
+      razonSocial:      isJuridica ? ((mProfRazon.value || '').trim() || null) : null,
+      giro:             isJuridica ? ((mProfGiro.value || '').trim() || null) : null,
+      correoEmpresa:    isJuridica ? ((mProfCorreoEmpresa.value || '').trim() || null) : null,
+      direccionEmpresa: isJuridica ? ((mProfDireccionEmpresa.value || '').trim() || null) : null,
+      ciudadEmpresa:    isJuridica ? ((mProfCiudadEmpresa.value || '').trim() || null) : null,
+
+      // compat
+      direccion: (mProfDireccion.value || '').trim() || null,
+
+      clinicasIds,
+
+      tieneDescuento,
+      descuentoUF: tieneDescuento ? descuentoUF : 0,
+      descuentoRazon: tieneDescuento ? (descuentoRazon || null) : null,
+
+      estado: (mProfEstado.value || 'activo'),
+      actualizadoEl: serverTimestamp()
     };
 
-    if(match){
-      await updateDoc(doc(db,'profesionales',match.id), payload);
-      updates++;
-    }else{
-      payload.createdAt = serverTimestamp();
-      payload.createdBy = state.user?.email || '';
-      await addDoc(colProfesionales, payload);
-      creates++;
-    }
-  }
+    if (state.modal.mode === 'create') patch.creadoEl = serverTimestamp();
 
-  toast(`Import listo: +${creates} / ↻${updates} / omitidos ${skipped}`);
-  await loadAll();
-}
+    await setDoc(doc(db, 'profesionales', docId), patch, { merge: true });
+
+    closeAllModals();
+    await loadProfesionales();
+    alert('Profesional guardado ✅');
+
+  } catch (err) {
+    console.error(err);
+    showError(mProfError, 'No se pudo guardar. Revisa consola.');
+  }
+});
 
 /* =========================
-   Boot
+   Search UI
 ========================= */
-requireAuth({
-  onUser: async (user)=>{
-    state.user = user;
-    $('who').textContent = `Conectado: ${user.email}`;
-    setActiveNav('profesionales');
-    wireLogout();
+profSearch?.addEventListener('input', async () => {
+  const q = profSearch.value || '';
+  const visibles = filtrarProfesionales(state.profesionalesCache || [], q);
 
-    $('btnGuardar').addEventListener('click', saveProfesional);
-    $('btnLimpiar').addEventListener('click', clearForm);
+  renderProfesionalesTable(visibles);
 
-    $('buscador').addEventListener('input', (e)=>{
-      state.q = normalize(e.target.value);
-      paint();
-    });
-
-    $('btnExportar').addEventListener('click', exportCSV);
-    $('btnDescargarPlantilla').addEventListener('click', plantillaCSV);
-
-    $('fileCSV').addEventListener('change', async (e)=>{
-      const file = e.target.files?.[0];
-      e.target.value = '';
-      if(!file) return;
-      await importCSV(file);
-    });
-
-    // IMPORTANTE: primero roles, luego profesionales (para poder marcar checkboxes al editar)
-    await loadRoles();
-    await loadAll();
+  if (profSearchHint) {
+    profSearchHint.textContent = (q.trim())
+      ? `Mostrando ${visibles.length} de ${state.profesionalesCache.length}.`
+      : `Total: ${state.profesionalesCache.length}.`;
   }
+  if (profSearchClear) {
+    profSearchClear.style.display = (q.trim()) ? 'inline-flex' : 'none';
+  }
+});
+
+profSearchClear?.addEventListener('click', () => {
+  if (!profSearch) return;
+  profSearch.value = '';
+  profSearch.dispatchEvent(new Event('input'));
+  profSearch.focus();
+});
+
+/* =========================
+   Buttons
+========================= */
+btnNuevoProfesional?.addEventListener('click', async () => {
+  try {
+    await openModalProfesionalCreate();
+  } catch (err) {
+    console.error(err);
+    alert('No se pudo abrir el modal. Revisa consola.');
+  }
+});
+
+/* =========================
+   Auth bootstrap
+========================= */
+onAuthStateChanged(auth, async (user) => {
+  if (!user) {
+    // Ajusta el destino si tu login está en otro archivo
+    window.location.href = 'index.html';
+    return;
+  }
+
+  state.user = user;
+  pillUser.textContent = user.email || 'Usuario';
+
+  // Carga inicial
+  await loadProfesionales();
 });
