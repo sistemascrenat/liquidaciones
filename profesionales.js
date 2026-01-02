@@ -1,18 +1,8 @@
 // profesionales.js
 // Profesionales: CRUD + buscar + importar/exportar CSV
 // Firestore: colección "profesionales" (docId = rutId)
-// Roles: colección "roles" (id = r_xxx, nombre = visible)
-// Clínicas: colección "clinicas" (id = C001, C002, nombre = visible)
-// Campos según tu Firestore real:
-// - tipoPersona: "natural" | "juridica"
-// - nombreProfesional, razonSocial (juridica), rut, rutId, rutEmpresa
-// - correoPersonal, correoEmpresa (juridica), telefono
-// - direccionEmpresa, ciudadEmpresa (juridica)
-// - rolPrincipalId (string), rolesSecundariosIds (array ids)
-// - clinicasIds (array ids)
-// - tieneDescuento (bool), descuentoUF (number), descuentoRazon (string)
-// - estado (activo/inactivo)
-// - creadoEl/actualizadoEl (timestamps) + audit (creadoPor/actualizadoPor)
+// Roles: desde colección "roles" (id = r_xxx, nombre = "Cirujano", etc.)
+// UI: Formulario como MODAL (Crear / Editar)
 
 import { db } from './firebase-init.js';
 import { requireAuth } from './auth.js';
@@ -20,7 +10,7 @@ import { setActiveNav, toast, wireLogout } from './ui.js';
 import { cleanReminder, toUpperSafe, parseCSV, toCSV } from './utils.js';
 
 import {
-  collection, getDocs, doc, setDoc, updateDoc, deleteDoc,
+  collection, getDocs, doc, getDoc, setDoc, updateDoc, deleteDoc,
   serverTimestamp
 } from 'https://www.gstatic.com/firebasejs/11.7.3/firebase-firestore.js';
 
@@ -29,27 +19,26 @@ import {
 ========================= */
 const state = {
   user: null,
+
+  // profesionales (ya normalizados para tabla / edición)
+  all: [],     // [{rutId, rut, tipoPersona, nombreProfesional, razonSocial, rolPrincipalId, rolesSecundariosIds, ...}]
   q: '',
-  editId: null,                 // rutId actual en edición
-  all: [],                      // docs profesionales normalizados
-  rolesCatalog: [],             // [{id, nombre}]
-  rolesMap: new Map(),          // id -> nombre
-  clinicasCatalog: [],          // [{id, nombre}]
-  clinicasMap: new Map()        // id -> nombre
+
+  // roles catálogo (desde Firestore)
+  rolesCatalog: [] // [{id, nombre}]
 };
 
 const $ = (id)=> document.getElementById(id);
 
+/* =========================
+   Utils
+========================= */
 function normalize(s=''){
   return (s ?? '')
     .toString()
     .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
     .toLowerCase()
     .trim();
-}
-
-function uniq(arr){
-  return [...new Set((arr || []).filter(Boolean))];
 }
 
 function escapeHtml(s=''){
@@ -61,28 +50,44 @@ function escapeHtml(s=''){
     .replaceAll("'","&#039;");
 }
 
-/* =========================
-   Rut helpers (docId = rutId)
-========================= */
-function rutToRutId(rut){
-  // deja solo dígitos (sin DV). Tu ejemplo: "16.128.922-1" => "161289221"
-  // En tu DB rutId incluye DV? según tu captura rutId = "161289221" (incluye DV "1" al final)
-  // Por tanto: dígitos + DV si DV es numérico, o K/k si necesitas:
-  // Aquí mantendremos números y letra K.
-  const raw = (rut ?? '').toString().trim();
-  if(!raw) return '';
-  return raw
-    .replace(/\./g,'')
-    .replace(/-/g,'')
-    .replace(/\s+/g,'')
-    .toLowerCase()
-    .replace(/[^0-9k]/g,''); // permite k
+function uniq(arr){
+  return [...new Set((arr || []).filter(Boolean))];
 }
 
-function ensurePrincipalInsideSecondaries(rolPrincipalId, rolesSecundariosIds){
-  const xs = Array.isArray(rolesSecundariosIds) ? [...rolesSecundariosIds] : [];
-  if(rolPrincipalId && !xs.includes(rolPrincipalId)) xs.push(rolPrincipalId);
-  return uniq(xs);
+// Convierte rut a rutId (solo dígitos)
+function rutToRutId(rut=''){
+  return (rut ?? '').toString().replace(/\D/g,'').trim();
+}
+
+function labelTipo(tipo){
+  const t = (tipo || '').toString().toLowerCase();
+  return t === 'juridica' ? 'Jurídica' : 'Natural';
+}
+
+function roleNameById(id){
+  const r = state.rolesCatalog.find(x=>x.id === id);
+  return r?.nombre || id || '';
+}
+
+function rolesIdsToPills(ids){
+  const xs = Array.isArray(ids) ? ids : (ids ? [ids] : []);
+  if(!xs.length) return `<span class="muted">—</span>`;
+  return xs.map(id=> `<span class="pill">${escapeHtml(roleNameById(id))}</span>`).join(' ');
+}
+
+function rowMatches(p, q){
+  if(!q) return true;
+
+  const hay = normalize([
+    p.nombreProfesional,
+    p.razonSocial,
+    p.rut,
+    p.rutEmpresa,
+    roleNameById(p.rolPrincipalId),
+    (p.rolesSecundariosIds||[]).map(roleNameById).join(' ')
+  ].join(' '));
+
+  return hay.includes(q);
 }
 
 /* =========================
@@ -90,141 +95,143 @@ function ensurePrincipalInsideSecondaries(rolPrincipalId, rolesSecundariosIds){
 ========================= */
 const colProfesionales = collection(db, 'profesionales');
 const colRoles = collection(db, 'roles');
-const colClinicas = collection(db, 'clinicas');
 
 /* =========================
-   UI - Tipo persona toggles
+   Modal controls
 ========================= */
-function syncTipoPersonaUI(){
-  const tipo = (cleanReminder($('tipoPersona')?.value) || 'natural').toLowerCase();
+function openModal(mode, p=null){
+  // mode: 'new' | 'edit'
+  $('modalProfesional').classList.add('show');
+  $('modalProfesional').setAttribute('aria-hidden','false');
 
-  const showJ = (tipo === 'juridica');
-
-  $('wrapRazonSocial').style.display = showJ ? '' : 'none';
-  $('wrapRutEmpresa').style.display = showJ ? '' : 'none';
-  $('wrapCorreoEmpresa').style.display = showJ ? '' : 'none';
-  $('wrapDireccionEmpresa').style.display = showJ ? '' : 'none';
-  $('wrapCiudadEmpresa').style.display = showJ ? '' : 'none';
+  if(mode === 'new'){
+    $('modalTitulo').textContent = 'Crear profesional';
+    $('modalSub').textContent = 'Completa los datos y guarda.';
+    $('modalHint').textContent = '';
+    clearModal();
+    // defaults
+    $('m_tipoPersona').value = 'natural';
+    $('m_estado').value = 'activo';
+    toggleJuridicaFields();
+    // roles
+    paintRolesUI();
+  }else{
+    $('modalTitulo').textContent = 'Editar profesional';
+    $('modalSub').textContent = 'Modifica y guarda los cambios.';
+    loadToModal(p);
+    toggleJuridicaFields();
+    paintRolesUI(p); // marca checks
+    $('modalHint').textContent = `DocId (rutId): ${p?.rutId || ''}`;
+  }
 }
 
-function syncDescuentoUI(){
-  const tiene = String($('tieneDescuento')?.value || 'false') === 'true';
-  $('descuentoUF').disabled = !tiene;
-  $('descuentoRazon').disabled = !tiene;
+function closeModal(){
+  $('modalProfesional').classList.remove('show');
+  $('modalProfesional').setAttribute('aria-hidden','true');
+}
 
-  if(!tiene){
-    $('descuentoUF').value = '0';
-    $('descuentoRazon').value = '';
+function clearModal(){
+  $('m_tipoPersona').value = 'natural';
+  $('m_estado').value = 'activo';
+
+  $('m_nombreProfesional').value = '';
+  $('m_razonSocial').value = '';
+
+  $('m_rut').value = '';
+  $('m_rutEmpresa').value = '';
+
+  $('m_correoPersonal').value = '';
+  $('m_correoEmpresa').value = '';
+
+  $('m_telefono').value = '';
+
+  $('m_direccionEmpresa').value = '';
+  $('m_ciudadEmpresa').value = '';
+
+  $('m_tieneDescuento').checked = false;
+  $('m_descuentoUF').value = 0;
+  $('m_descuentoRazon').value = '';
+
+  // roles se repintan
+  $('m_rolPrincipal').innerHTML = '';
+  $('m_rolesSecWrap').innerHTML = '';
+}
+
+function toggleJuridicaFields(){
+  const tipo = ($('m_tipoPersona').value || 'natural').toLowerCase();
+  const isJ = tipo === 'juridica';
+
+  $('wrap_razonSocial').style.display = isJ ? '' : 'none';
+  $('wrap_rutEmpresa').style.display = isJ ? '' : 'none';
+  $('wrap_correoEmpresa').style.display = isJ ? '' : 'none';
+  $('wrap_direccionEmpresa').style.display = isJ ? '' : 'none';
+  $('wrap_ciudadEmpresa').style.display = isJ ? '' : 'none';
+
+  // Si es natural, limpiamos “cosas empresa” para evitar basura accidental
+  if(!isJ){
+    $('m_razonSocial').value = '';
+    $('m_rutEmpresa').value = '';
+    $('m_correoEmpresa').value = '';
+    $('m_direccionEmpresa').value = '';
+    $('m_ciudadEmpresa').value = '';
   }
 }
 
 /* =========================
-   Roles UI
+   Roles UI (modal)
 ========================= */
-function paintRolPrincipalSelect(){
-  const sel = $('rolPrincipalId');
+function paintRolesUI(p=null){
+  // principal select
+  const sel = $('m_rolPrincipal');
   sel.innerHTML = '';
 
   if(!state.rolesCatalog.length){
-    sel.innerHTML = `<option value="">(No hay roles en Firestore)</option>`;
-    return;
+    sel.innerHTML = `<option value="">(No hay roles)</option>`;
+  }else{
+    sel.innerHTML = `<option value="">Selecciona rol principal...</option>` +
+      state.rolesCatalog.map(r=> `<option value="${escapeHtml(r.id)}">${escapeHtml(r.nombre)}</option>`).join('');
   }
 
-  sel.innerHTML = `<option value="">— Selecciona rol principal —</option>`;
-  for(const r of state.rolesCatalog){
-    const opt = document.createElement('option');
-    opt.value = r.id;
-    opt.textContent = r.nombre;
-    sel.appendChild(opt);
-  }
-}
-
-function paintRolesSecundariosPicker(){
-  const wrap = $('rolesWrap');
+  // secundarios: checkboxes
+  const wrap = $('m_rolesSecWrap');
   wrap.innerHTML = '';
 
   if(!state.rolesCatalog.length){
-    wrap.innerHTML = `<div class="muted">No hay roles creados. Ve al módulo <b>Roles</b> para crear.</div>`;
-    return;
-  }
-
-  for(const r of state.rolesCatalog){
-    const id = `role_${r.id}`;
-    const label = document.createElement('label');
-    label.className = 'roleCheck';
-
-    label.innerHTML = `
-      <input type="checkbox" id="${id}" data-role-id="${escapeHtml(r.id)}"/>
-      <span class="pill">${escapeHtml(r.nombre)}</span>
-    `;
-    wrap.appendChild(label);
-  }
-}
-
-function getSelectedRolesSecundariosIds(){
-  const wrap = $('rolesWrap');
-  const checks = wrap.querySelectorAll('input[type="checkbox"][data-role-id]');
-  const out = [];
-  checks.forEach(ch=>{
-    if(ch.checked){
-      out.push(ch.getAttribute('data-role-id') || '');
+    wrap.innerHTML = `<div class="muted">No hay roles creados. Ve a <b>Roles</b>.</div>`;
+  }else{
+    for(const r of state.rolesCatalog){
+      const id = `sec_${r.id}`;
+      const label = document.createElement('label');
+      label.className = 'roleCheck';
+      label.innerHTML = `
+        <input type="checkbox" id="${id}" data-roleid="${escapeHtml(r.id)}"/>
+        <span class="pill">${escapeHtml(r.nombre)}</span>
+      `;
+      wrap.appendChild(label);
     }
-  });
-  return uniq(out).filter(Boolean);
-}
-
-function setSelectedRolesSecundariosIds(ids){
-  const wanted = new Set((ids || []).filter(Boolean));
-  const wrap = $('rolesWrap');
-  const checks = wrap.querySelectorAll('input[type="checkbox"][data-role-id]');
-  checks.forEach(ch=>{
-    const id = ch.getAttribute('data-role-id') || '';
-    ch.checked = wanted.has(id);
-  });
-}
-
-/* =========================
-   Clínicas UI
-========================= */
-function paintClinicasPicker(){
-  const wrap = $('clinicasWrap');
-  wrap.innerHTML = '';
-
-  if(!state.clinicasCatalog.length){
-    wrap.innerHTML = `<div class="muted">No hay clínicas creadas.</div>`;
-    return;
   }
 
-  for(const c of state.clinicasCatalog){
-    const id = `clin_${c.id}`;
-    const label = document.createElement('label');
-    label.className = 'roleCheck';
-    label.innerHTML = `
-      <input type="checkbox" id="${id}" data-clin-id="${escapeHtml(c.id)}"/>
-      <span class="pill">${escapeHtml(c.nombre || c.id)}</span>
-    `;
-    wrap.appendChild(label);
+  // si viene p (editar), setear valores
+  if(p){
+    if(p.rolPrincipalId) sel.value = p.rolPrincipalId;
+
+    const wanted = new Set((p.rolesSecundariosIds || []).map(String));
+    const checks = wrap.querySelectorAll('input[type="checkbox"][data-roleid]');
+    checks.forEach(ch=>{
+      const rid = ch.getAttribute('data-roleid');
+      ch.checked = wanted.has(rid);
+    });
   }
 }
 
-function getSelectedClinicasIds(){
-  const wrap = $('clinicasWrap');
-  const checks = wrap.querySelectorAll('input[type="checkbox"][data-clin-id]');
+function getRolesSecundariosIds(){
+  const wrap = $('m_rolesSecWrap');
+  const checks = wrap.querySelectorAll('input[type="checkbox"][data-roleid]');
   const out = [];
   checks.forEach(ch=>{
-    if(ch.checked) out.push(ch.getAttribute('data-clin-id') || '');
+    if(ch.checked) out.push(ch.getAttribute('data-roleid'));
   });
-  return uniq(out).filter(Boolean);
-}
-
-function setSelectedClinicasIds(ids){
-  const wanted = new Set((ids || []).filter(Boolean));
-  const wrap = $('clinicasWrap');
-  const checks = wrap.querySelectorAll('input[type="checkbox"][data-clin-id]');
-  checks.forEach(ch=>{
-    const id = ch.getAttribute('data-clin-id') || '';
-    ch.checked = wanted.has(id);
-  });
+  return uniq(out);
 }
 
 /* =========================
@@ -236,86 +243,14 @@ async function loadRoles(){
 
   snap.forEach(d=>{
     const x = d.data() || {};
-    // esperado: roles/{r_xxx} con { nombre: "CIRUJANO" }
-    const nombre = cleanReminder(x.nombre) || cleanReminder(x.titulo) || d.id;
-    out.push({ id: d.id, nombre: nombre });
-  });
-
-  out.sort((a,b)=> normalize(a.nombre).localeCompare(normalize(b.nombre)));
-  state.rolesCatalog = out;
-  state.rolesMap = new Map(out.map(r=>[r.id, r.nombre]));
-
-  paintRolPrincipalSelect();
-  paintRolesSecundariosPicker();
-}
-
-async function loadClinicas(){
-  const snap = await getDocs(colClinicas);
-  const out = [];
-
-  snap.forEach(d=>{
-    const x = d.data() || {};
-    const nombre = cleanReminder(x.nombre) || cleanReminder(x.titulo) || d.id;
+    // asumimos: roles/{id} con campo nombre
+    const nombre = cleanReminder(x.nombre);
+    if(!nombre) return;
     out.push({ id: d.id, nombre });
   });
 
   out.sort((a,b)=> normalize(a.nombre).localeCompare(normalize(b.nombre)));
-  state.clinicasCatalog = out;
-  state.clinicasMap = new Map(out.map(c=>[c.id, c.nombre]));
-
-  paintClinicasPicker();
-}
-
-function normalizeProfesionalDoc(id, x){
-  const tipoPersona = (cleanReminder(x.tipoPersona) || 'natural').toLowerCase();
-  const isJ = (tipoPersona === 'juridica');
-
-  const rut = cleanReminder(x.rut);
-  const rutId = cleanReminder(x.rutId) || id || rutToRutId(rut);
-
-  const nombreProfesional = cleanReminder(x.nombreProfesional);
-  const razonSocial = cleanReminder(x.razonSocial);
-
-  const rolPrincipalId = cleanReminder(x.rolPrincipalId || '');
-  const rolesSecundariosIds = Array.isArray(x.rolesSecundariosIds) ? x.rolesSecundariosIds.filter(Boolean) : [];
-
-  const clinicasIds = Array.isArray(x.clinicasIds) ? x.clinicasIds.filter(Boolean) : [];
-
-  const tieneDescuento = !!x.tieneDescuento;
-  const descuentoUF = (x.descuentoUF === 0) ? 0 : (Number(x.descuentoUF) || 0);
-  const descuentoRazon = cleanReminder(x.descuentoRazon || '');
-
-  return {
-    id: rutId || id,
-    rutId,
-    tipoPersona,
-    estado: cleanReminder(x.estado || 'activo') || 'activo',
-
-    nombreProfesional,
-    razonSocial: isJ ? razonSocial : null,
-
-    rut,
-    rutEmpresa: isJ ? cleanReminder(x.rutEmpresa) : null,
-
-    telefono: cleanReminder(x.telefono),
-    correoPersonal: cleanReminder(x.correoPersonal),
-    correoEmpresa: isJ ? cleanReminder(x.correoEmpresa) : null,
-
-    direccionEmpresa: isJ ? cleanReminder(x.direccionEmpresa) : null,
-    ciudadEmpresa: isJ ? cleanReminder(x.ciudadEmpresa) : null,
-
-    rolPrincipalId,
-    rolesSecundariosIds,
-
-    clinicasIds,
-
-    tieneDescuento,
-    descuentoUF,
-    descuentoRazon,
-
-    creadoEl: x.creadoEl || null,
-    actualizadoEl: x.actualizadoEl || null
-  };
+  state.rolesCatalog = out;
 }
 
 async function loadAll(){
@@ -323,14 +258,44 @@ async function loadAll(){
   const out = [];
 
   snap.forEach(d=>{
-    out.push(normalizeProfesionalDoc(d.id, d.data() || {}));
+    const x = d.data() || {};
+
+    // EN TU FIREBASE: docId = rutId
+    const rutId = x.rutId || d.id;
+
+    out.push({
+      rutId: cleanReminder(rutId),
+      rut: cleanReminder(x.rut),
+      rutEmpresa: cleanReminder(x.rutEmpresa),
+      tipoPersona: (x.tipoPersona || 'natural').toString().toLowerCase(),
+
+      nombreProfesional: cleanReminder(x.nombreProfesional),
+      razonSocial: cleanReminder(x.razonSocial),
+
+      correoPersonal: cleanReminder(x.correoPersonal),
+      correoEmpresa: cleanReminder(x.correoEmpresa),
+
+      telefono: cleanReminder(x.telefono),
+
+      direccionEmpresa: cleanReminder(x.direccionEmpresa),
+      ciudadEmpresa: cleanReminder(x.ciudadEmpresa),
+
+      rolPrincipalId: cleanReminder(x.rolPrincipalId),
+      rolesSecundariosIds: Array.isArray(x.rolesSecundariosIds) ? x.rolesSecundariosIds.map(String) : [],
+
+      tieneDescuento: !!x.tieneDescuento,
+      descuentoUF: Number(x.descuentoUF || 0),
+      descuentoRazon: cleanReminder(x.descuentoRazon),
+
+      estado: cleanReminder(x.estado || 'activo')
+    });
   });
 
-  // sort: jurídicas por razón social, naturales por nombre
+  // orden: por razón social si jurídica, si no por nombreProfesional
   out.sort((a,b)=>{
-    const an = (a.tipoPersona === 'juridica') ? (a.razonSocial || '') : (a.nombreProfesional || '');
-    const bn = (b.tipoPersona === 'juridica') ? (b.razonSocial || '') : (b.nombreProfesional || '');
-    return normalize(an).localeCompare(normalize(bn));
+    const an = normalize(a.tipoPersona==='juridica' ? (a.razonSocial||'') : (a.nombreProfesional||''));
+    const bn = normalize(b.tipoPersona==='juridica' ? (b.razonSocial||'') : (b.nombreProfesional||''));
+    return an.localeCompare(bn);
   });
 
   state.all = out;
@@ -338,41 +303,10 @@ async function loadAll(){
 }
 
 /* =========================
-   Search
-========================= */
-function rowMatches(p, q){
-  if(!q) return true;
-
-  const principalName = state.rolesMap.get(p.rolPrincipalId) || p.rolPrincipalId || '';
-  const secundariosNames = (p.rolesSecundariosIds || []).map(id=> state.rolesMap.get(id) || id).join(' ');
-  const clinNames = (p.clinicasIds || []).map(id=> state.clinicasMap.get(id) || id).join(' ');
-
-  const hay = normalize([
-    p.tipoPersona,
-    p.nombreProfesional,
-    p.razonSocial,
-    p.rut,
-    p.telefono,
-    p.correoPersonal,
-    p.correoEmpresa,
-    principalName,
-    secundariosNames,
-    clinNames
-  ].join(' '));
-
-  return hay.includes(q);
-}
-
-/* =========================
    Paint table
 ========================= */
-function pill(text){
-  return `<span class="pill">${escapeHtml(text)}</span>`;
-}
-
 function paint(){
-  const q = state.q;
-  const rows = state.all.filter(p=>rowMatches(p, q));
+  const rows = state.all.filter(p=>rowMatches(p, state.q));
 
   $('count').textContent = `${rows.length} profesional${rows.length===1?'':'es'}`;
 
@@ -382,61 +316,38 @@ function paint(){
   for(const p of rows){
     const tr = document.createElement('tr');
 
-    const isJ = (p.tipoPersona === 'juridica');
+    const profesionalLabel = p.nombreProfesional || '—';
+    const razonSocialLabel = (p.tipoPersona === 'juridica') ? (p.razonSocial || '—') : '—';
 
-    const main = isJ ? (p.razonSocial || '—') : (p.nombreProfesional || '—');
-    const sub  = isJ ? (p.nombreProfesional ? `Contacto: ${p.nombreProfesional}` : '') : '';
+    const rolPrincipal = p.rolPrincipalId ? roleNameById(p.rolPrincipalId) : '—';
+    const rolesSec = rolesIdsToPills(p.rolesSecundariosIds || []);
 
-    const contacto = [
-      p.telefono ? `📞 ${p.telefono}` : '',
-      p.correoPersonal ? `✉️ ${p.correoPersonal}` : '',
-      (isJ && p.correoEmpresa) ? `🏢 ${p.correoEmpresa}` : ''
-    ].filter(Boolean).join('<br/>') || `<span class="muted">—</span>`;
-
-    const principalRole = state.rolesMap.get(p.rolPrincipalId) || (p.rolPrincipalId || '—');
-
-    const sec = (p.rolesSecundariosIds || []).length
-      ? (p.rolesSecundariosIds || [])
-          .map(id=> state.rolesMap.get(id) || id)
-          .map(n=> pill(n))
-          .join(' ')
-      : `<span class="muted">—</span>`;
-
-    const clin = (p.clinicasIds || []).length
-      ? (p.clinicasIds || [])
-          .map(id=> state.clinicasMap.get(id) || id)
-          .map(n=> pill(n))
-          .join(' ')
-      : `<span class="muted">—</span>`;
+    const desc = p.tieneDescuento
+      ? `<span class="pill">Sí</span> <span class="muted">UF ${escapeHtml(String(p.descuentoUF || 0))}</span>`
+      : `<span class="muted">No</span>`;
 
     tr.innerHTML = `
-      <td>
-        <b>${escapeHtml(main)}</b>
-        ${sub ? `<div class="muted" style="font-size:12px;margin-top:2px;">${escapeHtml(sub)}</div>` : ''}
-        <div class="muted" style="font-size:12px;margin-top:4px;">
-          ${escapeHtml(p.tipoPersona || '')} · ${escapeHtml(p.estado || '')}
-          ${p.tieneDescuento ? ` · ${escapeHtml(String(p.descuentoUF || 0))} UF` : ''}
-        </div>
-      </td>
-      <td>${escapeHtml(p.rut || '')}${isJ && p.rutEmpresa ? `<div class="muted" style="font-size:12px;margin-top:2px;">Emp: ${escapeHtml(p.rutEmpresa)}</div>` : ''}</td>
-      <td>${contacto}</td>
-      <td>${escapeHtml(principalRole)}</td>
-      <td>${sec}</td>
-      <td>${clin}</td>
+      <td><b>${escapeHtml(profesionalLabel)}</b></td>
+      <td>${escapeHtml(razonSocialLabel)}</td>
+      <td>${escapeHtml(p.rut || '')}</td>
+      <td>${escapeHtml(labelTipo(p.tipoPersona))}</td>
+      <td><span class="pill">${escapeHtml(rolPrincipal)}</span></td>
+      <td>${rolesSec}</td>
+      <td>${desc}</td>
       <td></td>
     `;
 
-    const td = tr.children[6];
+    const td = tr.children[7];
 
     const btnEdit = document.createElement('button');
     btnEdit.className = 'btn';
     btnEdit.textContent = 'Editar';
-    btnEdit.addEventListener('click', ()=> setForm(p));
+    btnEdit.addEventListener('click', ()=> openModal('edit', p));
 
     const btnDel = document.createElement('button');
     btnDel.className = 'btn danger';
     btnDel.textContent = 'Eliminar';
-    btnDel.addEventListener('click', ()=> removeProfesional(p.id));
+    btnDel.addEventListener('click', ()=> removeProfesional(p.rutId));
 
     td.appendChild(btnEdit);
     td.appendChild(btnDel);
@@ -446,203 +357,147 @@ function paint(){
 }
 
 /* =========================
-   Form set/clear
+   Save / Delete (modal)
 ========================= */
-function clearForm(){
-  state.editId = null;
+function loadToModal(p){
+  clearModal();
 
-  $('tipoPersona').value = 'natural';
-  $('estado').value = 'activo';
+  $('m_tipoPersona').value = (p.tipoPersona || 'natural');
+  $('m_estado').value = p.estado || 'activo';
 
-  $('nombreProfesional').value = '';
-  $('razonSocial').value = '';
+  $('m_nombreProfesional').value = p.nombreProfesional || '';
+  $('m_razonSocial').value = p.razonSocial || '';
 
-  $('rut').value = '';
-  $('rutEmpresa').value = '';
+  $('m_rut').value = p.rut || '';
+  $('m_rutEmpresa').value = p.rutEmpresa || '';
 
-  $('telefono').value = '';
-  $('correoPersonal').value = '';
-  $('correoEmpresa').value = '';
+  $('m_correoPersonal').value = p.correoPersonal || '';
+  $('m_correoEmpresa').value = p.correoEmpresa || '';
 
-  $('direccionEmpresa').value = '';
-  $('ciudadEmpresa').value = '';
+  $('m_telefono').value = p.telefono || '';
 
-  $('rolPrincipalId').value = '';
-  setSelectedRolesSecundariosIds([]);
+  $('m_direccionEmpresa').value = p.direccionEmpresa || '';
+  $('m_ciudadEmpresa').value = p.ciudadEmpresa || '';
 
-  setSelectedClinicasIds([]);
+  $('m_tieneDescuento').checked = !!p.tieneDescuento;
+  $('m_descuentoUF').value = Number(p.descuentoUF || 0);
+  $('m_descuentoRazon').value = p.descuentoRazon || '';
 
-  $('tieneDescuento').value = 'false';
-  $('descuentoUF').value = '0';
-  $('descuentoRazon').value = '';
-
-  $('btnGuardar').textContent = 'Guardar profesional';
-
-  syncTipoPersonaUI();
-  syncDescuentoUI();
+  // roles se setean en paintRolesUI(p)
 }
 
-function setForm(p){
-  state.editId = p.id;
+async function saveFromModal(){
+  const tipoPersona = ($('m_tipoPersona').value || 'natural').toLowerCase();
+  const isJ = tipoPersona === 'juridica';
 
-  $('tipoPersona').value = (p.tipoPersona || 'natural');
-  $('estado').value = (p.estado || 'activo');
+  const nombreProfesional = cleanReminder($('m_nombreProfesional').value);
+  const razonSocial = cleanReminder($('m_razonSocial').value);
 
-  $('nombreProfesional').value = p.nombreProfesional || '';
-  $('razonSocial').value = p.razonSocial || '';
-
-  $('rut').value = p.rut || '';
-  $('rutEmpresa').value = p.rutEmpresa || '';
-
-  $('telefono').value = p.telefono || '';
-  $('correoPersonal').value = p.correoPersonal || '';
-  $('correoEmpresa').value = p.correoEmpresa || '';
-
-  $('direccionEmpresa').value = p.direccionEmpresa || '';
-  $('ciudadEmpresa').value = p.ciudadEmpresa || '';
-
-  $('rolPrincipalId').value = p.rolPrincipalId || '';
-  setSelectedRolesSecundariosIds(p.rolesSecundariosIds || []);
-
-  setSelectedClinicasIds(p.clinicasIds || []);
-
-  $('tieneDescuento').value = p.tieneDescuento ? 'true' : 'false';
-  $('descuentoUF').value = String(p.descuentoUF ?? 0);
-  $('descuentoRazon').value = p.descuentoRazon || '';
-
-  $('btnGuardar').textContent = 'Actualizar profesional';
-
-  syncTipoPersonaUI();
-  syncDescuentoUI();
-
-  $('nombreProfesional').focus();
-}
-
-/* =========================
-   Save / Delete
-========================= */
-function validateBeforeSave(payload){
-  if(!payload.nombreProfesional){
-    toast('Falta nombre del profesional');
-    $('nombreProfesional').focus();
-    return false;
-  }
-  if(!payload.rut){
-    toast('Falta RUT');
-    $('rut').focus();
-    return false;
-  }
-  if(!payload.rutId){
-    toast('RUT inválido (no puedo calcular rutId)');
-    $('rut').focus();
-    return false;
-  }
-  if(payload.tipoPersona === 'juridica' && !payload.razonSocial){
-    toast('Falta Razón Social (persona jurídica)');
-    $('razonSocial').focus();
-    return false;
-  }
-  if(!payload.rolPrincipalId){
-    toast('Selecciona rol principal');
-    $('rolPrincipalId').focus();
-    return false;
-  }
-  return true;
-}
-
-async function saveProfesional(){
-  const tipoPersona = (cleanReminder($('tipoPersona').value) || 'natural').toLowerCase();
-  const isJ = (tipoPersona === 'juridica');
-
-  const rut = cleanReminder($('rut').value);
+  const rut = cleanReminder($('m_rut').value);
   const rutId = rutToRutId(rut);
 
-  const rolPrincipalId = cleanReminder($('rolPrincipalId').value);
+  const rolPrincipalId = cleanReminder($('m_rolPrincipal').value);
 
-  // roles secundarios (ids)
-  let rolesSecundariosIds = getSelectedRolesSecundariosIds();
-  // según tu ejemplo, el principal suele venir incluido:
-  rolesSecundariosIds = ensurePrincipalInsideSecondaries(rolPrincipalId, rolesSecundariosIds);
+  if(!rut){
+    toast('Falta RUT');
+    $('m_rut').focus();
+    return;
+  }
+  if(!rutId){
+    toast('RUT inválido');
+    $('m_rut').focus();
+    return;
+  }
 
-  // clínicas
-  const clinicasIds = getSelectedClinicasIds();
+  // Regla: nombreProfesional siempre requerido
+  if(!nombreProfesional){
+    toast('Falta nombre profesional');
+    $('m_nombreProfesional').focus();
+    return;
+  }
 
-  // descuento
-  const tieneDescuento = String($('tieneDescuento').value) === 'true';
-  const descuentoUF = tieneDescuento ? (Number($('descuentoUF').value) || 0) : 0;
-  const descuentoRazon = tieneDescuento ? cleanReminder($('descuentoRazon').value) : null;
+  // Regla: si jurídica, razón social requerida
+  if(isJ && !razonSocial){
+    toast('Falta razón social (jurídica)');
+    $('m_razonSocial').focus();
+    return;
+  }
+
+  // Rol principal obligatorio (según tu requerimiento)
+  if(!rolPrincipalId){
+    toast('Selecciona rol principal');
+    $('m_rolPrincipal').focus();
+    return;
+  }
+
+  const rolesSecundariosIds = getRolesSecundariosIds();
+
+  const tieneDescuento = !!$('m_tieneDescuento').checked;
+  const descuentoUF = Number($('m_descuentoUF').value || 0);
+  const descuentoRazon = cleanReminder($('m_descuentoRazon').value);
 
   const payload = {
-    tipoPersona,
-    estado: cleanReminder($('estado').value) || 'activo',
-
-    nombreProfesional: cleanReminder($('nombreProfesional').value),
-    razonSocial: isJ ? cleanReminder($('razonSocial').value) : null,
-
-    rut,
     rutId,
+    rut,
 
-    rutEmpresa: isJ ? cleanReminder($('rutEmpresa').value) : null,
+    tipoPersona,
+    estado: cleanReminder($('m_estado').value || 'activo'),
 
-    telefono: cleanReminder($('telefono').value) || null,
+    nombreProfesional,
+    razonSocial: isJ ? razonSocial : null,
 
-    correoPersonal: cleanReminder($('correoPersonal').value) || null,
-    correoEmpresa: isJ ? (cleanReminder($('correoEmpresa').value) || null) : null,
+    rutEmpresa: isJ ? cleanReminder($('m_rutEmpresa').value) : null,
 
-    direccionEmpresa: isJ ? (cleanReminder($('direccionEmpresa').value) || null) : null,
-    ciudadEmpresa: isJ ? (cleanReminder($('ciudadEmpresa').value) || null) : null,
+    correoPersonal: cleanReminder($('m_correoPersonal').value) || null,
+    correoEmpresa: isJ ? (cleanReminder($('m_correoEmpresa').value) || null) : null,
+
+    telefono: cleanReminder($('m_telefono').value) || null,
+
+    direccionEmpresa: isJ ? (cleanReminder($('m_direccionEmpresa').value) || null) : null,
+    ciudadEmpresa: isJ ? (cleanReminder($('m_ciudadEmpresa').value) || null) : null,
 
     rolPrincipalId,
     rolesSecundariosIds,
 
-    clinicasIds,
-
     tieneDescuento,
-    descuentoUF,
-    descuentoRazon,
+    descuentoUF: tieneDescuento ? descuentoUF : 0,
+    descuentoRazon: tieneDescuento ? (descuentoRazon || null) : null,
 
     actualizadoEl: serverTimestamp(),
-    actualizadoPor: state.user?.email || ''
   };
-
-  if(!validateBeforeSave(payload)) return;
 
   const ref = doc(db, 'profesionales', rutId);
 
-  if(state.editId){
-    // update (merge)
+  // Si existe => update. Si no existe => set con creadoEl.
+  const snap = await getDoc(ref);
+
+  if(snap.exists()){
+    payload.actualizadoPor = state.user?.email || '';
     await updateDoc(ref, payload);
     toast('Profesional actualizado');
   }else{
-    // create with fixed id rutId
-    await setDoc(ref, {
-      ...payload,
-      creadoEl: serverTimestamp(),
-      creadoPor: state.user?.email || ''
-    }, { merge: true });
+    payload.creadoEl = serverTimestamp();
+    payload.creadoPor = state.user?.email || '';
+    await setDoc(ref, payload);
     toast('Profesional creado');
   }
 
-  clearForm();
+  closeModal();
   await loadAll();
 }
 
-async function removeProfesional(id){
-  const p = state.all.find(x=>x.id===id);
-  const label = (p?.tipoPersona === 'juridica')
-    ? (p?.razonSocial || p?.nombreProfesional || '')
-    : (p?.nombreProfesional || '');
-
-  const ok = confirm(`¿Eliminar profesional?\n\n${label}\n\nDocId (rutId): ${id}`);
+async function removeProfesional(rutId){
+  const p = state.all.find(x=>x.rutId === rutId);
+  const ok = confirm(`¿Eliminar profesional?\n\n${p?.nombreProfesional || ''}\n${p?.rut || ''}`);
   if(!ok) return;
-
-  await deleteDoc(doc(db,'profesionales',id));
+  await deleteDoc(doc(db,'profesionales',rutId));
   toast('Eliminado');
   await loadAll();
 }
 
 /* =========================
-   CSV Import / Export
+   Import / Export CSV
+   (mantengo simple; si quieres, lo afinamos a tu formato exacto)
 ========================= */
 function download(filename, text, mime='text/plain'){
   const blob = new Blob([text], { type: mime });
@@ -654,49 +509,34 @@ function download(filename, text, mime='text/plain'){
   setTimeout(()=> URL.revokeObjectURL(url), 1500);
 }
 
-function arrToCell(arr){
-  return (arr || []).filter(Boolean).join(' | ');
-}
-
-function cellToArr(v){
-  const raw = (v ?? '').toString().trim();
-  if(!raw) return [];
-  return uniq(
-    raw.split('|')
-      .flatMap(x=> x.split(';'))
-      .flatMap(x=> x.split(','))
-      .map(x=> cleanReminder(x))
-      .filter(Boolean)
-  );
-}
-
 function exportCSV(){
   const headers = [
-    'rut','nombreProfesional','tipoPersona','razonSocial','rutEmpresa',
-    'telefono','correoPersonal','correoEmpresa','direccionEmpresa','ciudadEmpresa',
-    'estado',
+    'rutId','rut','tipoPersona','estado',
+    'nombreProfesional','razonSocial','rutEmpresa',
+    'correoPersonal','correoEmpresa','telefono',
     'rolPrincipalId','rolesSecundariosIds',
-    'clinicasIds',
     'tieneDescuento','descuentoUF','descuentoRazon'
   ];
 
   const items = state.all.map(p=>({
+    rutId: p.rutId || '',
     rut: p.rut || '',
-    nombreProfesional: p.nombreProfesional || '',
     tipoPersona: p.tipoPersona || 'natural',
+    estado: p.estado || 'activo',
+
+    nombreProfesional: p.nombreProfesional || '',
     razonSocial: p.razonSocial || '',
     rutEmpresa: p.rutEmpresa || '',
-    telefono: p.telefono || '',
+
     correoPersonal: p.correoPersonal || '',
     correoEmpresa: p.correoEmpresa || '',
-    direccionEmpresa: p.direccionEmpresa || '',
-    ciudadEmpresa: p.ciudadEmpresa || '',
-    estado: p.estado || 'activo',
+    telefono: p.telefono || '',
+
     rolPrincipalId: p.rolPrincipalId || '',
-    rolesSecundariosIds: arrToCell(p.rolesSecundariosIds || []),
-    clinicasIds: arrToCell(p.clinicasIds || []),
-    tieneDescuento: String(!!p.tieneDescuento),
-    descuentoUF: String(p.descuentoUF ?? 0),
+    rolesSecundariosIds: (p.rolesSecundariosIds || []).join('|'),
+
+    tieneDescuento: p.tieneDescuento ? 'true' : 'false',
+    descuentoUF: String(p.descuentoUF || 0),
     descuentoRazon: p.descuentoRazon || ''
   }));
 
@@ -707,9 +547,9 @@ function exportCSV(){
 
 function plantillaCSV(){
   const csv =
-`rut,nombreProfesional,tipoPersona,razonSocial,rutEmpresa,telefono,correoPersonal,correoEmpresa,direccionEmpresa,ciudadEmpresa,estado,rolPrincipalId,rolesSecundariosIds,clinicasIds,tieneDescuento,descuentoUF,descuentoRazon
-16.128.922-1,Ignacio Pastor,natural,,, +56952270713,nacho@correo.cl,,,,activo,r_cirujano,"r_asistente_cirujano | r_cirujano","C001 | C002",false,0,
-17.315.517-4,Paloma Martinez,juridica,Ignovacion SPA,77.644.246-1,+56981406262,paloma@correo.com,pagos@empresa.cl,Monjitas 360,Santiago,activo,r_cirujano,"r_asistente_cirujano | r_cirujano","C001 | C002 | C003",false,0,
+`rut,nombreProfesional,tipoPersona,razonSocial,rutEmpresa,correoPersonal,correoEmpresa,telefono,rolPrincipalId,rolesSecundariosIds,tieneDescuento,descuentoUF,descuentoRazon
+16128922-1,Ignacio Pastor,natural,,,nacho@gmail.com,,+56952270713,r_cirujano,r_asistente_cirujano|r_cirujano,false,0,
+17315517-4,Paloma Martinez,juridica,Ignovacion SPA,77644246-1,paloma@correo.com,pagos@empresa.cl,+56981406262,r_cirujano,r_asistente_cirujano,false,0,
 `;
   download('plantilla_profesionales.csv', csv, 'text/csv');
   toast('Plantilla descargada');
@@ -727,118 +567,77 @@ async function importCSV(file){
   const idx = (name)=> headers.indexOf(name.toLowerCase());
 
   const iRut = idx('rut');
-  const iNom = idx('nombreProfesional');
-  const iTipo = idx('tipoPersona');
-  const iRS = idx('razonSocial');
-  const iRutEmp = idx('rutEmpresa');
+  const iNombre = idx('nombreprofesional');
+  const iTipo = idx('tipopersona');
+  const iRazon = idx('razonsocial');
+  const iRutEmp = idx('rutempresa');
+  const iCorreoP = idx('correopersonal');
+  const iCorreoE = idx('correoempresa');
   const iTel = idx('telefono');
-  const iCP = idx('correoPersonal');
-  const iCE = idx('correoEmpresa');
-  const iDirE = idx('direccionEmpresa');
-  const iCiuE = idx('ciudadEmpresa');
-  const iEstado = idx('estado');
-  const iRolP = idx('rolPrincipalId');
-  const iRolesS = idx('rolesSecundariosIds');
-  const iClin = idx('clinicasIds');
-  const iTD = idx('tieneDescuento');
-  const iDUF = idx('descuentoUF');
-  const iDR = idx('descuentoRazon');
+  const iRolP = idx('rolprincipalid');
+  const iRolesS = idx('rolessecundariosids');
+  const iTiene = idx('tienedescuento');
+  const iUf = idx('descuentouf');
+  const iRazonD = idx('descuentorazon');
 
-  if(iRut < 0 || iNom < 0){
-    toast('CSV debe incluir columnas: rut, nombreProfesional');
+  if(iRut < 0 || iNombre < 0){
+    toast('CSV debe incluir: rut y nombreProfesional');
     return;
   }
 
   let creates = 0, updates = 0, skipped = 0;
 
-  for(let r=1; r<rows.length; r++){
+  for(let r=1;r<rows.length;r++){
     const row = rows[r];
 
     const rut = cleanReminder(row[iRut] ?? '');
     const rutId = rutToRutId(rut);
+    const nombreProfesional = cleanReminder(row[iNombre] ?? '');
 
-    const nombreProfesional = cleanReminder(row[iNom] ?? '');
-    const tipoPersona = (cleanReminder(iTipo>=0 ? row[iTipo] : 'natural') || 'natural').toLowerCase();
-    const isJ = (tipoPersona === 'juridica');
+    if(!rutId || !nombreProfesional){ skipped++; continue; }
 
-    const razonSocial = isJ ? cleanReminder(iRS>=0 ? row[iRS] : '') : null;
-    const rutEmpresa = isJ ? cleanReminder(iRutEmp>=0 ? row[iRutEmp] : '') : null;
-
-    const telefono = cleanReminder(iTel>=0 ? row[iTel] : '') || null;
-    const correoPersonal = cleanReminder(iCP>=0 ? row[iCP] : '') || null;
-    const correoEmpresa = isJ ? (cleanReminder(iCE>=0 ? row[iCE] : '') || null) : null;
-
-    const direccionEmpresa = isJ ? (cleanReminder(iDirE>=0 ? row[iDirE] : '') || null) : null;
-    const ciudadEmpresa = isJ ? (cleanReminder(iCiuE>=0 ? row[iCiuE] : '') || null) : null;
-
-    const estado = cleanReminder(iEstado>=0 ? row[iEstado] : 'activo') || 'activo';
+    const tipoPersona = cleanReminder(iTipo>=0 ? row[iTipo] : 'natural').toLowerCase() || 'natural';
+    const isJ = tipoPersona === 'juridica';
 
     const rolPrincipalId = cleanReminder(iRolP>=0 ? row[iRolP] : '');
-    let rolesSecundariosIds = iRolesS>=0 ? cellToArr(row[iRolesS]) : [];
-    rolesSecundariosIds = ensurePrincipalInsideSecondaries(rolPrincipalId, rolesSecundariosIds);
+    const rolesSecundariosIds = iRolesS>=0
+      ? uniq((row[iRolesS] ?? '').toString().split('|').map(x=>cleanReminder(x)).filter(Boolean))
+      : [];
 
-    const clinicasIds = iClin>=0 ? cellToArr(row[iClin]) : [];
-
-    const tieneDescuento = String(cleanReminder(iTD>=0 ? row[iTD] : 'false')).toLowerCase() === 'true';
-    const descuentoUF = tieneDescuento ? (Number(cleanReminder(iDUF>=0 ? row[iDUF] : '0')) || 0) : 0;
-    const descuentoRazon = tieneDescuento ? (cleanReminder(iDR>=0 ? row[iDR] : '') || null) : null;
-
-    if(!rut || !rutId || !nombreProfesional){
-      skipped++;
-      continue;
-    }
-    if(isJ && !razonSocial){
-      skipped++;
-      continue;
-    }
-    if(!rolPrincipalId){
-      skipped++;
-      continue;
-    }
+    const tieneDescuento = (iTiene>=0 ? cleanReminder(row[iTiene]) : '').toLowerCase() === 'true';
+    const descuentoUF = Number(iUf>=0 ? row[iUf] : 0) || 0;
+    const descuentoRazon = cleanReminder(iRazonD>=0 ? row[iRazonD] : '');
 
     const payload = {
-      tipoPersona,
-      estado,
-
-      rut,
       rutId,
-
+      rut,
+      tipoPersona,
       nombreProfesional,
-      razonSocial,
-
-      rutEmpresa,
-
-      telefono,
-      correoPersonal,
-      correoEmpresa,
-
-      direccionEmpresa,
-      ciudadEmpresa,
-
-      rolPrincipalId,
+      razonSocial: isJ ? (cleanReminder(iRazon>=0 ? row[iRazon] : '') || null) : null,
+      rutEmpresa: isJ ? (cleanReminder(iRutEmp>=0 ? row[iRutEmp] : '') || null) : null,
+      correoPersonal: cleanReminder(iCorreoP>=0 ? row[iCorreoP] : '') || null,
+      correoEmpresa: isJ ? (cleanReminder(iCorreoE>=0 ? row[iCorreoE] : '') || null) : null,
+      telefono: cleanReminder(iTel>=0 ? row[iTel] : '') || null,
+      rolPrincipalId: rolPrincipalId || null,
       rolesSecundariosIds,
-
-      clinicasIds,
-
       tieneDescuento,
-      descuentoUF,
-      descuentoRazon,
-
+      descuentoUF: tieneDescuento ? descuentoUF : 0,
+      descuentoRazon: tieneDescuento ? (descuentoRazon || null) : null,
       actualizadoEl: serverTimestamp(),
-      actualizadoPor: state.user?.email || ''
+      actualizadoPor: state.user?.email || '',
+      estado: 'activo'
     };
 
-    const exists = state.all.some(p=> p.id === rutId);
+    const ref = doc(db, 'profesionales', rutId);
+    const snap = await getDoc(ref);
 
-    if(exists){
-      await updateDoc(doc(db,'profesionales',rutId), payload);
+    if(snap.exists()){
+      await updateDoc(ref, payload);
       updates++;
     }else{
-      await setDoc(doc(db,'profesionales',rutId), {
-        ...payload,
-        creadoEl: serverTimestamp(),
-        creadoPor: state.user?.email || ''
-      }, { merge: true });
+      payload.creadoEl = serverTimestamp();
+      payload.creadoPor = state.user?.email || '';
+      await setDoc(ref, payload);
       creates++;
     }
   }
@@ -857,13 +656,7 @@ requireAuth({
     setActiveNav('profesionales');
     wireLogout();
 
-    // Listeners base
-    $('btnGuardar').addEventListener('click', saveProfesional);
-    $('btnLimpiar').addEventListener('click', clearForm);
-
-    $('tipoPersona').addEventListener('change', syncTipoPersonaUI);
-    $('tieneDescuento').addEventListener('change', syncDescuentoUI);
-
+    // eventos UI
     $('buscador').addEventListener('input', (e)=>{
       state.q = normalize(e.target.value);
       paint();
@@ -879,14 +672,30 @@ requireAuth({
       await importCSV(file);
     });
 
-    // Load catalogs first
-    await loadRoles();
-    await loadClinicas();
-    await loadAll();
+    // modal events
+    $('btnCrear').addEventListener('click', ()=> openModal('new'));
 
-    // default UI
-    syncTipoPersonaUI();
-    syncDescuentoUI();
-    clearForm();
+    $('btnCerrarModal').addEventListener('click', closeModal);
+    $('btnCancelarModal').addEventListener('click', closeModal);
+
+    $('m_tipoPersona').addEventListener('change', ()=>{
+      toggleJuridicaFields();
+    });
+
+    $('btnGuardarModal').addEventListener('click', saveFromModal);
+
+    // cerrar modal clic fuera
+    $('modalProfesional').addEventListener('click', (e)=>{
+      if(e.target === $('modalProfesional')) closeModal();
+    });
+
+    // ESC
+    window.addEventListener('keydown', (e)=>{
+      if(e.key === 'Escape' && $('modalProfesional').classList.contains('show')) closeModal();
+    });
+
+    // primero roles, luego profesionales (para pintar nombres)
+    await loadRoles();
+    await loadAll();
   }
 });
