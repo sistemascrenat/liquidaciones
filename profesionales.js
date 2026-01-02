@@ -476,8 +476,8 @@ function rolesMini(p){
     .filter(Boolean);
 
   const parts = [];
-  if(pri) parts.push(`Principal: <b>${escapeHtml(pri)}</b>`);
-  if(secs.length) parts.push(`Sec: ${secs.map(x=>`<span class="pill">${escapeHtml(x)}</span>`).join(' ')}`);
+  if(pri) parts.push(`ROL PRINCIPAL: <b>${escapeHtml(pri)}</b>`);
+  if(secs.length) parts.push(`OTROS ROLES: ${secs.map(x=>`<span class="pill">${escapeHtml(x)}</span>`).join(' ')}`);
 
   if(!parts.length) return `<span class="muted">—</span>`;
   return parts.join(' <span class="dot">·</span> ');
