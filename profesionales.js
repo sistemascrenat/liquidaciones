@@ -1,18 +1,9 @@
-// profesionales.js
-// Profesionales: CRUD + buscar + importar/exportar CSV
-// Firestore: colección "profesionales" (docId = rutId)
-// Roles: colección "roles" (id = r_xxx, nombre = visible)
-// Clínicas: colección "clinicas" (id = C001, C002, nombre = visible)
-// Campos según tu Firestore real:
-// - tipoPersona: "natural" | "juridica"
-// - nombreProfesional, razonSocial (juridica), rut, rutId, rutEmpresa
-// - correoPersonal, correoEmpresa (juridica), telefono
-// - direccionEmpresa, ciudadEmpresa (juridica)
-// - rolPrincipalId (string), rolesSecundariosIds (array ids)
-// - clinicasIds (array ids)
-// - tieneDescuento (bool), descuentoUF (number), descuentoRazon (string)
-// - estado (activo/inactivo)
-// - creadoEl/actualizadoEl (timestamps) + audit (creadoPor/actualizadoPor)
+// profesionales.js — COMPLETO
+// ✅ Tabla estilo "Profesional/Empresa | RUT | Contacto" como tu screenshot
+// ✅ Modal para crear/editar
+// ✅ Rol principal + roles secundarios (desde colección roles)
+// ✅ Descuentos (tieneDescuento, descuentoUF, descuentoRazon)
+// ✅ Lectura/guardado con tu esquema Firestore profesionales/{rutId}
 
 import { db } from './firebase-init.js';
 import { requireAuth } from './auth.js';
@@ -20,8 +11,8 @@ import { setActiveNav, toast, wireLogout } from './ui.js';
 import { cleanReminder, toUpperSafe, parseCSV, toCSV } from './utils.js';
 
 import {
-  collection, getDocs, doc, setDoc, updateDoc, deleteDoc,
-  serverTimestamp
+  collection, getDocs, setDoc, deleteDoc,
+  doc, serverTimestamp
 } from 'https://www.gstatic.com/firebasejs/11.7.3/firebase-firestore.js';
 
 /* =========================
@@ -29,13 +20,10 @@ import {
 ========================= */
 const state = {
   user: null,
+  all: [],
+  editRutId: null,
   q: '',
-  editId: null,                 // rutId actual en edición
-  all: [],                      // docs profesionales normalizados
-  rolesCatalog: [],             // [{id, nombre}]
-  rolesMap: new Map(),          // id -> nombre
-  clinicasCatalog: [],          // [{id, nombre}]
-  clinicasMap: new Map()        // id -> nombre
+  rolesCatalog: [] // [{id, nombre}]
 };
 
 const $ = (id)=> document.getElementById(id);
@@ -62,27 +50,10 @@ function escapeHtml(s=''){
 }
 
 /* =========================
-   Rut helpers (docId = rutId)
+   Rut helpers
 ========================= */
-function rutToRutId(rut){
-  // deja solo dígitos (sin DV). Tu ejemplo: "16.128.922-1" => "161289221"
-  // En tu DB rutId incluye DV? según tu captura rutId = "161289221" (incluye DV "1" al final)
-  // Por tanto: dígitos + DV si DV es numérico, o K/k si necesitas:
-  // Aquí mantendremos números y letra K.
-  const raw = (rut ?? '').toString().trim();
-  if(!raw) return '';
-  return raw
-    .replace(/\./g,'')
-    .replace(/-/g,'')
-    .replace(/\s+/g,'')
-    .toLowerCase()
-    .replace(/[^0-9k]/g,''); // permite k
-}
-
-function ensurePrincipalInsideSecondaries(rolPrincipalId, rolesSecundariosIds){
-  const xs = Array.isArray(rolesSecundariosIds) ? [...rolesSecundariosIds] : [];
-  if(rolPrincipalId && !xs.includes(rolPrincipalId)) xs.push(rolPrincipalId);
-  return uniq(xs);
+function rutToId(rut){
+  return (rut ?? '').toString().replace(/\D/g,'');
 }
 
 /* =========================
@@ -90,69 +61,75 @@ function ensurePrincipalInsideSecondaries(rolPrincipalId, rolesSecundariosIds){
 ========================= */
 const colProfesionales = collection(db, 'profesionales');
 const colRoles = collection(db, 'roles');
-const colClinicas = collection(db, 'clinicas');
 
 /* =========================
-   UI - Tipo persona toggles
+   Modal
 ========================= */
-function syncTipoPersonaUI(){
-  const tipo = (cleanReminder($('tipoPersona')?.value) || 'natural').toLowerCase();
+function openModal(mode, p=null){
+  $('modalBackdrop').style.display = 'grid';
 
-  const showJ = (tipo === 'juridica');
+  if(mode === 'create'){
+    state.editRutId = null;
+    $('modalTitle').textContent = 'Crear profesional';
+    $('modalSub').textContent = 'Completa los datos y guarda.';
+    clearForm();
+  }else{
+    state.editRutId = p?.rutId || null;
+    $('modalTitle').textContent = 'Editar profesional';
+    $('modalSub').textContent = state.editRutId ? `ID: ${state.editRutId}` : '';
+    setForm(p);
+  }
 
-  $('wrapRazonSocial').style.display = showJ ? '' : 'none';
-  $('wrapRutEmpresa').style.display = showJ ? '' : 'none';
-  $('wrapCorreoEmpresa').style.display = showJ ? '' : 'none';
-  $('wrapDireccionEmpresa').style.display = showJ ? '' : 'none';
-  $('wrapCiudadEmpresa').style.display = showJ ? '' : 'none';
+  applyTipoPersonaUI();
+  $('nombreProfesional').focus();
 }
 
-function syncDescuentoUI(){
-  const tiene = String($('tieneDescuento')?.value || 'false') === 'true';
-  $('descuentoUF').disabled = !tiene;
-  $('descuentoRazon').disabled = !tiene;
+function closeModal(){
+  $('modalBackdrop').style.display = 'none';
+}
 
-  if(!tiene){
-    $('descuentoUF').value = '0';
-    $('descuentoRazon').value = '';
+function applyTipoPersonaUI(){
+  const tipo = ($('tipoPersona').value || 'natural').toLowerCase();
+  const isJ = (tipo === 'juridica');
+
+  // solo jurídica
+  const onlyJ = ['razonSocial','rutEmpresa','correoEmpresa','direccionEmpresa','ciudadEmpresa','telefonoEmpresa'];
+  for(const id of onlyJ){
+    const el = $(id);
+    el.disabled = !isJ;
+    el.style.opacity = isJ ? '1' : '.55';
+    if(!isJ) el.value = '';
   }
 }
 
 /* =========================
    Roles UI
 ========================= */
-function paintRolPrincipalSelect(){
-  const sel = $('rolPrincipalId');
+function paintRolesUI(){
+  // rol principal select
+  const sel = $('rolPrincipal');
   sel.innerHTML = '';
 
   if(!state.rolesCatalog.length){
-    sel.innerHTML = `<option value="">(No hay roles en Firestore)</option>`;
-    return;
+    sel.innerHTML = `<option value="">(Sin roles)</option>`;
+  }else{
+    sel.innerHTML = `<option value="">Selecciona rol principal…</option>` +
+      state.rolesCatalog.map(r=> `<option value="${escapeHtml(r.id)}">${escapeHtml(r.nombre)}</option>`).join('');
   }
 
-  sel.innerHTML = `<option value="">— Selecciona rol principal —</option>`;
-  for(const r of state.rolesCatalog){
-    const opt = document.createElement('option');
-    opt.value = r.id;
-    opt.textContent = r.nombre;
-    sel.appendChild(opt);
-  }
-}
-
-function paintRolesSecundariosPicker(){
-  const wrap = $('rolesWrap');
+  // roles secundarios checkboxes
+  const wrap = $('rolesSecWrap');
   wrap.innerHTML = '';
 
   if(!state.rolesCatalog.length){
-    wrap.innerHTML = `<div class="muted">No hay roles creados. Ve al módulo <b>Roles</b> para crear.</div>`;
+    wrap.innerHTML = `<div class="muted">No hay roles creados. Ve a <b>Roles</b>.</div>`;
     return;
   }
 
   for(const r of state.rolesCatalog){
-    const id = `role_${r.id}`;
+    const id = `rs_${r.id}`;
     const label = document.createElement('label');
     label.className = 'roleCheck';
-
     label.innerHTML = `
       <input type="checkbox" id="${id}" data-role-id="${escapeHtml(r.id)}"/>
       <span class="pill">${escapeHtml(r.nombre)}</span>
@@ -161,70 +138,29 @@ function paintRolesSecundariosPicker(){
   }
 }
 
-function getSelectedRolesSecundariosIds(){
-  const wrap = $('rolesWrap');
+function getRolesSecundariosIds(){
+  const wrap = $('rolesSecWrap');
   const checks = wrap.querySelectorAll('input[type="checkbox"][data-role-id]');
   const out = [];
   checks.forEach(ch=>{
-    if(ch.checked){
-      out.push(ch.getAttribute('data-role-id') || '');
-    }
+    if(ch.checked) out.push(ch.getAttribute('data-role-id'));
   });
-  return uniq(out).filter(Boolean);
+  return uniq(out);
 }
 
-function setSelectedRolesSecundariosIds(ids){
+function setRolesSecundariosIds(ids){
   const wanted = new Set((ids || []).filter(Boolean));
-  const wrap = $('rolesWrap');
+  const wrap = $('rolesSecWrap');
   const checks = wrap.querySelectorAll('input[type="checkbox"][data-role-id]');
   checks.forEach(ch=>{
-    const id = ch.getAttribute('data-role-id') || '';
+    const id = ch.getAttribute('data-role-id');
     ch.checked = wanted.has(id);
   });
 }
 
-/* =========================
-   Clínicas UI
-========================= */
-function paintClinicasPicker(){
-  const wrap = $('clinicasWrap');
-  wrap.innerHTML = '';
-
-  if(!state.clinicasCatalog.length){
-    wrap.innerHTML = `<div class="muted">No hay clínicas creadas.</div>`;
-    return;
-  }
-
-  for(const c of state.clinicasCatalog){
-    const id = `clin_${c.id}`;
-    const label = document.createElement('label');
-    label.className = 'roleCheck';
-    label.innerHTML = `
-      <input type="checkbox" id="${id}" data-clin-id="${escapeHtml(c.id)}"/>
-      <span class="pill">${escapeHtml(c.nombre || c.id)}</span>
-    `;
-    wrap.appendChild(label);
-  }
-}
-
-function getSelectedClinicasIds(){
-  const wrap = $('clinicasWrap');
-  const checks = wrap.querySelectorAll('input[type="checkbox"][data-clin-id]');
-  const out = [];
-  checks.forEach(ch=>{
-    if(ch.checked) out.push(ch.getAttribute('data-clin-id') || '');
-  });
-  return uniq(out).filter(Boolean);
-}
-
-function setSelectedClinicasIds(ids){
-  const wanted = new Set((ids || []).filter(Boolean));
-  const wrap = $('clinicasWrap');
-  const checks = wrap.querySelectorAll('input[type="checkbox"][data-clin-id]');
-  checks.forEach(ch=>{
-    const id = ch.getAttribute('data-clin-id') || '';
-    ch.checked = wanted.has(id);
-  });
+function roleNameById(id){
+  const r = state.rolesCatalog.find(x=>x.id===id);
+  return r?.nombre || id || '';
 }
 
 /* =========================
@@ -233,104 +169,73 @@ function setSelectedClinicasIds(ids){
 async function loadRoles(){
   const snap = await getDocs(colRoles);
   const out = [];
-
   snap.forEach(d=>{
     const x = d.data() || {};
-    // esperado: roles/{r_xxx} con { nombre: "CIRUJANO" }
-    const nombre = cleanReminder(x.nombre) || cleanReminder(x.titulo) || d.id;
-    out.push({ id: d.id, nombre: nombre });
+    const nombre = cleanReminder(x.nombre);
+    if(!nombre) return;
+    out.push({ id: d.id, nombre: toUpperSafe(nombre) });
   });
-
   out.sort((a,b)=> normalize(a.nombre).localeCompare(normalize(b.nombre)));
   state.rolesCatalog = out;
-  state.rolesMap = new Map(out.map(r=>[r.id, r.nombre]));
-
-  paintRolPrincipalSelect();
-  paintRolesSecundariosPicker();
-}
-
-async function loadClinicas(){
-  const snap = await getDocs(colClinicas);
-  const out = [];
-
-  snap.forEach(d=>{
-    const x = d.data() || {};
-    const nombre = cleanReminder(x.nombre) || cleanReminder(x.titulo) || d.id;
-    out.push({ id: d.id, nombre });
-  });
-
-  out.sort((a,b)=> normalize(a.nombre).localeCompare(normalize(b.nombre)));
-  state.clinicasCatalog = out;
-  state.clinicasMap = new Map(out.map(c=>[c.id, c.nombre]));
-
-  paintClinicasPicker();
+  paintRolesUI();
 }
 
 function normalizeProfesionalDoc(id, x){
-  const tipoPersona = (cleanReminder(x.tipoPersona) || 'natural').toLowerCase();
+  const tipoPersona = (cleanReminder(x.tipoPersona) || '').toLowerCase() || 'natural';
   const isJ = (tipoPersona === 'juridica');
 
   const rut = cleanReminder(x.rut);
-  const rutId = cleanReminder(x.rutId) || id || rutToRutId(rut);
-
-  const nombreProfesional = cleanReminder(x.nombreProfesional);
-  const razonSocial = cleanReminder(x.razonSocial);
-
-  const rolPrincipalId = cleanReminder(x.rolPrincipalId || '');
-  const rolesSecundariosIds = Array.isArray(x.rolesSecundariosIds) ? x.rolesSecundariosIds.filter(Boolean) : [];
-
-  const clinicasIds = Array.isArray(x.clinicasIds) ? x.clinicasIds.filter(Boolean) : [];
-
-  const tieneDescuento = !!x.tieneDescuento;
-  const descuentoUF = (x.descuentoUF === 0) ? 0 : (Number(x.descuentoUF) || 0);
-  const descuentoRazon = cleanReminder(x.descuentoRazon || '');
+  const rutId = cleanReminder(x.rutId) || id || rutToId(rut);
 
   return {
-    id: rutId || id,
     rutId,
     tipoPersona,
-    estado: cleanReminder(x.estado || 'activo') || 'activo',
+    estado: (cleanReminder(x.estado) || 'activo').toLowerCase(),
 
-    nombreProfesional,
-    razonSocial: isJ ? razonSocial : null,
+    // persona/empresa
+    nombreProfesional: cleanReminder(x.nombreProfesional) || '',
+    razonSocial: isJ ? (cleanReminder(x.razonSocial) || '') : '',
 
-    rut,
-    rutEmpresa: isJ ? cleanReminder(x.rutEmpresa) : null,
+    // RUTs
+    rut: rut || '',
+    rutEmpresa: isJ ? (cleanReminder(x.rutEmpresa) || '') : '',
 
-    telefono: cleanReminder(x.telefono),
-    correoPersonal: cleanReminder(x.correoPersonal),
-    correoEmpresa: isJ ? cleanReminder(x.correoEmpresa) : null,
+    // contacto
+    telefono: cleanReminder(x.telefono) || '',
+    telefonoEmpresa: isJ ? (cleanReminder(x.telefonoEmpresa) || '') : '',
+    correoPersonal: cleanReminder(x.correoPersonal) || '',
+    correoEmpresa: isJ ? (cleanReminder(x.correoEmpresa) || '') : '',
 
-    direccionEmpresa: isJ ? cleanReminder(x.direccionEmpresa) : null,
-    ciudadEmpresa: isJ ? cleanReminder(x.ciudadEmpresa) : null,
+    // otros
+    direccion: cleanReminder(x.direccion) || '',
+    direccionEmpresa: isJ ? (cleanReminder(x.direccionEmpresa) || '') : '',
+    ciudadEmpresa: isJ ? (cleanReminder(x.ciudadEmpresa) || '') : '',
+    giro: cleanReminder(x.giro) || '',
 
-    rolPrincipalId,
-    rolesSecundariosIds,
+    // roles
+    rolPrincipalId: cleanReminder(x.rolPrincipalId) || '',
+    rolesSecundariosIds: Array.isArray(x.rolesSecundariosIds) ? x.rolesSecundariosIds.filter(Boolean) : [],
 
-    clinicasIds,
-
-    tieneDescuento,
-    descuentoUF,
-    descuentoRazon,
-
-    creadoEl: x.creadoEl || null,
-    actualizadoEl: x.actualizadoEl || null
+    // descuentos
+    tieneDescuento: !!x.tieneDescuento,
+    descuentoUF: Number(x.descuentoUF ?? 0) || 0,
+    descuentoRazon: (x.descuentoRazon ?? '') ? cleanReminder(x.descuentoRazon) : ''
   };
 }
 
 async function loadAll(){
   const snap = await getDocs(colProfesionales);
   const out = [];
-
   snap.forEach(d=>{
     out.push(normalizeProfesionalDoc(d.id, d.data() || {}));
   });
 
-  // sort: jurídicas por razón social, naturales por nombre
+  // Orden: si es jurídica, por razón social; si es natural, por nombre profesional
   out.sort((a,b)=>{
-    const an = (a.tipoPersona === 'juridica') ? (a.razonSocial || '') : (a.nombreProfesional || '');
-    const bn = (b.tipoPersona === 'juridica') ? (b.razonSocial || '') : (b.nombreProfesional || '');
-    return normalize(an).localeCompare(normalize(bn));
+    const A = normalize(a.tipoPersona==='juridica' ? a.razonSocial : a.nombreProfesional);
+    const B = normalize(b.tipoPersona==='juridica' ? b.razonSocial : b.nombreProfesional);
+    if(A !== B) return A.localeCompare(B);
+    return normalize(a.nombreProfesional || '').localeCompare(normalize(b.nombreProfesional || ''));
   });
 
   state.all = out;
@@ -343,114 +248,26 @@ async function loadAll(){
 function rowMatches(p, q){
   if(!q) return true;
 
-  const principalName = state.rolesMap.get(p.rolPrincipalId) || p.rolPrincipalId || '';
-  const secundariosNames = (p.rolesSecundariosIds || []).map(id=> state.rolesMap.get(id) || id).join(' ');
-  const clinNames = (p.clinicasIds || []).map(id=> state.clinicasMap.get(id) || id).join(' ');
+  const showMain = (p.tipoPersona === 'juridica' && p.razonSocial) ? p.razonSocial : p.nombreProfesional;
 
   const hay = normalize([
-    p.tipoPersona,
-    p.nombreProfesional,
-    p.razonSocial,
-    p.rut,
-    p.telefono,
-    p.correoPersonal,
-    p.correoEmpresa,
-    principalName,
-    secundariosNames,
-    clinNames
+    showMain,
+    (p.tipoPersona === 'juridica' ? p.nombreProfesional : ''),
+    p.rut, p.rutEmpresa,
+    p.correoPersonal, p.correoEmpresa,
+    p.telefono, p.telefonoEmpresa,
+    roleNameById(p.rolPrincipalId),
+    ...(p.rolesSecundariosIds || []).map(roleNameById),
+    p.estado, p.tipoPersona
   ].join(' '));
 
   return hay.includes(q);
 }
 
 /* =========================
-   Paint table
-========================= */
-function pill(text){
-  return `<span class="pill">${escapeHtml(text)}</span>`;
-}
-
-function paint(){
-  const q = state.q;
-  const rows = state.all.filter(p=>rowMatches(p, q));
-
-  $('count').textContent = `${rows.length} profesional${rows.length===1?'':'es'}`;
-
-  const tb = $('tbody');
-  tb.innerHTML = '';
-
-  for(const p of rows){
-    const tr = document.createElement('tr');
-
-    const isJ = (p.tipoPersona === 'juridica');
-
-    const main = isJ ? (p.razonSocial || '—') : (p.nombreProfesional || '—');
-    const sub  = isJ ? (p.nombreProfesional ? `Contacto: ${p.nombreProfesional}` : '') : '';
-
-    const contacto = [
-      p.telefono ? `📞 ${p.telefono}` : '',
-      p.correoPersonal ? `✉️ ${p.correoPersonal}` : '',
-      (isJ && p.correoEmpresa) ? `🏢 ${p.correoEmpresa}` : ''
-    ].filter(Boolean).join('<br/>') || `<span class="muted">—</span>`;
-
-    const principalRole = state.rolesMap.get(p.rolPrincipalId) || (p.rolPrincipalId || '—');
-
-    const sec = (p.rolesSecundariosIds || []).length
-      ? (p.rolesSecundariosIds || [])
-          .map(id=> state.rolesMap.get(id) || id)
-          .map(n=> pill(n))
-          .join(' ')
-      : `<span class="muted">—</span>`;
-
-    const clin = (p.clinicasIds || []).length
-      ? (p.clinicasIds || [])
-          .map(id=> state.clinicasMap.get(id) || id)
-          .map(n=> pill(n))
-          .join(' ')
-      : `<span class="muted">—</span>`;
-
-    tr.innerHTML = `
-      <td>
-        <b>${escapeHtml(main)}</b>
-        ${sub ? `<div class="muted" style="font-size:12px;margin-top:2px;">${escapeHtml(sub)}</div>` : ''}
-        <div class="muted" style="font-size:12px;margin-top:4px;">
-          ${escapeHtml(p.tipoPersona || '')} · ${escapeHtml(p.estado || '')}
-          ${p.tieneDescuento ? ` · ${escapeHtml(String(p.descuentoUF || 0))} UF` : ''}
-        </div>
-      </td>
-      <td>${escapeHtml(p.rut || '')}${isJ && p.rutEmpresa ? `<div class="muted" style="font-size:12px;margin-top:2px;">Emp: ${escapeHtml(p.rutEmpresa)}</div>` : ''}</td>
-      <td>${contacto}</td>
-      <td>${escapeHtml(principalRole)}</td>
-      <td>${sec}</td>
-      <td>${clin}</td>
-      <td></td>
-    `;
-
-    const td = tr.children[6];
-
-    const btnEdit = document.createElement('button');
-    btnEdit.className = 'btn';
-    btnEdit.textContent = 'Editar';
-    btnEdit.addEventListener('click', ()=> setForm(p));
-
-    const btnDel = document.createElement('button');
-    btnDel.className = 'btn danger';
-    btnDel.textContent = 'Eliminar';
-    btnDel.addEventListener('click', ()=> removeProfesional(p.id));
-
-    td.appendChild(btnEdit);
-    td.appendChild(btnDel);
-
-    tb.appendChild(tr);
-  }
-}
-
-/* =========================
    Form set/clear
 ========================= */
 function clearForm(){
-  state.editId = null;
-
   $('tipoPersona').value = 'natural';
   $('estado').value = 'activo';
 
@@ -460,31 +277,26 @@ function clearForm(){
   $('rut').value = '';
   $('rutEmpresa').value = '';
 
-  $('telefono').value = '';
   $('correoPersonal').value = '';
   $('correoEmpresa').value = '';
 
+  $('telefono').value = '';
+  $('telefonoEmpresa').value = '';
+
+  $('direccion').value = '';
   $('direccionEmpresa').value = '';
   $('ciudadEmpresa').value = '';
+  $('giro').value = '';
 
-  $('rolPrincipalId').value = '';
-  setSelectedRolesSecundariosIds([]);
+  $('rolPrincipal').value = '';
+  setRolesSecundariosIds([]);
 
-  setSelectedClinicasIds([]);
-
-  $('tieneDescuento').value = 'false';
+  $('tieneDescuento').checked = false;
   $('descuentoUF').value = '0';
   $('descuentoRazon').value = '';
-
-  $('btnGuardar').textContent = 'Guardar profesional';
-
-  syncTipoPersonaUI();
-  syncDescuentoUI();
 }
 
 function setForm(p){
-  state.editId = p.id;
-
   $('tipoPersona').value = (p.tipoPersona || 'natural');
   $('estado').value = (p.estado || 'activo');
 
@@ -494,155 +306,250 @@ function setForm(p){
   $('rut').value = p.rut || '';
   $('rutEmpresa').value = p.rutEmpresa || '';
 
-  $('telefono').value = p.telefono || '';
   $('correoPersonal').value = p.correoPersonal || '';
   $('correoEmpresa').value = p.correoEmpresa || '';
 
+  $('telefono').value = p.telefono || '';
+  $('telefonoEmpresa').value = p.telefonoEmpresa || '';
+
+  $('direccion').value = p.direccion || '';
   $('direccionEmpresa').value = p.direccionEmpresa || '';
   $('ciudadEmpresa').value = p.ciudadEmpresa || '';
+  $('giro').value = p.giro || '';
 
-  $('rolPrincipalId').value = p.rolPrincipalId || '';
-  setSelectedRolesSecundariosIds(p.rolesSecundariosIds || []);
+  $('rolPrincipal').value = p.rolPrincipalId || '';
+  setRolesSecundariosIds(p.rolesSecundariosIds || []);
 
-  setSelectedClinicasIds(p.clinicasIds || []);
-
-  $('tieneDescuento').value = p.tieneDescuento ? 'true' : 'false';
-  $('descuentoUF').value = String(p.descuentoUF ?? 0);
+  $('tieneDescuento').checked = !!p.tieneDescuento;
+  $('descuentoUF').value = String(Number(p.descuentoUF ?? 0) || 0);
   $('descuentoRazon').value = p.descuentoRazon || '';
 
-  $('btnGuardar').textContent = 'Actualizar profesional';
-
-  syncTipoPersonaUI();
-  syncDescuentoUI();
-
-  $('nombreProfesional').focus();
+  applyTipoPersonaUI();
 }
 
 /* =========================
    Save / Delete
 ========================= */
-function validateBeforeSave(payload){
-  if(!payload.nombreProfesional){
-    toast('Falta nombre del profesional');
-    $('nombreProfesional').focus();
-    return false;
-  }
-  if(!payload.rut){
-    toast('Falta RUT');
-    $('rut').focus();
-    return false;
-  }
-  if(!payload.rutId){
-    toast('RUT inválido (no puedo calcular rutId)');
-    $('rut').focus();
-    return false;
-  }
-  if(payload.tipoPersona === 'juridica' && !payload.razonSocial){
-    toast('Falta Razón Social (persona jurídica)');
-    $('razonSocial').focus();
-    return false;
-  }
-  if(!payload.rolPrincipalId){
-    toast('Selecciona rol principal');
-    $('rolPrincipalId').focus();
-    return false;
-  }
-  return true;
-}
-
 async function saveProfesional(){
-  const tipoPersona = (cleanReminder($('tipoPersona').value) || 'natural').toLowerCase();
+  const tipoPersona = ($('tipoPersona').value || 'natural').toLowerCase();
   const isJ = (tipoPersona === 'juridica');
 
+  const nombreProfesional = cleanReminder($('nombreProfesional').value);
+  const razonSocial = cleanReminder($('razonSocial').value);
+
   const rut = cleanReminder($('rut').value);
-  const rutId = rutToRutId(rut);
+  const rutEmpresa = cleanReminder($('rutEmpresa').value);
 
-  const rolPrincipalId = cleanReminder($('rolPrincipalId').value);
+  const correoPersonal = cleanReminder($('correoPersonal').value);
+  const correoEmpresa = cleanReminder($('correoEmpresa').value);
 
-  // roles secundarios (ids)
-  let rolesSecundariosIds = getSelectedRolesSecundariosIds();
-  // según tu ejemplo, el principal suele venir incluido:
-  rolesSecundariosIds = ensurePrincipalInsideSecondaries(rolPrincipalId, rolesSecundariosIds);
+  const telefono = cleanReminder($('telefono').value);
+  const telefonoEmpresa = cleanReminder($('telefonoEmpresa').value);
 
-  // clínicas
-  const clinicasIds = getSelectedClinicasIds();
+  const direccion = cleanReminder($('direccion').value);
+  const direccionEmpresa = cleanReminder($('direccionEmpresa').value);
+  const ciudadEmpresa = cleanReminder($('ciudadEmpresa').value);
 
-  // descuento
-  const tieneDescuento = String($('tieneDescuento').value) === 'true';
-  const descuentoUF = tieneDescuento ? (Number($('descuentoUF').value) || 0) : 0;
-  const descuentoRazon = tieneDescuento ? cleanReminder($('descuentoRazon').value) : null;
+  const giro = cleanReminder($('giro').value);
+  const estado = (cleanReminder($('estado').value) || 'activo').toLowerCase();
 
+  const rolPrincipalId = cleanReminder($('rolPrincipal').value);
+  const rolesSecundariosIds = getRolesSecundariosIds();
+
+  const tieneDescuento = !!$('tieneDescuento').checked;
+  const descuentoUF = Number($('descuentoUF').value ?? 0) || 0;
+  const descuentoRazon = cleanReminder($('descuentoRazon').value);
+
+  if(!rut){
+    toast('Falta RUT');
+    $('rut').focus();
+    return;
+  }
+  const rutId = rutToId(rut);
+  if(!rutId){
+    toast('RUT inválido (no pude generar rutId)');
+    $('rut').focus();
+    return;
+  }
+  if(!nombreProfesional){
+    toast('Falta nombre profesional');
+    $('nombreProfesional').focus();
+    return;
+  }
+  if(isJ && !razonSocial){
+    toast('Falta razón social (jurídica)');
+    $('razonSocial').focus();
+    return;
+  }
+  if(state.rolesCatalog.length && !rolPrincipalId){
+    toast('Selecciona un rol principal');
+    $('rolPrincipal').focus();
+    return;
+  }
+
+  // Payload según tu esquema
   const payload = {
     tipoPersona,
-    estado: cleanReminder($('estado').value) || 'activo',
-
-    nombreProfesional: cleanReminder($('nombreProfesional').value),
-    razonSocial: isJ ? cleanReminder($('razonSocial').value) : null,
+    estado,
 
     rut,
     rutId,
 
-    rutEmpresa: isJ ? cleanReminder($('rutEmpresa').value) : null,
+    nombreProfesional,
+    razonSocial: isJ ? (razonSocial || null) : null,
 
-    telefono: cleanReminder($('telefono').value) || null,
+    rutEmpresa: isJ ? (rutEmpresa || null) : null,
 
-    correoPersonal: cleanReminder($('correoPersonal').value) || null,
-    correoEmpresa: isJ ? (cleanReminder($('correoEmpresa').value) || null) : null,
+    correoPersonal: correoPersonal || null,
+    correoEmpresa: isJ ? (correoEmpresa || null) : null,
 
-    direccionEmpresa: isJ ? (cleanReminder($('direccionEmpresa').value) || null) : null,
-    ciudadEmpresa: isJ ? (cleanReminder($('ciudadEmpresa').value) || null) : null,
+    telefono: telefono || null,
+    telefonoEmpresa: isJ ? (telefonoEmpresa || null) : null,
 
-    rolPrincipalId,
-    rolesSecundariosIds,
+    direccion: direccion || null,
+    direccionEmpresa: isJ ? (direccionEmpresa || null) : null,
+    ciudadEmpresa: isJ ? (ciudadEmpresa || null) : null,
 
-    clinicasIds,
+    giro: giro || null,
+
+    rolPrincipalId: rolPrincipalId || null,
+    rolesSecundariosIds: uniq(rolesSecundariosIds),
 
     tieneDescuento,
     descuentoUF,
-    descuentoRazon,
+    descuentoRazon: descuentoRazon || null,
 
     actualizadoEl: serverTimestamp(),
     actualizadoPor: state.user?.email || ''
   };
 
-  if(!validateBeforeSave(payload)) return;
-
-  const ref = doc(db, 'profesionales', rutId);
-
-  if(state.editId){
-    // update (merge)
-    await updateDoc(ref, payload);
-    toast('Profesional actualizado');
-  }else{
-    // create with fixed id rutId
-    await setDoc(ref, {
-      ...payload,
-      creadoEl: serverTimestamp(),
-      creadoPor: state.user?.email || ''
-    }, { merge: true });
-    toast('Profesional creado');
+  const isEdit = !!state.editRutId;
+  if(!isEdit){
+    payload.creadoEl = serverTimestamp();
+    payload.creadoPor = state.user?.email || '';
   }
 
-  clearForm();
+  await setDoc(doc(db,'profesionales',rutId), payload, { merge:true });
+
+  toast(isEdit ? 'Profesional actualizado' : 'Profesional creado');
+  closeModal();
   await loadAll();
 }
 
-async function removeProfesional(id){
-  const p = state.all.find(x=>x.id===id);
-  const label = (p?.tipoPersona === 'juridica')
-    ? (p?.razonSocial || p?.nombreProfesional || '')
-    : (p?.nombreProfesional || '');
-
-  const ok = confirm(`¿Eliminar profesional?\n\n${label}\n\nDocId (rutId): ${id}`);
+async function removeProfesional(rutId){
+  const p = state.all.find(x=>x.rutId===rutId);
+  const main = (p?.tipoPersona === 'juridica' && p?.razonSocial) ? p.razonSocial : (p?.nombreProfesional || '');
+  const ok = confirm(`¿Eliminar?\n\n${main}\n${p?.rut || ''}`);
   if(!ok) return;
-
-  await deleteDoc(doc(db,'profesionales',id));
+  await deleteDoc(doc(db,'profesionales',rutId));
   toast('Eliminado');
   await loadAll();
 }
 
 /* =========================
-   CSV Import / Export
+   Paint table (TU FORMATO)
+========================= */
+function labelTipoEstado(p){
+  const t = (p.tipoPersona || 'natural');
+  const e = (p.estado || 'activo');
+  return `${t} · ${e}`;
+}
+
+function contactoBlock(p){
+  // Natural: 1 teléfono + correo personal
+  // Jurídica: 1 o 2 teléfonos (si hay telefonoEmpresa) + correo personal + correo empresa
+  const rows = [];
+
+  if(p.telefono) rows.push({ ico:'📞', val: p.telefono });
+  if(p.tipoPersona === 'juridica' && p.telefonoEmpresa) rows.push({ ico:'📞', val: p.telefonoEmpresa });
+
+  if(p.correoPersonal) rows.push({ ico:'✉️', val: p.correoPersonal });
+  if(p.tipoPersona === 'juridica' && p.correoEmpresa) rows.push({ ico:'🏢', val: p.correoEmpresa });
+
+  if(!rows.length) return `<div class="mini muted">—</div>`;
+
+  return rows.map(r=>`
+    <div class="kRow">
+      <span class="kIco">${r.ico}</span>
+      <span class="kVal">${escapeHtml(r.val)}</span>
+    </div>
+  `).join('');
+}
+
+function rutBlock(p){
+  // Natural: solo rut
+  // Jurídica: rut (profesional) + Emp: rutEmpresa
+  const a = [];
+  a.push(`<div class="mono"><b>${escapeHtml(p.rut || '')}</b></div>`);
+  if(p.tipoPersona === 'juridica' && p.rutEmpresa){
+    a.push(`<div class="mini mono">Emp: <b>${escapeHtml(p.rutEmpresa)}</b></div>`);
+  }
+  return a.join('');
+}
+
+function profEmpresaBlock(p){
+  // ✅ Tu pedido:
+  // - "Profesional / Empresa" = juntar, pero:
+  //   - si jurídica: mostrar RAZON SOCIAL primero (titulo) + "Contacto: {nombreProfesional}" abajo
+  //   - si natural: mostrar nombre profesional (titulo) + abajo "natural · activo"
+  const isJ = (p.tipoPersona === 'juridica');
+  const title = (isJ && p.razonSocial) ? p.razonSocial : (p.nombreProfesional || '—');
+
+  const subLines = [];
+  if(isJ){
+    // contacto debajo (si existe)
+    if(p.nombreProfesional){
+      subLines.push(`<span>Contacto: <b>${escapeHtml(p.nombreProfesional)}</b></span>`);
+    }
+  }
+  subLines.push(`<span>${escapeHtml(labelTipoEstado(p))}</span>`);
+
+  return `
+    <div class="cellBlock">
+      <div class="cellTitle">${escapeHtml(title)}</div>
+      <div class="cellSub">
+        ${subLines.join('<span class="dot">·</span>')}
+      </div>
+    </div>
+  `;
+}
+
+function paint(){
+  const q = state.q;
+  const rows = state.all.filter(p=>rowMatches(p,q));
+
+  $('count').textContent = `${rows.length} profesional${rows.length===1?'':'es'}`;
+
+  const tb = $('tbody');
+  tb.innerHTML = '';
+
+  for(const p of rows){
+    const tr = document.createElement('tr');
+
+    tr.innerHTML = `
+      <td>${profEmpresaBlock(p)}</td>
+      <td>${rutBlock(p)}</td>
+      <td>${contactoBlock(p)}</td>
+      <td>
+        <div class="actionsMini">
+          <button class="iconBtn" type="button" title="Editar" aria-label="Editar">✏️</button>
+          <button class="iconBtn danger" type="button" title="Eliminar" aria-label="Eliminar">🗑️</button>
+        </div>
+      </td>
+    `;
+
+    const btnEdit = tr.querySelector('button[aria-label="Editar"]');
+    const btnDel  = tr.querySelector('button[aria-label="Eliminar"]');
+
+    btnEdit.addEventListener('click', ()=> openModal('edit', p));
+    btnDel.addEventListener('click', ()=> removeProfesional(p.rutId));
+
+    tb.appendChild(tr);
+  }
+}
+
+/* =========================
+   CSV (mantengo lo que ya funcionaba)
 ========================= */
 function download(filename, text, mime='text/plain'){
   const blob = new Blob([text], { type: mime });
@@ -654,49 +561,32 @@ function download(filename, text, mime='text/plain'){
   setTimeout(()=> URL.revokeObjectURL(url), 1500);
 }
 
-function arrToCell(arr){
-  return (arr || []).filter(Boolean).join(' | ');
-}
-
-function cellToArr(v){
-  const raw = (v ?? '').toString().trim();
-  if(!raw) return [];
-  return uniq(
-    raw.split('|')
-      .flatMap(x=> x.split(';'))
-      .flatMap(x=> x.split(','))
-      .map(x=> cleanReminder(x))
-      .filter(Boolean)
-  );
-}
-
 function exportCSV(){
   const headers = [
-    'rut','nombreProfesional','tipoPersona','razonSocial','rutEmpresa',
-    'telefono','correoPersonal','correoEmpresa','direccionEmpresa','ciudadEmpresa',
-    'estado',
+    'tipoPersona','estado',
+    'nombreProfesional','razonSocial',
+    'rut','rutEmpresa',
+    'correoPersonal','correoEmpresa',
+    'telefono','telefonoEmpresa',
     'rolPrincipalId','rolesSecundariosIds',
-    'clinicasIds',
     'tieneDescuento','descuentoUF','descuentoRazon'
   ];
 
   const items = state.all.map(p=>({
-    rut: p.rut || '',
-    nombreProfesional: p.nombreProfesional || '',
     tipoPersona: p.tipoPersona || 'natural',
+    estado: p.estado || 'activo',
+    nombreProfesional: p.nombreProfesional || '',
     razonSocial: p.razonSocial || '',
+    rut: p.rut || '',
     rutEmpresa: p.rutEmpresa || '',
-    telefono: p.telefono || '',
     correoPersonal: p.correoPersonal || '',
     correoEmpresa: p.correoEmpresa || '',
-    direccionEmpresa: p.direccionEmpresa || '',
-    ciudadEmpresa: p.ciudadEmpresa || '',
-    estado: p.estado || 'activo',
+    telefono: p.telefono || '',
+    telefonoEmpresa: p.telefonoEmpresa || '',
     rolPrincipalId: p.rolPrincipalId || '',
-    rolesSecundariosIds: arrToCell(p.rolesSecundariosIds || []),
-    clinicasIds: arrToCell(p.clinicasIds || []),
-    tieneDescuento: String(!!p.tieneDescuento),
-    descuentoUF: String(p.descuentoUF ?? 0),
+    rolesSecundariosIds: (p.rolesSecundariosIds || []).join('|'),
+    tieneDescuento: p.tieneDescuento ? 'true' : 'false',
+    descuentoUF: (Number(p.descuentoUF ?? 0) || 0).toString(),
     descuentoRazon: p.descuentoRazon || ''
   }));
 
@@ -706,10 +596,9 @@ function exportCSV(){
 }
 
 function plantillaCSV(){
-  const csv =
-`rut,nombreProfesional,tipoPersona,razonSocial,rutEmpresa,telefono,correoPersonal,correoEmpresa,direccionEmpresa,ciudadEmpresa,estado,rolPrincipalId,rolesSecundariosIds,clinicasIds,tieneDescuento,descuentoUF,descuentoRazon
-16.128.922-1,Ignacio Pastor,natural,,, +56952270713,nacho@correo.cl,,,,activo,r_cirujano,"r_asistente_cirujano | r_cirujano","C001 | C002",false,0,
-17.315.517-4,Paloma Martinez,juridica,Ignovacion SPA,77.644.246-1,+56981406262,paloma@correo.com,pagos@empresa.cl,Monjitas 360,Santiago,activo,r_cirujano,"r_asistente_cirujano | r_cirujano","C001 | C002 | C003",false,0,
+  const csv = `tipoPersona,estado,nombreProfesional,razonSocial,rut,rutEmpresa,correoPersonal,correoEmpresa,telefono,telefonoEmpresa,rolPrincipalId,rolesSecundariosIds,tieneDescuento,descuentoUF,descuentoRazon
+natural,activo,Ignacio Pastor,,16.128.922-1,,nachopastorpino@gmail.com,,+56952270713,,r_cirujano,r_asistente_cirujano|r_cirujano,false,0,
+juridica,activo,Paloma Martinez,Ignovacion SPA,17.315.517-4,77.644.246-1,paloma@correo.com,pagos@empresa.cl,+56981406262,+56222223333,r_cirujano,r_asistente_cirujano,false,0,
 `;
   download('plantilla_profesionales.csv', csv, 'text/csv');
   toast('Plantilla descargada');
@@ -726,124 +615,79 @@ async function importCSV(file){
   const headers = rows[0].map(h=>cleanReminder(h).toLowerCase());
   const idx = (name)=> headers.indexOf(name.toLowerCase());
 
-  const iRut = idx('rut');
-  const iNom = idx('nombreProfesional');
-  const iTipo = idx('tipoPersona');
-  const iRS = idx('razonSocial');
-  const iRutEmp = idx('rutEmpresa');
-  const iTel = idx('telefono');
-  const iCP = idx('correoPersonal');
-  const iCE = idx('correoEmpresa');
-  const iDirE = idx('direccionEmpresa');
-  const iCiuE = idx('ciudadEmpresa');
-  const iEstado = idx('estado');
-  const iRolP = idx('rolPrincipalId');
-  const iRolesS = idx('rolesSecundariosIds');
-  const iClin = idx('clinicasIds');
-  const iTD = idx('tieneDescuento');
-  const iDUF = idx('descuentoUF');
-  const iDR = idx('descuentoRazon');
+  const I = {
+    tipoPersona: idx('tipopersona'),
+    estado: idx('estado'),
+    nombreProfesional: idx('nombreprofesional'),
+    razonSocial: idx('razonsocial'),
+    rut: idx('rut'),
+    rutEmpresa: idx('rutempresa'),
+    correoPersonal: idx('correopersonal'),
+    correoEmpresa: idx('correoempresa'),
+    telefono: idx('telefono'),
+    telefonoEmpresa: idx('telefonoempresa'),
+    rolPrincipalId: idx('rolprincipalid'),
+    rolesSecundariosIds: idx('rolessecundariosids'),
+    tieneDescuento: idx('tienedescuento'),
+    descuentoUF: idx('descuentouf'),
+    descuentoRazon: idx('descuentorazon')
+  };
 
-  if(iRut < 0 || iNom < 0){
-    toast('CSV debe incluir columnas: rut, nombreProfesional');
+  if(I.rut < 0 || I.nombreProfesional < 0){
+    toast('CSV debe incluir al menos: rut, nombreProfesional');
     return;
   }
 
-  let creates = 0, updates = 0, skipped = 0;
+  let upserts = 0, skipped = 0;
 
-  for(let r=1; r<rows.length; r++){
+  for(let r=1;r<rows.length;r++){
     const row = rows[r];
 
-    const rut = cleanReminder(row[iRut] ?? '');
-    const rutId = rutToRutId(rut);
+    const rut = cleanReminder(row[I.rut] ?? '');
+    const rutId = rutToId(rut);
+    const nombreProfesional = cleanReminder(row[I.nombreProfesional] ?? '');
 
-    const nombreProfesional = cleanReminder(row[iNom] ?? '');
-    const tipoPersona = (cleanReminder(iTipo>=0 ? row[iTipo] : 'natural') || 'natural').toLowerCase();
+    if(!rutId || !nombreProfesional){ skipped++; continue; }
+
+    const tipoPersona = (cleanReminder(I.tipoPersona>=0 ? row[I.tipoPersona] : 'natural') || 'natural').toLowerCase();
     const isJ = (tipoPersona === 'juridica');
-
-    const razonSocial = isJ ? cleanReminder(iRS>=0 ? row[iRS] : '') : null;
-    const rutEmpresa = isJ ? cleanReminder(iRutEmp>=0 ? row[iRutEmp] : '') : null;
-
-    const telefono = cleanReminder(iTel>=0 ? row[iTel] : '') || null;
-    const correoPersonal = cleanReminder(iCP>=0 ? row[iCP] : '') || null;
-    const correoEmpresa = isJ ? (cleanReminder(iCE>=0 ? row[iCE] : '') || null) : null;
-
-    const direccionEmpresa = isJ ? (cleanReminder(iDirE>=0 ? row[iDirE] : '') || null) : null;
-    const ciudadEmpresa = isJ ? (cleanReminder(iCiuE>=0 ? row[iCiuE] : '') || null) : null;
-
-    const estado = cleanReminder(iEstado>=0 ? row[iEstado] : 'activo') || 'activo';
-
-    const rolPrincipalId = cleanReminder(iRolP>=0 ? row[iRolP] : '');
-    let rolesSecundariosIds = iRolesS>=0 ? cellToArr(row[iRolesS]) : [];
-    rolesSecundariosIds = ensurePrincipalInsideSecondaries(rolPrincipalId, rolesSecundariosIds);
-
-    const clinicasIds = iClin>=0 ? cellToArr(row[iClin]) : [];
-
-    const tieneDescuento = String(cleanReminder(iTD>=0 ? row[iTD] : 'false')).toLowerCase() === 'true';
-    const descuentoUF = tieneDescuento ? (Number(cleanReminder(iDUF>=0 ? row[iDUF] : '0')) || 0) : 0;
-    const descuentoRazon = tieneDescuento ? (cleanReminder(iDR>=0 ? row[iDR] : '') || null) : null;
-
-    if(!rut || !rutId || !nombreProfesional){
-      skipped++;
-      continue;
-    }
-    if(isJ && !razonSocial){
-      skipped++;
-      continue;
-    }
-    if(!rolPrincipalId){
-      skipped++;
-      continue;
-    }
 
     const payload = {
       tipoPersona,
-      estado,
+      estado: (cleanReminder(I.estado>=0 ? row[I.estado] : 'activo') || 'activo').toLowerCase(),
 
       rut,
       rutId,
 
       nombreProfesional,
-      razonSocial,
+      razonSocial: isJ ? (cleanReminder(I.razonSocial>=0 ? row[I.razonSocial] : '') || null) : null,
+      rutEmpresa: isJ ? (cleanReminder(I.rutEmpresa>=0 ? row[I.rutEmpresa] : '') || null) : null,
 
-      rutEmpresa,
+      correoPersonal: (cleanReminder(I.correoPersonal>=0 ? row[I.correoPersonal] : '') || null),
+      correoEmpresa: isJ ? (cleanReminder(I.correoEmpresa>=0 ? row[I.correoEmpresa] : '') || null) : null,
 
-      telefono,
-      correoPersonal,
-      correoEmpresa,
+      telefono: (cleanReminder(I.telefono>=0 ? row[I.telefono] : '') || null),
+      telefonoEmpresa: isJ ? (cleanReminder(I.telefonoEmpresa>=0 ? row[I.telefonoEmpresa] : '') || null) : null,
 
-      direccionEmpresa,
-      ciudadEmpresa,
+      rolPrincipalId: (cleanReminder(I.rolPrincipalId>=0 ? row[I.rolPrincipalId] : '') || null),
+      rolesSecundariosIds: uniq(
+        (cleanReminder(I.rolesSecundariosIds>=0 ? row[I.rolesSecundariosIds] : '') || '')
+          .split('|').map(x=>cleanReminder(x)).filter(Boolean)
+      ),
 
-      rolPrincipalId,
-      rolesSecundariosIds,
-
-      clinicasIds,
-
-      tieneDescuento,
-      descuentoUF,
-      descuentoRazon,
+      tieneDescuento: String(cleanReminder(I.tieneDescuento>=0 ? row[I.tieneDescuento] : 'false') || 'false').toLowerCase() === 'true',
+      descuentoUF: Number(cleanReminder(I.descuentoUF>=0 ? row[I.descuentoUF] : '0') || 0) || 0,
+      descuentoRazon: (cleanReminder(I.descuentoRazon>=0 ? row[I.descuentoRazon] : '') || null),
 
       actualizadoEl: serverTimestamp(),
       actualizadoPor: state.user?.email || ''
     };
 
-    const exists = state.all.some(p=> p.id === rutId);
-
-    if(exists){
-      await updateDoc(doc(db,'profesionales',rutId), payload);
-      updates++;
-    }else{
-      await setDoc(doc(db,'profesionales',rutId), {
-        ...payload,
-        creadoEl: serverTimestamp(),
-        creadoPor: state.user?.email || ''
-      }, { merge: true });
-      creates++;
-    }
+    await setDoc(doc(db,'profesionales',rutId), payload, { merge:true });
+    upserts++;
   }
 
-  toast(`Import listo: +${creates} / ↻${updates} / omitidos ${skipped}`);
+  toast(`Import listo: ${upserts} guardados / ${skipped} omitidos`);
   await loadAll();
 }
 
@@ -857,21 +701,27 @@ requireAuth({
     setActiveNav('profesionales');
     wireLogout();
 
-    // Listeners base
-    $('btnGuardar').addEventListener('click', saveProfesional);
-    $('btnLimpiar').addEventListener('click', clearForm);
+    // Modal
+    $('btnCrear').addEventListener('click', ()=> openModal('create'));
+    $('btnModalClose').addEventListener('click', closeModal);
+    $('btnModalCancelar').addEventListener('click', closeModal);
+    $('btnModalGuardar').addEventListener('click', saveProfesional);
 
-    $('tipoPersona').addEventListener('change', syncTipoPersonaUI);
-    $('tieneDescuento').addEventListener('change', syncDescuentoUI);
+    $('modalBackdrop').addEventListener('click', (e)=>{
+      if(e.target === $('modalBackdrop')) closeModal();
+    });
 
+    $('tipoPersona').addEventListener('change', applyTipoPersonaUI);
+
+    // Search
     $('buscador').addEventListener('input', (e)=>{
       state.q = normalize(e.target.value);
       paint();
     });
 
+    // CSV
     $('btnExportar').addEventListener('click', exportCSV);
     $('btnDescargarPlantilla').addEventListener('click', plantillaCSV);
-
     $('fileCSV').addEventListener('change', async (e)=>{
       const file = e.target.files?.[0];
       e.target.value = '';
@@ -879,14 +729,8 @@ requireAuth({
       await importCSV(file);
     });
 
-    // Load catalogs first
+    // Load
     await loadRoles();
-    await loadClinicas();
     await loadAll();
-
-    // default UI
-    syncTipoPersonaUI();
-    syncDescuentoUI();
-    clearForm();
   }
 });
