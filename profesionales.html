@@ -7,10 +7,8 @@
   <link rel="icon" type="image/png" href="logoCR.png">
   <link rel="stylesheet" href="estilos.css"/>
 </head>
-
 <body>
-  <!-- APP SHELL -->
-  <div class="app-shell">
+  <div class="container">
 
     <!-- SIDEBAR -->
     <aside class="sidebar">
@@ -23,194 +21,145 @@
       </div>
 
       <nav class="nav">
-        <a class="nav-item active" href="profesionales.html">👩‍⚕️ Profesionales</a>
-        <a class="nav-item" href="procedimientos.html">🧾 Procedimientos</a>
-        <a class="nav-item" href="clinicas.html">🏥 Clínicas</a>
-        <a class="nav-item" href="dashboard.html">🏠 Volver al Dashboard</a>
+        <a href="profesionales.html" data-nav="profesionales">👩‍⚕️ Profesionales</a>
+        <a href="roles.html" data-nav="roles">🧩 Roles</a>
+
+        <a href="#" data-nav="ambulatorios" onclick="alert('Módulo en construcción');return false;">🧾 Ambulatorios</a>
+        <a href="#" data-nav="clinicas" onclick="alert('Módulo en construcción');return false;">🏥 Clínicas</a>
+        <a href="#" data-nav="liquidaciones" onclick="alert('Módulo en construcción');return false;">📄 Liquidaciones</a>
+        <a href="#" data-nav="produccion" onclick="alert('Módulo en construcción');return false;">📊 Producción</a>
       </nav>
 
-      <div class="sidebar-footer">
-        <div class="pill" id="pillUser">—</div>
-        <button class="btn" id="btnLogout">⏏️ Cerrar sesión</button>
+      <div style="margin-top:14px; padding:10px;">
+        <button class="btn soft" id="btnLogout" style="width:100%;">⏏️ Cerrar sesión</button>
       </div>
     </aside>
 
     <!-- MAIN -->
     <main class="main">
-
-      <!-- HEADER -->
-      <header class="topbar">
+      <div class="topbar">
         <div>
-          <h1 style="margin:0;">Profesionales</h1>
-          <div class="muted" id="subHeader">Gestión de profesionales (incluye descuentos UF y clínicas)</div>
+          <div class="h1">Profesionales</div>
+          <div class="muted" id="who"></div>
         </div>
+        <div class="badge" id="count">0 profesionales</div>
+      </div>
 
-        <div class="top-actions">
-          <button class="btn btn-soft" id="btnNuevoProfesional">+ Nuevo profesional</button>
+      <!-- FORM -->
+      <section class="card" style="margin-bottom:14px;">
+        <div class="grid">
+          <div>
+            <label>Nombre / Razón social</label>
+            <input id="nombre" placeholder="Ej: Juan Pérez / Empresa SPA"/>
+          </div>
 
-          <div class="search-wrap">
-            <input id="profSearch" placeholder="Buscar (nombre, rut, razón social, correo, estado…)" />
-            <button class="btn btn-soft" id="profSearchClear" style="display:none;">✕</button>
+          <div>
+            <label>RUT</label>
+            <input id="rut" placeholder="Ej: 12.345.678-9"/>
+          </div>
+
+          <div>
+            <label>Email</label>
+            <input id="email" placeholder="correo@dominio.cl"/>
+          </div>
+
+          <div>
+            <label>Teléfono</label>
+            <input id="telefono" placeholder="+56 9 1234 5678"/>
+          </div>
+
+          <div>
+            <label>Dirección</label>
+            <input id="direccion" placeholder="Dirección (si aplica)"/>
+          </div>
+
+          <div>
+            <label>Giro (empresa)</label>
+            <input id="giro" placeholder="Giro (si aplica)"/>
+          </div>
+
+          <div>
+            <label>Contacto empresa</label>
+            <input id="contactoEmpresa" placeholder="Nombre contacto (si aplica)"/>
+          </div>
+
+          <div>
+            <label>Tipo persona</label>
+            <select id="tipoPersona">
+              <option value="NATURAL">Natural</option>
+              <option value="JURIDICA">Jurídica</option>
+            </select>
           </div>
         </div>
-      </header>
 
-      <!-- HINT -->
-      <div class="muted" id="profSearchHint" style="margin:8px 0 14px 0;"></div>
+        <div style="margin-top:12px;">
+          <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px;">
+            <label style="margin:0;">Roles (selección múltiple)</label>
+            <a class="muted" href="roles.html" style="text-decoration:underline;">Administrar Roles</a>
+          </div>
+
+          <!-- Se pinta dinámicamente con checkboxes -->
+          <div id="rolesWrap" class="rolesWrap"></div>
+
+          <div class="muted" style="margin-top:8px;">
+            Si no hay roles aún, crea algunos en el módulo <b>Roles</b>.
+          </div>
+        </div>
+
+        <div class="actions" style="margin-top:12px;">
+          <button class="btn primary" id="btnGuardar">Guardar profesional</button>
+          <button class="btn" id="btnLimpiar">Limpiar</button>
+
+          <span style="flex:1"></span>
+
+          <input id="buscador" placeholder="Buscar (nombre, rut, email, roles)" style="max-width:420px;"/>
+        </div>
+      </section>
+
+      <!-- IMPORT / EXPORT -->
+      <section class="card" style="margin-bottom:14px;">
+        <div class="actions">
+          <button class="btn" id="btnDescargarPlantilla">⬇️ Plantilla CSV</button>
+          <button class="btn" id="btnExportar">⬇️ Exportar CSV</button>
+
+          <label class="btn" style="display:inline-flex;gap:8px;align-items:center;">
+            ⬆️ Importar CSV
+            <input id="fileCSV" type="file" accept=".csv,text/csv" style="display:none;"/>
+          </label>
+
+          <div class="muted">
+            Columnas esperadas: <b>nombre,rut,email,telefono,direccion,tipoPersona,giro,contactoEmpresa,roles</b>
+            <span class="muted"> (roles separados por “|”, ej: MEDICO|AUXILIAR)</span>
+          </div>
+        </div>
+      </section>
 
       <!-- TABLE -->
       <section class="card">
-        <div id="tablaProfesionales"></div>
+        <div class="tableWrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Nombre / Razón social</th>
+                <th>RUT</th>
+                <th>Email</th>
+                <th>Roles</th>
+                <th style="width:220px;">Acciones</th>
+              </tr>
+            </thead>
+            <tbody id="tbody"></tbody>
+          </table>
+        </div>
+
+        <div class="muted" style="margin-top:10px;">
+          Guardado en Firestore: colección <b>profesionales</b>. Roles vienen de colección <b>roles</b>.
+        </div>
       </section>
 
     </main>
   </div>
 
-  <!-- OVERLAY + MODAL PROFESIONAL -->
-  <div id="modalOverlay" class="modal-overlay" style="display:none;">
-    <div id="modalProfesional" class="modal" style="display:none;">
-
-      <div class="modal-head">
-        <div>
-          <div class="modal-title" id="modalProfTitle">Nuevo profesional</div>
-          <div class="muted" id="modalProfSubtitle">Crear un nuevo profesional</div>
-        </div>
-        <button class="btn btn-soft" id="btnCerrarModalProf">✕</button>
-      </div>
-
-      <div class="modal-body">
-        <div id="mProfError" class="error" style="display:none;"></div>
-
-        <div class="grid-2">
-          <div>
-            <label>RUT (ID)</label>
-            <input id="mProfRut" placeholder="12.345.678-9">
-          </div>
-
-          <div>
-            <label>Nombre profesional (obligatorio)</label>
-            <input id="mProfNombre" placeholder="Ej: Juan Pérez">
-          </div>
-        </div>
-
-        <div class="grid-2">
-          <div>
-            <label>Tipo persona</label>
-            <select id="mProfTipoPersona">
-              <option value="natural">Natural</option>
-              <option value="juridica">Jurídica</option>
-            </select>
-          </div>
-
-          <div>
-            <label>Estado</label>
-            <select id="mProfEstado">
-              <option value="activo">Activo</option>
-              <option value="inactivo">Inactivo</option>
-            </select>
-          </div>
-        </div>
-
-        <div class="grid-2">
-          <div>
-            <label>Correo personal</label>
-            <input id="mProfCorreoPersonal" placeholder="correo@dominio.cl">
-          </div>
-          <div>
-            <label>Teléfono</label>
-            <input id="mProfTelefono" placeholder="+56 9 1234 5678">
-          </div>
-        </div>
-
-        <div>
-          <label>Dirección / Comentarios</label>
-          <input id="mProfDireccion" placeholder="Dirección o comentario interno">
-        </div>
-
-        <!-- CAMPOS EMPRESA (solo jurídica) -->
-        <div id="empresaFields" style="display:none; margin-top:10px;">
-          <div class="divider"></div>
-          <div class="muted" style="margin-bottom:8px;">Datos de empresa (solo si es Jurídica)</div>
-
-          <div class="grid-2">
-            <div>
-              <label>RUT empresa</label>
-              <input id="mProfRutEmpresa" placeholder="76.123.456-7">
-            </div>
-            <div>
-              <label>Razón social</label>
-              <input id="mProfRazon" placeholder="Empresa SpA">
-            </div>
-          </div>
-
-          <div class="grid-2">
-            <div>
-              <label>Giro</label>
-              <input id="mProfGiro" placeholder="Giro">
-            </div>
-            <div>
-              <label>Correo empresa</label>
-              <input id="mProfCorreoEmpresa" placeholder="contacto@empresa.cl">
-            </div>
-          </div>
-
-          <div class="grid-2">
-            <div>
-              <label>Dirección empresa</label>
-              <input id="mProfDireccionEmpresa" placeholder="Dirección empresa">
-            </div>
-            <div>
-              <label>Ciudad empresa</label>
-              <input id="mProfCiudadEmpresa" placeholder="Santiago">
-            </div>
-          </div>
-        </div>
-
-        <!-- CLINICAS -->
-        <div style="margin-top:12px;">
-          <div class="divider"></div>
-          <div class="muted" style="margin-bottom:8px;">Clínicas asignadas</div>
-          <div id="mProfClinicas" class="checklist"></div>
-          <div class="muted" style="margin-top:6px;">En “Nuevo profesional” se asignan por defecto todas las clínicas activas.</div>
-        </div>
-
-        <!-- DESCUENTOS -->
-        <div style="margin-top:12px;">
-          <div class="divider"></div>
-          <div class="grid-2" style="align-items:center;">
-            <div>
-              <label style="display:flex;gap:10px;align-items:center;margin:0;">
-                <input type="checkbox" id="mProfTieneDesc">
-                <span>Aplica descuento (UF)</span>
-              </label>
-              <div class="muted" style="margin-top:6px;">Ej: “0,50 UF” de descuento mensual / fijo.</div>
-            </div>
-            <div>
-              <label>Monto descuento UF</label>
-              <input id="mProfDescMonto" placeholder="0,50">
-            </div>
-          </div>
-
-          <div style="margin-top:8px;">
-            <label>Razón del descuento</label>
-            <input id="mProfDescRazon" placeholder="Ej: ajuste convenio, descuento especial, etc.">
-          </div>
-        </div>
-
-        <div class="divider" style="margin-top:14px;"></div>
-        <div class="muted">
-          Nota: Roles no se editan aquí. Quedan para el módulo “Roles”.
-        </div>
-
-      </div>
-
-      <div class="modal-foot">
-        <button class="btn btn-soft" id="btnCancelarModalProf">Cancelar</button>
-        <button class="btn" id="btnGuardarModalProf">Guardar</button>
-      </div>
-
-    </div>
-  </div>
+  <div id="toast" class="toast"></div>
 
   <script type="module" src="profesionales.js"></script>
 </body>
