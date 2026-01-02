@@ -1,9 +1,5 @@
 // firebase-init.js
-// Configuración de Firebase para el panel Clínica Rennat
-
-// Importamos desde la CDN de Firebase (ESM)
 import { initializeApp } from "https://www.gstatic.com/firebasejs/11.7.3/firebase-app.js";
-import { getAuth } from "https://www.gstatic.com/firebasejs/11.7.3/firebase-auth.js";
 import { getFirestore } from "https://www.gstatic.com/firebasejs/11.7.3/firebase-firestore.js";
 
 // Config de tu proyecto (la que me enviaste)
@@ -18,5 +14,4 @@ const firebaseConfig = {
 
 // Inicializamos Firebase y exportamos para el resto del código
 export const app = initializeApp(firebaseConfig);
-export const auth = getAuth(app);
 export const db   = getFirestore(app);
