@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Clínica Rennat – Profesionales</title>
+  <link rel="icon" type="image/png" href="logo.png"/>
+  <link rel="stylesheet" href="estilos.css"/>
+</head>
+<body>
+  <div class="container">
+
+    <!-- SIDEBAR -->
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="logo">CR</div>
+        <div>
+          <div class="title">Clínica Rennat</div>
+          <div class="sub">Panel privado</div>
+        </div>
+      </div>
+
+      <nav class="nav">
+        <a href="profesionales.html" data-nav="profesionales">👩‍⚕️ Profesionales</a>
+        <a href="#" data-nav="ambulatorios" onclick="alert('Módulo en construcción');return false;">🧾 Ambulatorios</a>
+        <a href="#" data-nav="clinicas" onclick="alert('Módulo en construcción');return false;">🏥 Clínicas</a>
+        <a href="#" data-nav="liquidaciones" onclick="alert('Módulo en construcción');return false;">📄 Liquidaciones</a>
+        <a href="#" data-nav="produccion" onclick="alert('Módulo en construcción');return false;">📊 Producción</a>
+      </nav>
+
+      <div style="margin-top:14px; padding:10px;">
+        <button class="btn soft" id="btnLogout" style="width:100%;">⏏️ Cerrar sesión</button>
+      </div>
+    </aside>
+
+    <!-- MAIN -->
+    <main class="main">
+      <div class="topbar">
+        <div>
+          <div class="h1">Profesionales</div>
+          <div class="muted" id="who"></div>
+        </div>
+        <div class="badge" id="count">0 profesionales</div>
+      </div>
+
+      <!-- FORM -->
+      <section class="card" style="margin-bottom:14px;">
+        <div class="grid">
+          <div>
+            <label>Nombre</label>
+            <input id="nombre" placeholder="Ej: Juan Pérez"/>
+          </div>
+          <div>
+            <label>RUT</label>
+            <input id="rut" placeholder="Ej: 12.345.678-9"/>
+          </div>
+          <div>
+            <label>Email</label>
+            <input id="email" placeholder="correo@dominio.cl"/>
+          </div>
+          <div>
+            <label>Rol</label>
+            <select id="rol">
+              <option value="MEDICO">Médico</option>
+              <option value="ANESTESISTA">Anestesista</option>
+              <option value="AUXILIAR">Auxiliar</option>
+              <option value="OTRO">Otro</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="actions" style="margin-top:12px;">
+          <button class="btn primary" id="btnGuardar">Guardar profesional</button>
+          <button class="btn" id="btnLimpiar">Limpiar</button>
+
+          <span style="flex:1"></span>
+
+          <input id="buscador" placeholder="Buscar (nombre, rut, email, rol)" style="max-width:420px;"/>
+        </div>
+      </section>
+
+      <!-- IMPORT / EXPORT -->
+      <section class="card" style="margin-bottom:14px;">
+        <div class="actions">
+          <button class="btn" id="btnDescargarPlantilla">⬇️ Plantilla CSV</button>
+          <button class="btn" id="btnExportar">⬇️ Exportar CSV</button>
+
+          <label class="btn" style="display:inline-flex;gap:8px;align-items:center;">
+            ⬆️ Importar CSV
+            <input id="fileCSV" type="file" accept=".csv,text/csv" style="display:none;"/>
+          </label>
+
+          <div class="muted">
+            Columnas esperadas: <b>nombre,rut,email,rol</b>
+          </div>
+        </div>
+      </section>
+
+      <!-- TABLE -->
+      <section class="card">
+        <div class="tableWrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Nombre</th>
+                <th>RUT</th>
+                <th>Email</th>
+                <th>Rol</th>
+                <th style="width:220px;">Acciones</th>
+              </tr>
+            </thead>
+            <tbody id="tbody"></tbody>
+          </table>
+        </div>
+        <div class="muted" style="margin-top:10px;">
+          Guardado en Firestore: colección <b>profesionales</b>.
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <div id="toast" class="toast"></div>
+
+  <script type="module" src="profesionales.js"></script>
+</body>
+</html>
