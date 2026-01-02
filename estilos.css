@@ -320,3 +320,18 @@ th{
  border-color: transparent;
  color:#fff;
 }
+
+/* ===== Estado ACTIVO / INACTIVO ===== */
+.state{
+  font-weight: 800;
+  font-size: 12px;
+}
+
+.state.activo{
+  color: #15803d; /* verde */
+}
+
+.state.inactivo{
+  color: #b91c1c; /* rojo */
+}
+
