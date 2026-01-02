@@ -1,10 +1,12 @@
-// cirugias.js — COMPLETO
-// ✅ Procedimientos tipo "cirugía" en colección: procedimientos (docId = PC0001, PC0002...)
-// ✅ Tarifas por (clínica, tipoPaciente) con descomposición: HMQ (roles), DP, INS
-// ✅ Tabla muestra chips: "CLÍNICA · PACIENTE · $TOTAL" (o PENDIENTE si no hay nada)
+// cirugias.js — COMPLETO (compatible con tu Firestore ACTUAL)
+// ✅ Colección: procedimientos (docId PC0001, PC0002...; tipo="cirugia")
+// ✅ Tarifas embebidas en el MISMO doc, en MAP:
+//    tarifas.{CLINICA}.pacientes.{particular|isapre|fonasa}.{ honorarios{}, derechosPabellon, insumos, actualizadoEl, actualizadoPor }
+// ✅ Tabla: chips "CLÍNICA · PACIENTE · $TOTAL" (si no hay nada => TARIFA: PENDIENTE)
 // ✅ Buscador: coma=AND, guión=OR
-// ✅ CSV: plantilla, export, import (filas por tarifa)
-// ✅ Sidebar común via layout.js
+// ✅ CSV: plantilla / export / import (1 fila por tarifa)
+// ✅ Sidebar común: layout.js (await loadSidebar({ active:'cirugias' }))
+// ✅ Formato CLP: $ con puntos de miles
 
 import { db } from './firebase-init.js';
 import { requireAuth } from './auth.js';
@@ -15,7 +17,8 @@ import { loadSidebar } from './layout.js';
 import {
   collection, getDocs, setDoc, deleteDoc,
   doc, getDoc, serverTimestamp,
-  query, where
+  query, where,
+  updateDoc, arrayUnion
 } from 'https://www.gstatic.com/firebasejs/11.7.3/firebase-firestore.js';
 
 /* =========================
@@ -34,7 +37,7 @@ const state = {
     clinicaId: null,
     tipoPaciente: 'particular',
     // data
-    hmqPorRol: {}, // {roleId: montoNumber}
+    hmqPorRol: {},  // {roleId: montoNumber}
     dp: 0,
     ins: 0
   }
@@ -42,6 +45,9 @@ const state = {
 
 const $ = (id)=> document.getElementById(id);
 
+/* =========================
+   Utils
+========================= */
 function normalize(s=''){
   return (s ?? '')
     .toString()
@@ -70,7 +76,6 @@ function asNumberLoose(v){
 }
 function clp(n){
   const x = Number(n || 0) || 0;
-  // puntos miles
   const s = Math.round(x).toString();
   const withDots = s.replace(/\B(?=(\d{3})+(?!\d))/g, '.');
   return `$${withDots}`;
@@ -87,7 +92,7 @@ function wireMoneyInput(el, onChange){
   el.addEventListener('blur', repaint);
   el.addEventListener('change', repaint);
 
-  // mientras escribe, dejamos solo dígitos (no forzamos $ para no pelear con el caret)
+  // mientras escribe: solo dígitos para no pelear con el caret
   el.addEventListener('input', ()=>{
     const digits = (el.value ?? '').toString().replace(/[^\d]/g,'');
     el.value = digits;
@@ -103,7 +108,7 @@ const colRoles = collection(db, 'roles');
 const colClinicas = collection(db, 'clinicas');
 
 /* =========================
-   Load catalogs
+   Catalog loaders
 ========================= */
 async function loadRoles(){
   const snap = await getDocs(colRoles);
@@ -135,18 +140,28 @@ async function loadClinicas(){
 
 /* =========================
    Procedimientos loader (cirugías)
-   - Guarda tarifas embebidas en memoria (no en el doc) para pintar tabla
+   - LEE tarifas desde MAP en el doc: tarifas.{C}.pacientes.{tp}.{honorarios, derechosPabellon, insumos}
 ========================= */
 function normalizeProcDoc(id, x){
   return {
     id,
+    _raw: x || {}, // 👈 guardamos doc crudo para leer tarifas
     codigo: cleanReminder(x.codigo) || id,
     tipo: cleanReminder(x.tipo) || 'cirugia',
     nombre: cleanReminder(x.nombre) || '',
     estado: (cleanReminder(x.estado) || 'activa').toLowerCase(),
-    rolesIds: Array.isArray(x.rolesIds) ? x.rolesIds.filter(Boolean) : [],
-    tarifas: [] // se llena después
+    rolesIds: Array.isArray(x.rolesIds) ? x.rolesIds.filter(Boolean)
+           : (Array.isArray(x.roles) ? x.roles.filter(Boolean) : []),
+    tarifas: [] // se llena después desde _raw.tarifas
   };
+}
+
+function sumHmq(hmqPorRol){
+  let s = 0;
+  for(const k of Object.keys(hmqPorRol || {})){
+    s += Number(hmqPorRol[k] || 0) || 0;
+  }
+  return s;
 }
 
 async function loadAll(){
@@ -168,34 +183,38 @@ async function loadAll(){
     return normalize(a.codigo).localeCompare(normalize(b.codigo));
   });
 
-  // Cargar tarifas por cada procedimiento
-  // Estructura: procedimientos/{PC0001}/tarifas/{C001_particular}
-  for(const p of out){
-    const tarifasCol = collection(db, 'procedimientos', p.id, 'tarifas');
-    const ts = await getDocs(tarifasCol);
+  // Construir p.tarifas desde MAP embebido en doc
+  for (const p of out) {
     const arr = [];
-    ts.forEach(td=>{
-      const t = td.data() || {};
-      const clinicaId = cleanReminder(t.clinicaId) || '';
-      const tipoPaciente = (cleanReminder(t.tipoPaciente) || '').toLowerCase();
-      const dp = Number(t.dp ?? 0) || 0;
-      const ins = Number(t.ins ?? 0) || 0;
-      const hmqPorRol = (t.hmqPorRol && typeof t.hmqPorRol === 'object') ? t.hmqPorRol : {};
-      const hmq = sumHmq(hmqPorRol);
-      const total = hmq + dp + ins;
+    const tarifasMap = (p._raw?.tarifas && typeof p._raw.tarifas === 'object') ? p._raw.tarifas : null;
 
-      // consideramos "tarifa existente" si hay algún monto > 0
-      const hasAny = (hmq > 0) || (dp > 0) || (ins > 0);
+    if (tarifasMap) {
+      for (const clinicaId of Object.keys(tarifasMap)) {
+        const clinNode = tarifasMap[clinicaId] || {};
+        const pacientes = (clinNode.pacientes && typeof clinNode.pacientes === 'object') ? clinNode.pacientes : {};
 
-      arr.push({
-        id: td.id,
-        clinicaId,
-        clinicaNombre: state.clinicasMap.get(clinicaId) || clinicaId || '(Sin clínica)',
-        tipoPaciente: tipoPaciente || '',
-        hmq, dp, ins, total,
-        hasAny
-      });
-    });
+        for (const tipoPaciente of Object.keys(pacientes)) {
+          const nodo = pacientes[tipoPaciente] || {};
+          const honorarios = (nodo.honorarios && typeof nodo.honorarios === 'object') ? nodo.honorarios : {};
+          const dp = Number(nodo.derechosPabellon ?? 0) || 0;
+          const ins = Number(nodo.insumos ?? 0) || 0;
+
+          const hmq = sumHmq(honorarios);
+          const total = hmq + dp + ins;
+          const hasAny = (hmq > 0) || (dp > 0) || (ins > 0);
+
+          arr.push({
+            id: `${clinicaId}_${(tipoPaciente||'').toLowerCase()}`,
+            clinicaId,
+            clinicaNombre: state.clinicasMap.get(clinicaId) || clinicaId || '(Sin clínica)',
+            tipoPaciente: (tipoPaciente || '').toLowerCase(),
+            honorarios, // 👈 clave para export y para re-editar sin re-leer doc
+            hmq, dp, ins, total,
+            hasAny
+          });
+        }
+      }
+    }
 
     // ordenar tarifas: clínica, paciente
     arr.sort((a,b)=>{
@@ -212,6 +231,9 @@ async function loadAll(){
   paint();
 }
 
+/* =========================
+   Role helpers
+========================= */
 function roleNameById(id){
   const r = state.rolesCatalog.find(x=>x.id===id);
   return r?.nombre || id || '';
@@ -219,9 +241,6 @@ function roleNameById(id){
 
 /* =========================
    Search: coma=AND, guión=OR
-   Ej:
-   "manga, huingan - pc0001" => AND: ["manga","huingan - pc0001"]
-   dentro de cada término AND, el "-" funciona como OR
 ========================= */
 function splitAnd(raw){
   return (raw || '')
@@ -242,8 +261,9 @@ function rowMatches(p, rawQuery){
   const andTerms = splitAnd(rawQuery);
   if(!andTerms.length) return true;
 
-  // searchable text (incluye tarifas por clínica/paciente)
   const rolesNames = (p.rolesIds || []).map(roleNameById);
+
+  // texto de tarifas: incluye clinica, paciente, total
   const tarifasText = (p.tarifas || [])
     .filter(t=>t.hasAny)
     .map(t=> `${t.clinicaNombre} ${t.tipoPaciente} ${t.total}`)
@@ -253,16 +273,13 @@ function rowMatches(p, rawQuery){
     p.codigo, p.nombre,
     p.estado, 'procedimiento cirugia',
     ...rolesNames,
-    ...((p.rolesIds||[]).map(x=>x)),
+    ...(p.rolesIds || []),
     tarifasText,
-    // nombres de clínicas aunque no tengan tarifa
     ...((p.tarifas||[]).map(t=>t.clinicaNombre)),
     ...((p.tarifas||[]).map(t=>t.clinicaId)),
     ...((p.tarifas||[]).map(t=>t.tipoPaciente))
   ].join(' '));
 
-  // AND real: cada bloque AND debe cumplirse
-  // Cada bloque AND puede ser OR por guión
   return andTerms.every(block=>{
     const ors = splitOr(block);
     if(!ors.length) return true;
@@ -291,13 +308,13 @@ function rolesBlock(p){
 }
 
 function tarifaChips(p){
-  const tarifas = (p.tarifas || []).filter(t=>t.hasAny && t.total > 0);
+  const tarifas = (p.tarifas || []).filter(t=>t.hasAny);
 
   if(!tarifas.length){
     return `<span class="pill">TARIFA: PENDIENTE</span>`;
   }
 
-  // mostramos hasta 3 chips y luego "+N"
+  // mostramos hasta 3 chips y luego +N
   const maxShow = 3;
   const shown = tarifas.slice(0, maxShow);
   const rest = tarifas.length - shown.length;
@@ -312,9 +329,7 @@ function tarifaChips(p){
     `;
   }).join(' ');
 
-  const more = rest > 0
-    ? ` <span class="pill">+${rest}</span>`
-    : '';
+  const more = rest > 0 ? ` <span class="pill">+${rest}</span>` : '';
 
   return `<div style="display:flex; flex-wrap:wrap; gap:8px;">${chips}${more}</div>`;
 }
@@ -324,14 +339,14 @@ function tarifaChips(p){
 ========================= */
 function paint(){
   const rows = state.all.filter(p=> rowMatches(p, state.q));
-  $('count').textContent = `${rows.length} cirugía${rows.length===1?'':'s'}`;
+  if($('count')) $('count').textContent = `${rows.length} cirugía${rows.length===1?'':'s'}`;
 
   const tb = $('tbody');
+  if(!tb) return;
   tb.innerHTML = '';
 
   for(const p of rows){
     const tr = document.createElement('tr');
-
     tr.innerHTML = `
       <td>
         <div class="mono"><b>${escapeHtml(p.codigo || p.id)}</b></div>
@@ -374,6 +389,7 @@ function paint(){
 ========================= */
 function paintProcRolesUI(selectedIds=[]){
   const wrap = $('procRolesWrap');
+  if(!wrap) return;
   wrap.innerHTML = '';
 
   if(!state.rolesCatalog.length){
@@ -397,6 +413,7 @@ function paintProcRolesUI(selectedIds=[]){
 
 function getProcRolesSelected(){
   const wrap = $('procRolesWrap');
+  if(!wrap) return [];
   const checks = wrap.querySelectorAll('input[type="checkbox"][data-role-id]');
   const out = [];
   checks.forEach(ch=>{
@@ -479,33 +496,21 @@ async function removeProc(id){
   const ok = confirm(`¿Eliminar cirugía?\n\n${id}`);
   if(!ok) return;
 
-  // ⚠️ (simple) borra doc principal; no borra subcolecciones automáticamente
+  // ⚠️ Simple: borra doc principal
   await deleteDoc(doc(db,'procedimientos', id));
   toast('Eliminada');
   await loadAll();
 }
 
 /* =========================
-   Tarifario modal
+   Tarifario modal (MAP embebido)
 ========================= */
-function sumHmq(hmqPorRol){
-  let s = 0;
-  for(const k of Object.keys(hmqPorRol || {})){
-    s += Number(hmqPorRol[k] || 0) || 0;
-  }
-  return s;
-}
-
 function tipoPacienteLabel(v){
   const x = (v || '').toLowerCase();
   if(x === 'particular') return 'PARTICULAR';
   if(x === 'isapre') return 'ISAPRE';
   if(x === 'fonasa') return 'FONASA';
   return (v || '').toUpperCase();
-}
-
-function tarifaDocId(clinicaId, tipoPaciente){
-  return `${clinicaId}_${tipoPaciente}`; // ej: C001_particular
 }
 
 function paintClinicasSelect(){
@@ -560,7 +565,7 @@ function computeTarTotals(){
   const ins = Number(state.activeTar.ins || 0) || 0;
   const total = hmq + dp + ins;
 
-  $('hmqPill').textContent = `HMQ: ${clp(hmq)}`;
+  if($('hmqPill')) $('hmqPill').textContent = `HMQ: ${clp(hmq)}`;
 
   $('tarTotales').innerHTML = `
     HMQ: <b>${clp(hmq)}</b><br/>
@@ -575,11 +580,11 @@ function computeTarTotals(){
 
   $('tarResumen').textContent = `${clinName} · ${tp} · ${clp(total)}`;
 
-  // Hint: “OK de clínica” significa que para esa clínica estén completos los 3 pacientes con HMQ+DP+INS (si tú quieres).
-  // Pero como ahora quieres: NO “pendiente” si ya hay algo, el hint aclara.
-  $('tarHint').textContent =
-    `La tarifa se calcula como TOTAL = HMQ (roles) + DP + INS. ` +
-    `Puedes guardar parcial si te falta info; igual quedará un total.`;
+  if($('tarHint')){
+    $('tarHint').textContent =
+      `TOTAL = HMQ (honorarios por rol) + DP (derechos pabellón) + INS (insumos). ` +
+      `Puedes guardar parcial: igual quedará un total.`;
+  }
 }
 
 async function loadTarifarioIntoState(procId, clinicaId, tipoPaciente){
@@ -592,23 +597,24 @@ async function loadTarifarioIntoState(procId, clinicaId, tipoPaciente){
   state.activeTar.dp = 0;
   state.activeTar.ins = 0;
 
-  // leer doc si existe
-  const tid = tarifaDocId(clinicaId, tipoPaciente);
-  const ref = doc(db, 'procedimientos', procId, 'tarifas', tid);
+  // leer doc principal
+  const ref = doc(db, 'procedimientos', procId);
   const snap = await getDoc(ref);
 
-  if(snap.exists()){
-    const t = snap.data() || {};
-    const hmqPorRol = (t.hmqPorRol && typeof t.hmqPorRol === 'object') ? t.hmqPorRol : {};
-    state.activeTar.hmqPorRol = { ...hmqPorRol };
-    state.activeTar.dp = Number(t.dp ?? 0) || 0;
-    state.activeTar.ins = Number(t.ins ?? 0) || 0;
+  if (snap.exists()){
+    const p = snap.data() || {};
+    const nodo = p?.tarifas?.[clinicaId]?.pacientes?.[tipoPaciente] || null;
+
+    if (nodo){
+      const honorarios = (nodo.honorarios && typeof nodo.honorarios === 'object') ? nodo.honorarios : {};
+      state.activeTar.hmqPorRol = { ...honorarios };
+      state.activeTar.dp = Number(nodo.derechosPabellon ?? 0) || 0;
+      state.activeTar.ins = Number(nodo.insumos ?? 0) || 0;
+    }
   }
 
-  // pintar inputs
-  // roles
-  const roleInputs = $('tarRolesList').querySelectorAll('input[data-role-money]');
-  roleInputs.forEach(inp=>{
+  // pintar inputs roles
+  $('tarRolesList').querySelectorAll('input[data-role-money]').forEach(inp=>{
     const rid = inp.getAttribute('data-role-money');
     const n = Number(state.activeTar.hmqPorRol[rid] || 0) || 0;
     inp.value = (n > 0) ? clp(n) : '';
@@ -660,7 +666,7 @@ function openTarModal(proc){
     computeTarTotals();
   });
 
-  // cambios de selects => cargar doc si existe
+  // cambios de selects => cargar nodo si existe
   $('tarClinica').onchange = async ()=>{
     state.activeTar.clinicaId = $('tarClinica').value || '';
     await loadTarifarioIntoState(proc.id, state.activeTar.clinicaId, state.activeTar.tipoPaciente);
@@ -692,51 +698,41 @@ async function saveTarifario(){
     return;
   }
 
-  // payload
-  const hmqPorRol = {};
+  // limpiamos honorarios: guardamos solo >0
+  const honorarios = {};
   for(const k of Object.keys(state.activeTar.hmqPorRol || {})){
     const n = Number(state.activeTar.hmqPorRol[k] || 0) || 0;
-    if(n > 0) hmqPorRol[k] = n; // guardamos solo los >0 (limpio)
+    if(n > 0) honorarios[k] = n;
   }
 
   const dp = Number(state.activeTar.dp || 0) || 0;
   const ins = Number(state.activeTar.ins || 0) || 0;
-  const hmq = sumHmq(hmqPorRol);
-  const total = hmq + dp + ins;
 
-  const tid = tarifaDocId(clinicaId, tipoPaciente);
+  const procRef = doc(db, 'procedimientos', procId);
 
-  const payload = {
-    id: tid,
-    clinicaId,
-    tipoPaciente,
-    hmqPorRol,
-    dp,
-    ins,
-    hmq,
-    total,
+  // escribir SOLO la rama, sin pisar el resto del doc
+  await updateDoc(procRef, {
+    [`tarifas.${clinicaId}.pacientes.${tipoPaciente}`]: {
+      honorarios,
+      derechosPabellon: dp,
+      insumos: ins,
+      actualizadoEl: serverTimestamp(),
+      actualizadoPor: state.user?.email || ''
+    },
+    clinicasIds: arrayUnion(clinicaId),
     actualizadoEl: serverTimestamp(),
     actualizadoPor: state.user?.email || ''
-  };
+  });
 
-  // si no existía antes, setea creadoEl/Por también
-  const ref = doc(db, 'procedimientos', procId, 'tarifas', tid);
-  const prev = await getDoc(ref);
-  if(!prev.exists()){
-    payload.creadoEl = serverTimestamp();
-    payload.creadoPor = state.user?.email || '';
-  }
-
-  await setDoc(ref, payload, { merge:true });
   toast('Tarifario guardado');
   closeTarModal();
   await loadAll();
 }
 
 /* =========================
-   CSV (tarifas)
-   - export: una fila por (procedimiento, clínica, tipoPaciente)
-   - incluye columnas: dp, ins, hmq_total, total y hmq_{roleId} por cada rol del catálogo
+   CSV (tarifas embebidas)
+   - plantilla/export/import: 1 fila por (procedimiento, clínica, tipoPaciente)
+   - columnas: dp, ins y hmq_{roleId}
 ========================= */
 function download(filename, text, mime='text/plain'){
   const blob = new Blob([text], { type: mime });
@@ -749,7 +745,6 @@ function download(filename, text, mime='text/plain'){
 }
 
 function plantillaCSV(){
-  // columnas base + hmq_roleId por roles conocidos
   const roleCols = state.rolesCatalog.map(r=> `hmq_${r.id}`);
   const headers = [
     'codigo','nombre','estado',
@@ -759,18 +754,17 @@ function plantillaCSV(){
     ...roleCols
   ];
 
-  // ejemplo mínimo
   const example = {
     codigo: 'PC0001',
     nombre: 'Manga',
     estado: 'activa',
     rolesIds: 'r_cirujano|r_anestesista|r_arsenalera|r_asistente_cirujano|r_ayudante_1|r_ayudante_2',
-    clinicaId: 'C001',
+    clinicaId: 'C002',
     tipoPaciente: 'particular',
     dp: '1760500',
     ins: '924630'
   };
-  for(const rc of roleCols) example[rc] = ''; // vacío salvo algunos
+  for(const rc of roleCols) example[rc] = '0';
   example['hmq_r_cirujano'] = '1050000';
   example['hmq_r_anestesista'] = '235000';
   example['hmq_r_arsenalera'] = '110000';
@@ -799,7 +793,6 @@ function exportCSV(){
     const tarifas = (p.tarifas || []).filter(t=>t.hasAny);
 
     if(!tarifas.length){
-      // exporta una fila “sin tarifas” igual (útil para completar después)
       const row = {
         codigo: p.codigo,
         nombre: p.nombre,
@@ -819,56 +812,8 @@ function exportCSV(){
     }
 
     for(const t of tarifas){
-      // para export completo, leemos el doc real para obtener hmqPorRol
-      // (porque en memoria solo teníamos totales)
-      // simplificación: si quieres ultra-perf luego lo cacheamos
-      // eslint-disable-next-line no-await-in-loop
-      // NOTE: aquí sin await para no romper, pero no tenemos async.
-    }
-  }
-
-  // Para no complicar con awaits, hacemos export “rápido” desde la subcolección real:
-  // recorrer procedimientos y leer subcolección tarifas para construir filas completas.
-  // => lo hacemos en función async.
-  exportCSVAsync(headers, roleCols).catch(err=>{
-    console.error(err);
-    toast('Error exportando CSV (ver consola)');
-  });
-}
-
-async function exportCSVAsync(headers, roleCols){
-  const items = [];
-
-  for(const p of state.all){
-    const tarifasCol = collection(db, 'procedimientos', p.id, 'tarifas');
-    const ts = await getDocs(tarifasCol);
-
-    if(ts.empty){
-      const row = {
-        codigo: p.codigo,
-        nombre: p.nombre,
-        estado: p.estado,
-        rolesIds: (p.rolesIds || []).join('|'),
-        clinicaId: '',
-        clinicaNombre: '',
-        tipoPaciente: '',
-        dp: '0',
-        ins: '0',
-        hmq_total: '0',
-        total: '0'
-      };
-      for(const rc of roleCols) row[rc] = '0';
-      items.push(row);
-      continue;
-    }
-
-    ts.forEach(td=>{
-      const t = td.data() || {};
-      const clinicaId = cleanReminder(t.clinicaId) || '';
-      const tipoPaciente = (cleanReminder(t.tipoPaciente) || '').toLowerCase();
-
-      const hmqPorRol = (t.hmqPorRol && typeof t.hmqPorRol === 'object') ? t.hmqPorRol : {};
-      const hmq_total = sumHmq(hmqPorRol);
+      const honorarios = (t.honorarios && typeof t.honorarios === 'object') ? t.honorarios : {};
+      const hmq_total = sumHmq(honorarios);
       const dp = Number(t.dp ?? 0) || 0;
       const ins = Number(t.ins ?? 0) || 0;
       const total = hmq_total + dp + ins;
@@ -878,9 +823,9 @@ async function exportCSVAsync(headers, roleCols){
         nombre: p.nombre,
         estado: p.estado,
         rolesIds: (p.rolesIds || []).join('|'),
-        clinicaId,
-        clinicaNombre: state.clinicasMap.get(clinicaId) || '',
-        tipoPaciente,
+        clinicaId: t.clinicaId,
+        clinicaNombre: t.clinicaNombre || '',
+        tipoPaciente: t.tipoPaciente,
         dp: String(dp),
         ins: String(ins),
         hmq_total: String(hmq_total),
@@ -889,11 +834,11 @@ async function exportCSVAsync(headers, roleCols){
 
       for(const r of state.rolesCatalog){
         const key = `hmq_${r.id}`;
-        row[key] = String(Number(hmqPorRol[r.id] || 0) || 0);
+        row[key] = String(Number(honorarios[r.id] || 0) || 0);
       }
 
       items.push(row);
-    });
+    }
   }
 
   const csv = toCSV(headers, items);
@@ -928,7 +873,6 @@ async function importCSV(file){
     return;
   }
 
-  // role columns: hmq_r_xxx
   const roleCols = headers.filter(h=> h.startsWith('hmq_'));
 
   let upserts = 0, skipped = 0;
@@ -959,9 +903,13 @@ async function importCSV(file){
       actualizadoEl: serverTimestamp(),
       actualizadoPor: state.user?.email || ''
     };
+    // si no existía, setea creadoEl/Por (merge no rompe si ya existe)
+    procPayload.creadoEl = serverTimestamp();
+    procPayload.creadoPor = state.user?.email || '';
+
     await setDoc(doc(db,'procedimientos', codigo), procPayload, { merge:true });
 
-    // tarifa si viene
+    // tarifa si viene clinica + paciente
     const clinicaId = cleanReminder(I.clinicaId>=0 ? row[I.clinicaId] : '');
     const tipoPaciente = (cleanReminder(I.tipoPaciente>=0 ? row[I.tipoPaciente] : '') || '').toLowerCase();
 
@@ -969,33 +917,29 @@ async function importCSV(file){
       const dp = Number(cleanReminder(I.dp>=0 ? row[I.dp] : '0') || 0) || 0;
       const ins = Number(cleanReminder(I.ins>=0 ? row[I.ins] : '0') || 0) || 0;
 
-      const hmqPorRol = {};
+      const honorarios = {};
       for(const col of roleCols){
         const j = idx(col);
         if(j < 0) continue;
         const rid = col.replace(/^hmq_/,''); // r_cirujano
         const val = Number(cleanReminder(row[j] ?? '0') || 0) || 0;
-        if(val > 0) hmqPorRol[rid] = val;
+        if(val > 0) honorarios[rid] = val;
       }
 
-      const hmq = sumHmq(hmqPorRol);
-      const total = hmq + dp + ins;
+      const procRef = doc(db,'procedimientos', codigo);
 
-      const tid = tarifaDocId(clinicaId, tipoPaciente);
-      const tarPayload = {
-        id: tid,
-        clinicaId,
-        tipoPaciente,
-        hmqPorRol,
-        dp,
-        ins,
-        hmq,
-        total,
+      await updateDoc(procRef, {
+        [`tarifas.${clinicaId}.pacientes.${tipoPaciente}`]: {
+          honorarios,
+          derechosPabellon: dp,
+          insumos: ins,
+          actualizadoEl: serverTimestamp(),
+          actualizadoPor: state.user?.email || ''
+        },
+        clinicasIds: arrayUnion(clinicaId),
         actualizadoEl: serverTimestamp(),
         actualizadoPor: state.user?.email || ''
-      };
-
-      await setDoc(doc(db,'procedimientos', codigo, 'tarifas', tid), tarPayload, { merge:true });
+      });
     }
 
     upserts++;
@@ -1016,41 +960,41 @@ requireAuth({
     await loadSidebar({ active: 'cirugias' });
     setActiveNav('cirugias');
 
-    $('who').textContent = `Conectado: ${user.email}`;
+    if($('who')) $('who').textContent = `Conectado: ${user.email}`;
     wireLogout();
 
     // Modales: cierre
-    $('btnProcClose').addEventListener('click', closeProcModal);
-    $('btnProcCancelar').addEventListener('click', closeProcModal);
-    $('btnProcGuardar').addEventListener('click', saveProc);
+    $('btnProcClose')?.addEventListener('click', closeProcModal);
+    $('btnProcCancelar')?.addEventListener('click', closeProcModal);
+    $('btnProcGuardar')?.addEventListener('click', saveProc);
 
-    $('modalProcBackdrop').addEventListener('click', (e)=>{
+    $('modalProcBackdrop')?.addEventListener('click', (e)=>{
       if(e.target === $('modalProcBackdrop')) closeProcModal();
     });
 
-    $('btnTarClose').addEventListener('click', closeTarModal);
-    $('btnTarCancelar').addEventListener('click', closeTarModal);
-    $('btnTarGuardar').addEventListener('click', saveTarifario);
+    $('btnTarClose')?.addEventListener('click', closeTarModal);
+    $('btnTarCancelar')?.addEventListener('click', closeTarModal);
+    $('btnTarGuardar')?.addEventListener('click', saveTarifario);
 
-    $('modalTarBackdrop').addEventListener('click', (e)=>{
+    $('modalTarBackdrop')?.addEventListener('click', (e)=>{
       if(e.target === $('modalTarBackdrop')) closeTarModal();
     });
 
     // botones toolbar
-    $('btnCrear').addEventListener('click', ()=> openProcModal('create'));
+    $('btnCrear')?.addEventListener('click', ()=> openProcModal('create'));
 
     // buscador
-    $('buscador').addEventListener('input', (e)=>{
+    $('buscador')?.addEventListener('input', (e)=>{
       state.q = (e.target.value || '').toString();
       paint();
     });
 
-    // CSV
-    $('btnDescargarPlantilla').addEventListener('click', plantillaCSV);
-    $('btnExportar').addEventListener('click', exportCSV);
+    // CSV (si existen los botones en el HTML)
+    $('btnDescargarPlantilla')?.addEventListener('click', plantillaCSV);
+    $('btnExportar')?.addEventListener('click', exportCSV);
 
-    $('btnImportar').addEventListener('click', ()=> $('fileCSV').click());
-    $('fileCSV').addEventListener('change', async (e)=>{
+    $('btnImportar')?.addEventListener('click', ()=> $('fileCSV')?.click());
+    $('fileCSV')?.addEventListener('change', async (e)=>{
       const file = e.target.files?.[0];
       e.target.value = '';
       if(!file) return;
@@ -1067,4 +1011,3 @@ requireAuth({
     await loadAll();
   }
 });
-
