@@ -22,6 +22,8 @@
 
       <nav class="nav">
         <a href="profesionales.html" data-nav="profesionales">👩‍⚕️ Profesionales</a>
+        <a href="roles.html" data-nav="roles">🧩 Roles</a>
+
         <a href="#" data-nav="ambulatorios" onclick="alert('Módulo en construcción');return false;">🧾 Ambulatorios</a>
         <a href="#" data-nav="clinicas" onclick="alert('Módulo en construcción');return false;">🏥 Clínicas</a>
         <a href="#" data-nav="liquidaciones" onclick="alert('Módulo en construcción');return false;">📄 Liquidaciones</a>
@@ -46,23 +48,14 @@
       <!-- FORM -->
       <section class="card" style="margin-bottom:14px;">
         <div class="grid">
-
           <div>
-            <label>Tipo</label>
-            <select id="tipoPersona">
-              <option value="NATURAL">Persona natural</option>
-              <option value="JURIDICA">Persona jurídica (empresa)</option>
-            </select>
+            <label>Nombre / Razón social</label>
+            <input id="nombre" placeholder="Ej: Juan Pérez / Empresa SPA"/>
           </div>
 
           <div>
-            <label>Nombre (natural) / Razón social (jurídica)</label>
-            <input id="nombre" placeholder="Ej: Juan Pérez / Clínica X SpA"/>
-          </div>
-
-          <div>
-            <label>RUT (persona o empresa)</label>
-            <input id="rut" placeholder="Ej: 12.345.678-9 / 76.123.456-7"/>
+            <label>RUT</label>
+            <input id="rut" placeholder="Ej: 12.345.678-9"/>
           </div>
 
           <div>
@@ -77,30 +70,40 @@
 
           <div>
             <label>Dirección</label>
-            <input id="direccion" placeholder="Dirección (persona o empresa)"/>
-          </div>
-
-          <!-- Empresa (solo si Jurídica) -->
-          <div id="boxEmpresa" style="display:none;">
-            <label>Giro (empresa)</label>
-            <input id="giro" placeholder="Ej: Prestación de servicios médicos"/>
-          </div>
-
-          <div id="boxEmpresa2" style="display:none;">
-            <label>Contacto empresa (opcional)</label>
-            <input id="contactoEmpresa" placeholder="Ej: María Soto / Encargada"/>
+            <input id="direccion" placeholder="Dirección (si aplica)"/>
           </div>
 
           <div>
-            <label>Rol</label>
-            <select id="rol">
-              <option value="MEDICO">Médico</option>
-              <option value="ANESTESISTA">Anestesista</option>
-              <option value="AUXILIAR">Auxiliar</option>
-              <option value="OTRO">Otro</option>
-            </select>
+            <label>Giro (empresa)</label>
+            <input id="giro" placeholder="Giro (si aplica)"/>
           </div>
 
+          <div>
+            <label>Contacto empresa</label>
+            <input id="contactoEmpresa" placeholder="Nombre contacto (si aplica)"/>
+          </div>
+
+          <div>
+            <label>Tipo persona</label>
+            <select id="tipoPersona">
+              <option value="NATURAL">Natural</option>
+              <option value="JURIDICA">Jurídica</option>
+            </select>
+          </div>
+        </div>
+
+        <div style="margin-top:12px;">
+          <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px;">
+            <label style="margin:0;">Roles (selección múltiple)</label>
+            <a class="muted" href="roles.html" style="text-decoration:underline;">Administrar Roles</a>
+          </div>
+
+          <!-- Se pinta dinámicamente con checkboxes -->
+          <div id="rolesWrap" class="rolesWrap"></div>
+
+          <div class="muted" style="margin-top:8px;">
+            Si no hay roles aún, crea algunos en el módulo <b>Roles</b>.
+          </div>
         </div>
 
         <div class="actions" style="margin-top:12px;">
@@ -109,11 +112,7 @@
 
           <span style="flex:1"></span>
 
-          <input id="buscador" placeholder="Buscar (nombre, rut, email, teléfono, dirección, giro, rol)" style="max-width:520px;"/>
-        </div>
-
-        <div class="muted" style="margin-top:10px;">
-          * Si seleccionas <b>Persona jurídica</b>, se habilitan los campos de empresa.
+          <input id="buscador" placeholder="Buscar (nombre, rut, email, roles)" style="max-width:420px;"/>
         </div>
       </section>
 
@@ -129,7 +128,8 @@
           </label>
 
           <div class="muted">
-            Columnas esperadas: <b>tipoPersona,nombre,rut,email,telefono,direccion,giro,contactoEmpresa,rol</b>
+            Columnas esperadas: <b>nombre,rut,email,telefono,direccion,tipoPersona,giro,contactoEmpresa,roles</b>
+            <span class="muted"> (roles separados por “|”, ej: MEDICO|AUXILIAR)</span>
           </div>
         </div>
       </section>
@@ -140,12 +140,10 @@
           <table>
             <thead>
               <tr>
-                <th>Tipo</th>
                 <th>Nombre / Razón social</th>
                 <th>RUT</th>
                 <th>Email</th>
-                <th>Teléfono</th>
-                <th>Rol</th>
+                <th>Roles</th>
                 <th style="width:220px;">Acciones</th>
               </tr>
             </thead>
@@ -154,7 +152,7 @@
         </div>
 
         <div class="muted" style="margin-top:10px;">
-          Guardado en Firestore: colección <b>profesionales</b>.
+          Guardado en Firestore: colección <b>profesionales</b>. Roles vienen de colección <b>roles</b>.
         </div>
       </section>
 
