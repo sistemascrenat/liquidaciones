@@ -11,6 +11,7 @@ import { requireAuth } from './auth.js';
 import { toast, wireLogout, setActiveNav } from './ui.js';
 import { cleanReminder, toUpperSafe, toCSV } from './utils.js';
 import { loadSidebar } from './layout.js';
+await loadSidebar({ active: 'liquidaciones' });
 
 import {
   collection, getDocs, query, where
