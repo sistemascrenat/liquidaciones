@@ -1,610 +1,211 @@
-:root {
-  --bg: #f4f6fb;
-  --bg-strong: #00a89d;
-  --bg-dark: #008477;
-  --accent: #00c7b6;
-  --accent-soft: #e0fffa;
-  --ink: #0f172a;
-  --muted: #6b7280;
-  --card: #ffffff;
-  --border: #d1d5db;
-  --danger: #e11d48;
-  --panel: #ffffff;
-
+:root{
+  --bg:#f4f6fb;
+  --panel:#ffffff;
+  --line:#d1d5db;
+  --text:#0f172a;
+  --muted:#6b7280;
+  --brand:#00a89d;
+  --brand2:#008477;
+  --accent:#00c7b6;
+  --danger:#e11d48;
+  --shadow: 0 8px 24px rgba(15,23,42,.08);
+  --radius: 16px;
 }
 
-* {
-  box-sizing: border-box;
-  margin: 0;
-  padding: 0;
+*{box-sizing:border-box;margin:0;padding:0}
+body{
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+  background:var(--bg);
+  color:var(--text);
+  min-height:100vh;
 }
 
-body {
-  font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
-  background: var(--bg);
-  color: var(--ink);
-  min-height: 100vh;
-}
-
-a {
-  color: inherit;
-  text-decoration: none;
-}
-
-.logo-img {
-  height: 40px;
-  object-fit: contain;
-  display: block;
-}
-
-.panel-label {
-  font-size: 14px;
-  color: #e5f5f2;
-  margin-left: 10px;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
-
-/* ========= LAYOUT GENERAL ========= */
-
-.app-shell {
-  /* Oculta el dashboard hasta que el usuario esté logueado.
-     Luego el JS hace: appShell.style.display = 'grid'; */
-  display: none;
-  min-height: 100vh;
-  grid-template-rows: auto 1fr;
+a{color:inherit;text-decoration:none}
+.container{
+  display:grid;
   grid-template-columns: 260px 1fr;
-  grid-template-areas:
-    "header header"
-    "sidebar main";
+  min-height:100vh;
 }
 
-header.app-header {
-  grid-area: header;
-  background: var(--bg-strong);
-  color: #fff;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 10px 24px;
+.sidebar{
+  background:linear-gradient(180deg,var(--brand2),var(--brand));
+  color:#fff;
+  padding:18px 14px;
 }
 
-.header-left {
-  display: flex;
-  align-items: center;
-  gap: 12px;
+.brand{
+  display:flex;align-items:center;gap:10px;
+  padding:10px 10px 14px 10px;
 }
-
-.header-right {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  font-size: 14px;
-}
-
-.pill {
-  padding: 4px 10px;
-  border-radius: 999px;
-  background: rgba(255,255,255,.2);
-  font-size: 12px;
-}
-
-.btn-outline {
-  border-radius: 999px;
-  border: 1px solid rgba(255,255,255,.5);
-  padding: 6px 14px;
-  font-size: 13px;
-  cursor: pointer;
-  background: transparent;
-  color: #fff;
-}
-.btn-outline:hover {
-  background: rgba(255,255,255,.15);
-}
-
-aside.sidebar {
-  grid-area: sidebar;
-  background: #ffffff;
-  border-right: 1px solid var(--border);
-  display: flex;
-  flex-direction: column;
-  padding: 16px 12px;
-  gap: 12px;
-}
-
-.sidebar-title {
-  font-size: 12px;
-  text-transform: uppercase;
-  letter-spacing: .18em;
-  color: var(--muted);
-  margin-bottom: 4px;
-  padding: 0 8px;
-}
-
-.nav-group {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.nav-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 10px;
-  border-radius: 999px;
-  font-size: 14px;
-  color: var(--muted);
-  cursor: pointer;
-  border: 1px solid transparent;
-}
-
-.nav-item span.icon {
-  font-size: 16px;
-}
-
-.nav-item.active {
-  background: var(--accent-soft);
-  color: var(--bg-dark);
-  border-color: var(--accent);
-  font-weight: 600;
-}
-
-.nav-item:hover:not(.active) {
-  background: #f3f4f6;
-}
-
-main.app-main {
-  grid-area: main;
-  padding: 18px 20px;
-  overflow-y: auto;
-}
-
-.view {
-  display: none;
-}
-.view.active {
-  display: block;
-}
-
-.view-header {
-  display: flex;
-  align-items: baseline;
-  gap: 12px;
-  margin-bottom: 16px;
-}
-
-.view-title {
-  font-size: 22px;
-  font-weight: 700;
-}
-
-.view-subtitle {
-  color: var(--muted);
-  font-size: 14px;
-}
-
-.card {
-  background: var(--card);
-  border-radius: 16px;
-  border: 1px solid var(--border);
-  padding: 16px 18px;
-  margin-bottom: 16px;
-}
-
-.card-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 52px;   /* ⬅️ MÁS AIRE */
-  gap: 12px;
-}
-
-.card-title {
-  font-size: 16px;
-  font-weight: 600;
-}
-
-.card-subtitle {
-  font-size: 13px;
-  color: var(--muted);
-}
-
-.card-actions {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.btn {
-  border-radius: 999px;
-  border: none;
-  padding: 6px 12px;
-  font-size: 13px;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.btn-primary {
-  background: var(--bg-dark);
-  color: #fff;
-}
-
-.btn-soft {
-  background: #eef2ff;
-  color: #1e293b;
-}
-
-.badge {
-  font-size: 11px;
-  padding: 2px 8px;
-  border-radius: 999px;
-  background: #f3f4f6;
-  color: var(--muted);
-}
-
-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 13px;
-  margin-top: 6px;
-}
-
-thead {
-  background: #f9fafb;
-}
-
-th, td {
-  padding: 8px 6px;
-  border-bottom: 1px solid #e5e7eb;
-  text-align: left;
-}
-
-th {
-  font-weight: 600;
-  color: var(--muted);
-  font-size: 12px;
-  text-transform: uppercase;
-  letter-spacing: .05em;
-}
-
-tr:nth-child(even) td {
-  background: #fcfcff;
-}
-
-.text-right { text-align: right; }
-.text-center { text-align: center; }
-
-/* ========= LOGIN ========= */
-
-.login-shell {
-  min-height: 100vh;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 16px;
-}
-
-.login-card {
-  background: var(--card);
-  border-radius: 18px;
-  max-width: 380px;
-  width: 100%;
-  box-shadow: 0 18px 40px rgba(15, 23, 42, .15);
-  border: 1px solid rgba(148, 163, 184, .3);
-  overflow: hidden; /* para que el header verde respete el borde redondeado */
-}
-
-.login-card-header {
-  background: var(--bg-strong);
-  padding: 14px 20px;
-  display: flex;
-  align-items: center;
-  justify-content: flex-start;
-}
-
-.login-card-body {
-  padding: 24px 24px 20px;
-}
-
-.login-title {
-  font-size: 20px;
-  font-weight: 700;
-  margin-bottom: 4px;
-}
-
-.login-subtitle {
-  font-size: 13px;
-  color: var(--muted);
-  margin-bottom: 18px;
-}
-
-.form-field {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  margin-bottom: 10px;
-}
-
-.form-field label {
-  font-size: 13px;
-  color: var(--muted);
-}
-
-.form-field input {
-  padding: 8px 10px;
-  border-radius: 999px;
-  border: 1px solid var(--border);
-  font-size: 14px;
-  outline: none;
-}
-.form-field input:focus {
-  border-color: var(--bg-strong);
-  box-shadow: 0 0 0 1px var(--accent-soft);
-}
-
-.login-actions {
-  margin-top: 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.btn-full {
-  width: 100%;
-  justify-content: center;
-}
-
-.login-hint {
-  font-size: 11px;
-  color: var(--muted);
-  margin-top: 8px;
-}
-
-.login-error {
-  margin-top: 6px;
-  font-size: 12px;
-  color: var(--danger);
-}
-
-/* =========================
-   Buscador Profesionales
-========================= */
-.searchbar-wrap{
-  position: relative;
-  width: 100%;
-  margin: 0;
+.brand .logo{
+  width:40px;height:40px;border-radius:12px;
+  background:rgba(255,255,255,.14);
+  display:grid;place-items:center;
+  font-weight:800;
 }
-
-/* input ocupa todo */
-.searchbar-input{
-  width: 100%;
-  height: 44px;
-  padding: 0 52px 0 42px;   /* ✅ deja espacio para el botón dentro del input */
-  border-radius: 14px;
-}
-
-/* botón “dentro” del input (única definición) */
-.searchbar-clear{
-  position: absolute;
-  right: 10px;
-  top: 50%;
-  transform: translateY(-50%);
-
-  display: flex;
-  align-items: center;
-  justify-content: center;
+.brand .title{font-weight:800;letter-spacing:.2px}
+.brand .sub{font-size:12px;opacity:.9;margin-top:2px}
 
-  width: 36px;
-  height: 36px;
-
-  border-radius: 10px;
-  border: 1px solid var(--border);
-  background: #fff;
-
-  font-size: 14px;
-  line-height: 1;
-  padding: 0;
-
-  cursor: pointer;
+.nav{
+  margin-top:10px;
+  display:flex;flex-direction:column;gap:6px;
 }
-.searchbar-clear:hover{
-  background: rgba(2, 6, 23, .05);
+.nav a{
+  display:flex;align-items:center;gap:10px;
+  padding:10px 10px;
+  border-radius:12px;
+  background:rgba(255,255,255,.10);
+  opacity:.92;
 }
+.nav a:hover{background:rgba(255,255,255,.16)}
+.nav a.active{background:rgba(255,255,255,.22); opacity:1}
 
-
-/* El segundo bloque (donde está el buscador + botones) debe crecer */
-.card-header-center{
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  gap: 6px;
-}
-
-/* botones a la derecha */
-.card-header-actions{
-  flex: 0 0 auto;
-  margin-left: auto;
-  flex-wrap: nowrap;
+.main{
+  padding:22px;
 }
-
 
-.searchbar-input::placeholder{
-  color: var(--muted);
+.topbar{
+  display:flex;align-items:center;justify-content:space-between;
+  gap:12px;
+  margin-bottom:14px;
 }
-
-.searchbar-input:focus{
-  border-color: rgba(14, 165, 233, .45); /* suave (celeste) */
-  box-shadow: 0 14px 26px rgba(2, 6, 23, .10);
-  transform: translateY(-1px);
+.h1{
+  font-size:20px;font-weight:900;
 }
-
-.searchbar-icon{
-  position: absolute;
-  left: 14px;
-  top: 50%;
-  transform: translateY(-50%);
-  opacity: .65;
-  font-size: 16px;
-  pointer-events: none;
+.badge{
+  font-size:12px;
+  background: #e0fffa;
+  color:#045d56;
+  padding:6px 10px;border-radius:999px;
+  border:1px solid rgba(0,0,0,.06);
 }
 
-.searchbar-hint{
-  margin-top: 10px;
-  font-size: 12px;
-  color: var(--muted);
+.card{
+  background:var(--panel);
+  border:1px solid rgba(0,0,0,.08);
+  box-shadow: var(--shadow);
+  border-radius: var(--radius);
+  padding:16px;
 }
 
-/* =========================
-   Header Profesionales (1 línea)
-========================= */
-.card-header--pro{
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+.grid{
+  display:grid;
+  grid-template-columns: 1fr 1fr;
+  gap:12px;
 }
-
-.card-header-left{
-  min-width: 220px;
+@media (max-width: 960px){
+  .container{grid-template-columns:1fr}
+  .sidebar{position:sticky;top:0}
+  .grid{grid-template-columns:1fr}
 }
 
-/* ✅ el buscador va aquí y se expande */
-.card-header-center{
-  flex: 1;               /* ocupa el espacio disponible */
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;  /* el input toma todo el ancho */
-  gap: 6px;
+.row{
+  display:grid;
+  grid-template-columns: 1fr 1fr;
+  gap:12px;
 }
-
-/* ✅ botones siempre a la derecha */
-.card-header-right{
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  min-width: 420px;      /* ajusta si quieres */
+@media (max-width: 720px){
+  .row{grid-template-columns:1fr}
 }
 
-.card-header-actions{
-  display: flex;
-  gap: 8px;
-  flex-wrap: nowrap;     /* no baja en desktop */
+label{
+  font-size:12px;
+  color:var(--muted);
+  display:block;
+  margin-bottom:6px;
+  font-weight:700;
 }
-
 
-.searchbar-hint--right{
-  text-align: right;
-  margin-top: 6px;
+input, select{
+  width:100%;
+  padding:10px 12px;
+  border-radius:12px;
+  border:1px solid rgba(0,0,0,.12);
+  outline:none;
+  background:#fff;
 }
-
-/* Responsive: en pantallas chicas se apila bonito */
-@media (max-width: 980px){
-  .card-header--pro{
-    flex-direction: column;
-    align-items: stretch;
-  }
-  .card-header-left{
-    min-width: unset;
-  }
-  .card-header-actions{
-    justify-content: flex-start;
-    flex-wrap: wrap; /* en móvil sí permitimos wrap */
-  }
-  .card-header-right{
-    min-width: unset;
-    align-items: stretch;
-  }
-  .searchbar-hint--right{
-    text-align: left;
-  }
+input:focus, select:focus{
+  border-color: rgba(0,168,157,.55);
+  box-shadow: 0 0 0 4px rgba(0,168,157,.14);
 }
-
-/* ===========================
-   BUSCADOR PROFESIONALES — FIX FOCUS / BORDE MARCADO
-   Pegar al FINAL de estilo.css
-=========================== */
 
-/* wrapper visual */
-.searchbar-wrap{
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  background: var(--card);
-  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.08); /* flotante suave */
-  display:flex;
+.actions{
+  display:flex;flex-wrap:wrap;gap:8px;
   align-items:center;
-  gap:8px;
-  padding: 10px 12px;
 }
 
-/* input: que no herede estilos agresivos de inputs globales */
-.searchbar-input{
-  border: none !important;
-  outline: none !important;
-  box-shadow: none !important;
-  background: transparent;
-  width: 100%;
-  font-size: 14px;
+.btn{
+  border:1px solid rgba(0,0,0,.12);
+  background:#fff;
+  padding:10px 12px;
+  border-radius:12px;
+  cursor:pointer;
+  font-weight:800;
+}
+.btn:hover{transform: translateY(-1px)}
+.btn.primary{
+  background: linear-gradient(90deg,var(--brand2),var(--brand));
+  color:#fff;border-color:transparent;
+}
+.btn.danger{
+  background: var(--danger);
+  color:#fff;border-color:transparent;
+}
+.btn.soft{
+  background: #e0fffa;
+  border-color: rgba(0,0,0,.08);
+  color:#045d56;
 }
 
-/* evita el borde/outline duro al hacer focus (incluye focus-visible) */
-.searchbar-wrap:focus-within{
-  border-color: var(--border);            /* NO oscurecer */
-  box-shadow: 0 8px 22px rgba(15, 23, 42, 0.10); /* leve aumento */
+.tableWrap{
+  overflow:auto;
+  border-radius: 14px;
+  border:1px solid rgba(0,0,0,.08);
 }
 
-/* por si tienes estilos globales tipo .form-field input:focus */
-.searchbar-input:focus,
-.searchbar-input:focus-visible{
-  outline: none !important;
-  box-shadow: none !important;
+table{
+  width:100%;
+  border-collapse:collapse;
+  min-width: 920px;
+  background:#fff;
+}
+th, td{
+  padding:12px 10px;
+  border-bottom:1px solid rgba(0,0,0,.08);
+  text-align:left;
+  vertical-align:top;
+  font-size:14px;
+}
+th{
+  font-size:12px;
+  color:var(--muted);
+  font-weight:900;
+  background:#fafafa;
+  position:sticky;top:0;
+  z-index:1;
 }
 
-/* icono */
-.searchbar-icon{
-  opacity: .75;
+.muted{color:var(--muted)}
+.pill{
+  display:inline-block;
+  padding:4px 8px;
+  border-radius:999px;
+  border:1px solid rgba(0,0,0,.10);
+  background:#f8fafc;
+  font-size:12px;
+  font-weight:800;
 }
 
-/* botón X */
-.searchbar-clear{
-  border: none;
-  background: transparent;
-  cursor: pointer;
-  opacity: .55;
-  padding: 6px 10px;
-  border-radius: 10px;
+.toast{
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  background:#0f172a;
+  color:#fff;
+  padding:12px 14px;
+  border-radius:14px;
+  box-shadow: var(--shadow);
+  max-width: 420px;
+  display:none;
 }
-.searchbar-clear:hover{
-  opacity: .9;
-  background: rgba(15, 23, 42, 0.06);
-}
-
-
-/* ✅ Buscador más angosto y alineado (desktop) */
-.searchbar-wrap--pro{
-  width: 560px;         /* <-- AJUSTA AQUÍ (ej: 480 / 520 / 560) */
-  max-width: 100%;
-  margin: 0 auto;       /* centra dentro del espacio disponible */
-}
-
-@media (max-width: 980px){
-  .searchbar-wrap--pro{
-    width: 100%;
-    margin: 0;
-  }
-}
-
-@media (max-width: 800px) {
-  .app-shell {
-    grid-template-columns: 1fr;
-    grid-template-areas:
-      "header"
-      "main";
-  }
-  aside.sidebar {
-    display: none; /* versión 1: ocultamos sidebar en mobile */
-  }
-}
+.toast.show{display:block}
