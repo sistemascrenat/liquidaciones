@@ -260,9 +260,8 @@ function roleCell(r){
     <div class="cellBlock">
       <div class="cellTitle">${escapeHtml(r.nombre || '—')}</div>
       <div class="cellSub">
-        <span class="muted">ID:</span> <span class="mono"><b>${escapeHtml(r.idDoc)}</b></span>
         <span class="dot">·</span>
-        <span class="muted">APLICA A:</span> <b>${escapeHtml(labelAplicaA(r.aplicaA))}</b>
+        <span class="muted">PROCEDIMIENTO:</span> <b>${escapeHtml(labelAplicaA(r.aplicaA))}</b>
       </div>
       ${r.nota ? `<div class="mini" style="margin-top:4px;">${escapeHtml(r.nota)}</div>` : `<div class="mini muted" style="margin-top:4px;">&nbsp;</div>`}
     </div>
