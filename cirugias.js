@@ -13,6 +13,8 @@ import { db } from './firebase-init.js';
 import { requireAuth } from './auth.js';
 import { setActiveNav, toast, wireLogout } from './ui.js';
 import { cleanReminder, toUpperSafe } from './utils.js';
+import { loadSidebar } from './layout.js';
+await loadSidebar({ active: 'cirugias' });
 
 import {
   collection, getDocs, doc, getDoc, setDoc, deleteDoc,
