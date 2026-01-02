@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Clínica Rennat – Producción</title>
+  <link rel="icon" type="image/png" href="logoCR.png">
+  <link rel="stylesheet" href="estilos.css"/>
+</head>
+<body>
+
+<div class="container">
+
+  <!-- SIDEBAR COMÚN -->
+  <div id="sidebar-slot"></div>
+
+  <!-- MAIN -->
+  <main class="main">
+
+    <div class="topbar">
+      <div>
+        <div class="h1">Producción</div>
+        <div class="muted" id="who"></div>
+      </div>
+      <div class="badge" id="estadoImport">—</div>
+    </div>
+
+    <!-- CARGA CSV -->
+    <section class="card" style="margin-bottom:14px;">
+      <div class="grid">
+        <div>
+          <label>Mes</label>
+          <select id="mes">
+            <option value="01">Enero</option><option value="02">Febrero</option>
+            <option value="03">Marzo</option><option value="04">Abril</option>
+            <option value="05">Mayo</option><option value="06">Junio</option>
+            <option value="07">Julio</option><option value="08">Agosto</option>
+            <option value="09">Septiembre</option><option value="10">Octubre</option>
+            <option value="11">Noviembre</option><option value="12">Diciembre</option>
+          </select>
+        </div>
+
+        <div>
+          <label>Año</label>
+          <input id="anio" type="number" min="2020" value="2025"/>
+        </div>
+
+        <div>
+          <label>Archivo CSV</label>
+          <input id="fileCSV" type="file" accept=".csv"/>
+        </div>
+
+        <div style="display:flex;align-items:end;">
+          <button class="btn primary" id="btnCargar">Cargar CSV</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- RESUMEN -->
+    <section class="card" id="resumenBox" style="display:none;margin-bottom:14px;">
+      <div class="grid">
+        <div><b>Total filas:</b> <span id="rTotal"></span></div>
+        <div><b>Monto total:</b> <span id="rMonto"></span></div>
+        <div><b>Filas con monto 0:</b> <span id="rCero"></span></div>
+        <div><b>Profesionales no encontrados:</b> <span id="rProfesionales"></span></div>
+        <div><b>Clínicas no encontradas:</b> <span id="rClinicas"></span></div>
+        <div><b>Roles no encontrados:</b> <span id="rRoles"></span></div>
+      </div>
+    </section>
+
+    <!-- TABLA -->
+    <section class="card">
+      <div class="tableWrap">
+        <table>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Fecha</th>
+              <th>Profesional</th>
+              <th>Rol</th>
+              <th>Clínica</th>
+              <th>Procedimiento</th>
+              <th>Paciente</th>
+              <th>Monto</th>
+              <th>Estado</th>
+            </tr>
+          </thead>
+          <tbody id="tbody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ACCIONES -->
+    <section class="card" style="margin-top:14px;">
+      <div class="actions">
+        <button class="btn" id="btnConfirmar">Confirmar Importación</button>
+        <button class="btn danger" id="btnAnular">Anular Importación</button>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<div id="toast" class="toast"></div>
+
+<script type="module" src="produccion.js"></script>
+</body>
+</html>
