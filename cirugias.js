@@ -102,6 +102,17 @@ function wireMoneyInput(el, onChange){
   });
 }
 
+function spanPrice(txt){
+  return `<span style="color:#facc15;font-weight:900;">${txt}</span>`; // amarillo
+}
+function spanCost(txt){
+  return `<span style="color:#ef4444;font-weight:900;">${txt}</span>`; // rojo
+}
+function spanProfit(txt){
+  return `<span style="color:#22c55e;font-weight:900;">${txt}</span>`; // verde
+}
+
+
 /* =========================
    Firestore refs
 ========================= */
@@ -607,19 +618,32 @@ function computeTarTotals(){
   const tp = tipoPacienteLabel(state.activeTar.tipoPaciente);
   
   if(precio > 0){
-    $('tarResumen').textContent = `${clinName} · ${tp} · Precio ${clp(precio)} · Costo ${clp(costo)}`;
+    $('tarResumen').innerHTML =
+      `${clinName} · ${tp} · ` +
+      `Precio ${spanPrice(clp(precio))} · ` +
+      `Costo ${spanCost(clp(costo))}`;
   } else {
-    $('tarResumen').textContent = `${clinName} · ${tp} · Precio: PENDIENTE · Costo ${clp(costo)}`;
+    $('tarResumen').innerHTML =
+      `${clinName} · ${tp} · ` +
+      `Precio ${spanPrice('PENDIENTE')} · ` +
+      `Costo ${spanCost(clp(costo))}`;
   }
   
   // Utilidad + margen
   if($('tarUtilidad')){
-    $('tarUtilidad').textContent = (precio > 0) ? `${clp(utilidad)}` : '—';
+    if(precio > 0){
+      $('tarUtilidad').innerHTML = spanProfit(clp(utilidad));
+    } else {
+      $('tarUtilidad').textContent = '—';
+    }
   }
+
   if($('tarMargen')){
     if(precio > 0){
       const margen = (utilidad / precio) * 100;
-      $('tarMargen').textContent = `Margen: ${margen.toFixed(1)}%`;
+      const color = utilidad >= 0 ? '#22c55e' : '#ef4444';
+      $('tarMargen').innerHTML =
+        `<span style="color:${color};font-weight:700;">Margen: ${margen.toFixed(1)}%</span>`;
     } else {
       $('tarMargen').textContent = '';
     }
