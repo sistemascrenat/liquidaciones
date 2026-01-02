@@ -2,6 +2,8 @@ import { db } from './firebase-init.js';
 import { requireAuth } from './auth.js';
 import { toast } from './ui.js';
 import { cleanReminder, parseCSV, toCSV } from './utils.js';
+import { loadSidebar } from './layout.js';
+await loadSidebar({ active: 'roles' });
 
 import {
   collection, getDocs, setDoc, deleteDoc,
