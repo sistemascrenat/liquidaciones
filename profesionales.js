@@ -637,8 +637,8 @@ function exportCSV(){
 
 function plantillaCSV(){
   const csv = `tipoPersona,estado,nombreProfesional,razonSocial,rut,rutEmpresa,correoPersonal,correoEmpresa,telefono,telefonoEmpresa,rolPrincipalId,rolesSecundariosIds,tieneDescuento,descuentoUF,descuentoRazon
-natural,activo,Ignacio Pastor,,16.128.922-1,,nachopastorpino@gmail.com,,+56952270713,,r_cirujano,r_asistente_cirujano|r_cirujano,false,0,
-juridica,activo,Paloma Martinez,Ignovacion SPA,17.315.517-4,77.644.246-1,paloma@correo.com,pagos@empresa.cl,+56981406262,+56222223333,r_cirujano,r_asistente_cirujano,false,0,
+natural,activo,Juan Pérez,,14.123.456-1,,juanperez@gmail.com,,+56988775599,,r_cirujano,r_asistente_cirujano|r_cirujano,false,0,
+juridica,activo,Andrea González,González SPA,17.321.765-4,77.998.233-1,andrea@correo.com,gonzalezspa@empresa.cl,+56988997755,+56222223333,r_cirujano,r_asistente_cirujano,false,0,
 `;
   download('plantilla_profesionales.csv', csv, 'text/csv');
   toast('Plantilla descargada');
