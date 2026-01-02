@@ -7,6 +7,7 @@
   <link rel="icon" type="image/png" href="logoCR.png">
   <link rel="stylesheet" href="estilos.css"/>
 </head>
+
 <body>
   <div class="container">
 
@@ -45,12 +46,148 @@
         <div class="badge" id="count">0 profesionales</div>
       </div>
 
-      <!-- IMPORT / EXPORT + CREAR -->
+      <!-- FORM -->
+      <section class="card" style="margin-bottom:14px;">
+        <div class="grid">
+
+          <div>
+            <label>Tipo persona</label>
+            <select id="tipoPersona">
+              <option value="natural">Natural</option>
+              <option value="juridica">Jurídica</option>
+            </select>
+          </div>
+
+          <div>
+            <label>Estado</label>
+            <select id="estado">
+              <option value="activo">Activo</option>
+              <option value="inactivo">Inactivo</option>
+            </select>
+          </div>
+
+          <div>
+            <label>Nombre profesional</label>
+            <input id="nombreProfesional" placeholder="Ej: Ignacio Pastor / Paloma Martínez"/>
+          </div>
+
+          <div id="wrapRazonSocial" style="display:none;">
+            <label>Razón social (solo jurídica)</label>
+            <input id="razonSocial" placeholder="Ej: Ignovacion SPA"/>
+          </div>
+
+          <div>
+            <label>RUT</label>
+            <input id="rut" placeholder="Ej: 16.128.922-1"/>
+            <div class="muted" style="margin-top:6px;font-size:12px;">
+              Se guarda con <b>rutId</b> automático (RUT sin puntos/guión).
+            </div>
+          </div>
+
+          <div id="wrapRutEmpresa" style="display:none;">
+            <label>RUT Empresa (solo jurídica)</label>
+            <input id="rutEmpresa" placeholder="Ej: 77.644.246-1"/>
+          </div>
+
+          <div>
+            <label>Teléfono</label>
+            <input id="telefono" placeholder="+56912345678"/>
+          </div>
+
+          <div>
+            <label>Correo personal</label>
+            <input id="correoPersonal" placeholder="correo@dominio.cl"/>
+          </div>
+
+          <div id="wrapCorreoEmpresa" style="display:none;">
+            <label>Correo empresa (solo jurídica)</label>
+            <input id="correoEmpresa" placeholder="pagos@empresa.cl"/>
+          </div>
+
+          <div id="wrapDireccionEmpresa" style="display:none;">
+            <label>Dirección empresa (solo jurídica)</label>
+            <input id="direccionEmpresa" placeholder="Ej: Monjitas 360"/>
+          </div>
+
+          <div id="wrapCiudadEmpresa" style="display:none;">
+            <label>Ciudad empresa (solo jurídica)</label>
+            <input id="ciudadEmpresa" placeholder="Ej: Santiago"/>
+          </div>
+
+          <!-- ROLES -->
+          <div style="grid-column:1 / -1; margin-top:6px;">
+            <label>Rol principal</label>
+            <select id="rolPrincipalId"></select>
+            <div class="muted" style="margin-top:6px;font-size:12px;">
+              El rol principal se guarda en <b>rolPrincipalId</b>. Los secundarios en <b>rolesSecundariosIds</b>.
+            </div>
+          </div>
+
+          <div style="grid-column:1 / -1;">
+            <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px;">
+              <label style="margin:0;">Roles secundarios (selección múltiple)</label>
+              <span class="muted" style="font-size:12px;">
+                (Se cargan desde la colección <b>roles</b>)
+              </span>
+            </div>
+            <div id="rolesWrap" class="rolesWrap"></div>
+          </div>
+
+          <!-- CLÍNICAS -->
+          <div style="grid-column:1 / -1;">
+            <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px;">
+              <label style="margin:0;">Clínicas asociadas (clinicasIds)</label>
+              <span class="muted" style="font-size:12px;">
+                (Se cargan desde la colección <b>clinicas</b>)
+              </span>
+            </div>
+            <div id="clinicasWrap" class="rolesWrap"></div>
+          </div>
+
+          <!-- DESCUENTOS -->
+          <div style="grid-column:1 / -1; margin-top:8px;">
+            <label style="margin-bottom:8px;">Descuento</label>
+
+            <div class="row" style="grid-template-columns: 1fr 1fr; gap:12px;">
+              <div>
+                <label style="margin-bottom:6px;">¿Tiene descuento?</label>
+                <select id="tieneDescuento">
+                  <option value="false">No</option>
+                  <option value="true">Sí</option>
+                </select>
+              </div>
+
+              <div>
+                <label style="margin-bottom:6px;">Descuento UF (descuentoUF)</label>
+                <input id="descuentoUF" type="number" step="0.01" value="0"/>
+              </div>
+            </div>
+
+            <div style="margin-top:10px;">
+              <label>Razón del descuento (descuentoRazon)</label>
+              <input id="descuentoRazon" placeholder="Ej: convenio / descuento especial / etc."/>
+            </div>
+
+            <div class="muted" style="margin-top:6px;font-size:12px;">
+              Se guarda en Firestore como: <b>tieneDescuento</b>, <b>descuentoUF</b>, <b>descuentoRazon</b>
+            </div>
+          </div>
+
+        </div>
+
+        <div class="actions" style="margin-top:12px;">
+          <button class="btn primary" id="btnGuardar">Guardar profesional</button>
+          <button class="btn" id="btnLimpiar">Limpiar</button>
+
+          <span style="flex:1"></span>
+
+          <input id="buscador" placeholder="Buscar (nombre, razón social, rut, roles)" style="max-width:420px;"/>
+        </div>
+      </section>
+
+      <!-- IMPORT / EXPORT -->
       <section class="card" style="margin-bottom:14px;">
         <div class="actions">
-          <!-- NUEVO -->
-          <button class="btn primary" id="btnCrear">➕ Crear Profesional</button>
-
           <button class="btn" id="btnDescargarPlantilla">⬇️ Plantilla CSV</button>
           <button class="btn" id="btnExportar">⬇️ Exportar CSV</button>
 
@@ -59,12 +196,9 @@
             <input id="fileCSV" type="file" accept=".csv,text/csv" style="display:none;"/>
           </label>
 
-          <span style="flex:1"></span>
-
-          <input id="buscador" placeholder="Buscar (nombre, razón social, rut, rol)" style="max-width:420px;"/>
-
-          <div class="muted" style="width:100%; margin-top:8px;">
-            Columnas esperadas CSV: <b>nombreProfesional,razonSocial,rut,rutEmpresa,correoPersonal,correoEmpresa,telefono,tipoPersona,rolPrincipalId,rolesSecundariosIds,tieneDescuento,descuentoUF,descuentoRazon</b>
+          <div class="muted">
+            Columnas clave: <b>rut,nombreProfesional,tipoPersona,razonSocial,rolPrincipalId,rolesSecundariosIds,clinicasIds</b>
+            <span class="muted"> (arrays separados por “|”)</span>
           </div>
         </div>
       </section>
@@ -75,13 +209,12 @@
           <table>
             <thead>
               <tr>
-                <th>Profesional</th>
-                <th>Razón social</th>
+                <th>Profesional / Empresa</th>
                 <th>RUT</th>
-                <th>Tipo</th>
+                <th>Contacto</th>
                 <th>Rol principal</th>
                 <th>Roles secundarios</th>
-                <th>Descuento</th>
+                <th>Clínicas</th>
                 <th style="width:220px;">Acciones</th>
               </tr>
             </thead>
@@ -90,145 +223,14 @@
         </div>
 
         <div class="muted" style="margin-top:10px;">
-          Firestore: colección <b>profesionales</b> (docId = <b>rutId</b>). Roles vienen de colección <b>roles</b>.
+          Firestore: colección <b>profesionales</b> (docId = <b>rutId</b>). Roles vienen de <b>roles</b>.
         </div>
       </section>
+
     </main>
   </div>
 
   <div id="toast" class="toast"></div>
-
-  <!-- MODAL PROFESIONAL -->
-  <div id="modalProfesional" class="modalOverlay" aria-hidden="true">
-    <div class="modalCard" role="dialog" aria-modal="true" aria-labelledby="modalTitulo">
-      <div class="modalHead">
-        <div>
-          <div class="modalTitle" id="modalTitulo">Crear profesional</div>
-          <div class="muted" id="modalSub">Completa los datos y guarda.</div>
-        </div>
-        <button class="btn" id="btnCerrarModal" title="Cerrar">✕</button>
-      </div>
-
-      <div class="grid" style="margin-top:12px;">
-        <div>
-          <label>Tipo persona</label>
-          <select id="m_tipoPersona">
-            <option value="natural">Natural</option>
-            <option value="juridica">Jurídica</option>
-          </select>
-        </div>
-
-        <div>
-          <label>Estado</label>
-          <select id="m_estado">
-            <option value="activo">Activo</option>
-            <option value="inactivo">Inactivo</option>
-          </select>
-        </div>
-
-        <div>
-          <label>Nombre profesional</label>
-          <input id="m_nombreProfesional" placeholder="Ej: Ignacio Pastor"/>
-        </div>
-
-        <div id="wrap_razonSocial">
-          <label>Razón social (solo jurídica)</label>
-          <input id="m_razonSocial" placeholder="Ej: Ignovación SPA"/>
-        </div>
-
-        <div>
-          <label>RUT</label>
-          <input id="m_rut" placeholder="Ej: 16128922-1"/>
-        </div>
-
-        <div id="wrap_rutEmpresa">
-          <label>RUT empresa (solo jurídica)</label>
-          <input id="m_rutEmpresa" placeholder="Ej: 77644246-1"/>
-        </div>
-
-        <div>
-          <label>Correo personal</label>
-          <input id="m_correoPersonal" placeholder="correo@dominio.cl"/>
-        </div>
-
-        <div id="wrap_correoEmpresa">
-          <label>Correo empresa (solo jurídica)</label>
-          <input id="m_correoEmpresa" placeholder="pagos@empresa.cl"/>
-        </div>
-
-        <div>
-          <label>Teléfono</label>
-          <input id="m_telefono" placeholder="+569xxxxxxxx"/>
-        </div>
-
-        <div id="wrap_direccionEmpresa">
-          <label>Dirección empresa (solo jurídica)</label>
-          <input id="m_direccionEmpresa" placeholder="Ej: Monjitas 360"/>
-        </div>
-
-        <div id="wrap_ciudadEmpresa">
-          <label>Ciudad empresa (solo jurídica)</label>
-          <input id="m_ciudadEmpresa" placeholder="Ej: Santiago"/>
-        </div>
-      </div>
-
-      <!-- ROLES -->
-      <div style="margin-top:12px;">
-        <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px;">
-          <label style="margin:0;">Roles</label>
-          <a class="muted" href="roles.html" style="text-decoration:underline;">Administrar Roles</a>
-        </div>
-
-        <div class="row" style="margin-top:8px;">
-          <div>
-            <label>Rol principal</label>
-            <select id="m_rolPrincipal"></select>
-          </div>
-          <div>
-            <label>Roles secundarios (selección múltiple)</label>
-            <div id="m_rolesSecWrap" class="rolesWrap"></div>
-          </div>
-        </div>
-
-        <div class="muted" style="margin-top:8px;">
-          El rol principal es obligatorio. Roles secundarios son opcionales.
-        </div>
-      </div>
-
-      <!-- DESCUENTO -->
-      <div style="margin-top:14px;">
-        <label style="margin-bottom:8px;">Descuento</label>
-        <div class="row">
-          <div>
-            <label style="display:flex;align-items:center;gap:8px;font-weight:800;color:var(--text);">
-              <input type="checkbox" id="m_tieneDescuento" style="width:auto;"/>
-              Tiene descuento
-            </label>
-            <div class="muted">Si marcas esto, puedes indicar UF y la razón.</div>
-          </div>
-
-          <div>
-            <label>Descuento UF</label>
-            <input id="m_descuentoUF" type="number" step="0.01" value="0"/>
-          </div>
-
-          <div>
-            <label>Razón descuento</label>
-            <input id="m_descuentoRazon" placeholder="Ej: Convenio / promoción / etc."/>
-          </div>
-        </div>
-      </div>
-
-      <div class="actions" style="margin-top:14px;">
-        <button class="btn primary" id="btnGuardarModal">Guardar</button>
-        <button class="btn" id="btnCancelarModal">Cancelar</button>
-
-        <span style="flex:1"></span>
-
-        <div class="muted" id="modalHint"></div>
-      </div>
-    </div>
-  </div>
 
   <script type="module" src="profesionales.js"></script>
 </body>
