@@ -243,52 +243,5 @@
 
   <script type="module" src="profesionales.js"></script>
 
-  <!-- CSS extra mínimo para el modal y botones ícono (si no lo tienes en estilos.css) -->
-  <style>
-    .modalBackdrop{
-      position:fixed; inset:0;
-      background:rgba(15,23,42,.45);
-      display:grid; place-items:center;
-      padding:18px;
-      z-index:9999;
-    }
-    .modalCard{
-      width:min(980px, 96vw);
-      max-height: 90vh;
-      overflow:auto;
-      background: var(--panel);
-      border:1px solid rgba(0,0,0,.10);
-      box-shadow: var(--shadow);
-      border-radius: var(--radius);
-    }
-    .modalHead{
-      display:flex; align-items:center; justify-content:space-between;
-      padding:14px 14px 10px 14px;
-      border-bottom:1px solid rgba(0,0,0,.08);
-      position:sticky; top:0; background:var(--panel); z-index:2;
-    }
-    .modalBody{ padding:14px; }
-    .modalFoot{
-      display:flex; gap:10px; align-items:center;
-      padding:14px;
-      border-top:1px solid rgba(0,0,0,.08);
-      position:sticky; bottom:0; background:var(--panel); z-index:2;
-    }
-    .iconBtn{
-      width:40px;height:40px;border-radius:12px;
-      border:1px solid rgba(0,0,0,.12);
-      background:#fff;
-      cursor:pointer;
-      display:inline-grid;
-      place-items:center;
-      font-size:18px; line-height:1;
-    }
-    .iconBtn:hover{ transform: translateY(-1px); }
-    .iconBtn.danger{
-      background: var(--danger);
-      border-color: transparent;
-      color:#fff;
-    }
-  </style>
 </body>
 </html>
