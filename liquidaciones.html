@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Clínica Rennat — Liquidaciones</title>
+  <link rel="icon" type="image/png" href="RaitraiLogo.png"/>
+
+  <!-- Tu CSS global (el mismo que usas en los otros módulos) -->
+  <link rel="stylesheet" href="style.css"/>
+
+  <style>
+    /* Pequeños ajustes específicos de esta pantalla */
+    .page{ display:flex; min-height:100vh; }
+    .main{ flex:1; padding:18px 18px 30px; }
+    .topRow{ display:flex; align-items:flex-start; justify-content:space-between; gap:14px; margin-bottom:14px; }
+    .pageTitle{ font-size:20px; font-weight:900; margin:0; }
+    .pageSub{ color:var(--muted); margin-top:2px; font-size:13px; }
+
+    .card{ background:var(--card); border:1px solid var(--border); border-radius:14px; box-shadow:0 8px 22px rgba(15,23,42,.06); }
+    .cardPad{ padding:14px; }
+    .toolbar{ display:flex; gap:10px; flex-wrap:wrap; align-items:end; justify-content:space-between; }
+    .filters{ display:flex; gap:10px; flex-wrap:wrap; align-items:end; }
+    .field{ display:flex; flex-direction:column; gap:6px; min-width:170px; }
+    .field label{ font-size:12px; color:var(--muted); font-weight:800; }
+    .field select, .field input{
+      height:38px; border-radius:10px; border:1px solid var(--border);
+      padding:0 10px; background:#fff;
+    }
+
+    .btn{ height:38px; padding:0 12px; border-radius:10px; border:1px solid var(--border); background:#fff; cursor:pointer; font-weight:800; }
+    .btn.primary{ background:var(--bg-strong); border-color:var(--bg-strong); color:#fff; }
+    .btn.soft{ background:var(--accent-soft); border-color:#bfeee8; }
+    .btn.danger{ background:var(--danger); border-color:var(--danger); color:#fff; }
+    .btn:disabled{ opacity:.6; cursor:not-allowed; }
+
+    .pill{
+      display:inline-flex; align-items:center; gap:6px;
+      border:1px solid var(--border); border-radius:999px;
+      padding:4px 10px; font-size:12px; font-weight:900; background:#fff;
+    }
+    .pill.ok{ background:#e9fff6; border-color:#b7f2d5; color:#0a7a49; }
+    .pill.warn{ background:#fff7ed; border-color:#fed7aa; color:#9a3412; }
+    .pill.bad{ background:#ffe4e6; border-color:#fecdd3; color:#9f1239; }
+
+    .tableWrap{ overflow:auto; border-radius:12px; border:1px solid var(--border); }
+    table{ width:100%; border-collapse:collapse; min-width:980px; background:#fff; }
+    th, td{ padding:10px 10px; border-bottom:1px solid #eef2f7; vertical-align:top; }
+    th{ text-align:left; font-size:12px; color:var(--muted); font-weight:900; background:#fbfcfe; position:sticky; top:0; z-index:1; }
+    td .mini{ font-size:12px; color:var(--muted); }
+    td .big{ font-weight:900; }
+    .mono{ font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .actionsMini{ display:flex; gap:8px; }
+    .iconBtn{ height:34px; width:40px; border-radius:10px; border:1px solid var(--border); background:#fff; cursor:pointer; font-weight:900; }
+    .iconBtn:hover{ filter:brightness(.98); }
+
+    .split{ display:flex; gap:12px; flex-wrap:wrap; align-items:center; justify-content:space-between; }
+    .right{ display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+
+    /* Modal */
+    .backdrop{
+      position:fixed; inset:0; background:rgba(2,6,23,.55);
+      display:none; place-items:center; z-index:50; padding:18px;
+    }
+    .modal{
+      width:min(1100px, 98vw);
+      max-height:92vh;
+      overflow:auto;
+      border-radius:16px;
+      background:#fff;
+      border:1px solid var(--border);
+      box-shadow:0 18px 55px rgba(2,6,23,.28);
+    }
+    .modalHead{ padding:14px 14px 10px; border-bottom:1px solid #eef2f7; display:flex; align-items:flex-start; justify-content:space-between; gap:10px; }
+    .modalTitle{ font-size:16px; font-weight:1000; margin:0; }
+    .modalSub{ font-size:12px; color:var(--muted); margin-top:3px; }
+    .modalBody{ padding:14px; }
+    .modalFoot{ padding:12px 14px; border-top:1px solid #eef2f7; display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; }
+    .closeX{ height:34px; width:38px; border-radius:10px; border:1px solid var(--border); background:#fff; cursor:pointer; font-weight:1000; }
+  </style>
+</head>
+
+<body>
+  <div class="page">
+    <!-- Sidebar común -->
+    <div id="sidebar-slot"></div>
+
+    <main class="main">
+      <div class="topRow">
+        <div>
+          <h1 class="pageTitle">Liquidaciones</h1>
+          <div class="pageSub" id="who">Conectado: —</div>
+        </div>
+
+        <div class="right">
+          <span class="pill" id="pillEstado">Estado: —</span>
+          <span class="pill" id="pillCount">0 profesionales</span>
+        </div>
+      </div>
+
+      <section class="card cardPad" style="margin-bottom:14px;">
+        <div class="toolbar">
+          <div class="filters">
+            <div class="field">
+              <label>Mes</label>
+              <select id="mes"></select>
+            </div>
+
+            <div class="field" style="min-width:120px;">
+              <label>Año</label>
+              <select id="ano"></select>
+            </div>
+
+            <div class="field" style="min-width:260px;">
+              <label>Buscar</label>
+              <input id="q" placeholder="Buscar profesional, rol, clínica, procedimiento, paciente…"/>
+            </div>
+          </div>
+
+          <div class="right">
+            <button class="btn soft" id="btnRecalcular">🔄 Recalcular</button>
+            <button class="btn" id="btnCSVResumen">⬇️ CSV Resumen</button>
+            <button class="btn" id="btnCSVDetalle">⬇️ CSV Detalle</button>
+          </div>
+        </div>
+
+        <div class="split" style="margin-top:12px;">
+          <div class="mini" id="hint">
+            Fuente: <b>Producción confirmada</b> del mes seleccionado. Cálculo: <b>Tarifario (procedimientos)</b>.
+          </div>
+          <div class="mini" id="lastLoad">—</div>
+        </div>
+      </section>
+
+      <section class="card cardPad">
+        <div class="tableWrap">
+          <table>
+            <thead>
+              <tr>
+                <th style="width:44px;">#</th>
+                <th>Profesional</th>
+                <th>RUT</th>
+                <th>Tipo</th>
+                <th>Casos</th>
+                <th>Total</th>
+                <th>Estado</th>
+                <th style="width:140px;">Acciones</th>
+              </tr>
+            </thead>
+            <tbody id="tbody"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Modal detalle profesional -->
+  <div class="backdrop" id="modalBackdrop">
+    <div class="modal">
+      <div class="modalHead">
+        <div>
+          <div class="modalTitle" id="modalTitle">Detalle</div>
+          <div class="modalSub" id="modalSub">—</div>
+        </div>
+        <button class="closeX" id="btnClose">✕</button>
+      </div>
+
+      <div class="modalBody">
+        <div class="split" style="margin-bottom:10px;">
+          <div class="pill" id="modalPillTotal">TOTAL: —</div>
+          <div class="mini" id="modalPillPendientes">Pendientes: —</div>
+        </div>
+
+        <div class="tableWrap">
+          <table style="min-width:1100px;">
+            <thead>
+              <tr>
+                <th>Fecha</th>
+                <th>Clínica</th>
+                <th>Procedimiento</th>
+                <th>Paciente</th>
+                <th>Rol</th>
+                <th>Monto</th>
+                <th>Estado</th>
+                <th>Observación</th>
+              </tr>
+            </thead>
+            <tbody id="modalTbody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="modalFoot">
+        <button class="btn" id="btnCerrar2">Cerrar</button>
+        <button class="btn soft" id="btnExportDetalleProf">⬇️ Exportar detalle (este profesional)</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Sidebar loader -->
+  <script type="module" src="layout.js"></script>
+  <!-- JS del módulo -->
+  <script type="module" src="liquidaciones.js"></script>
+</body>
+</html>
