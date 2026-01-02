@@ -498,8 +498,8 @@ function rolesMini(p){
 
 function descuentoMini(p){
   return p.tieneDescuento
-    ? `<span class="pill">Descuento: SÍ</span>`
-    : `<span class="muted">Descuento: NO</span>`;
+    ? `<span class="pill">DESCUENTO: SÍ</span>`
+    : `<span class="muted">DESCUENTO: NO</span>`;
 }
 
 function contactoBlock(p){
@@ -536,7 +536,7 @@ function profEmpresaBlock(p){
 
   const subLines = [];
   if(isJ && p.nombreProfesional){
-    subLines.push(`<span>Contacto: <b>${escapeHtml(p.nombreProfesional)}</b></span>`);
+    subLines.push(`<span>PROFESIONAL: <b>${escapeHtml(p.nombreProfesional)}</b></span>`);
   }
   subLines.push(`<span>${escapeHtml(labelTipoEstado(p))}</span>`);
 
