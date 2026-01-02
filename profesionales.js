@@ -1,9 +1,9 @@
 // profesionales.js — COMPLETO
-// ✅ Tabla estilo "Profesional/Empresa | RUT | Contacto" como tu screenshot
+// ✅ Tabla estilo "Profesional/Empresa | RUT | Contacto" + Acciones (✏️ 🗑️)
 // ✅ Modal para crear/editar
 // ✅ Rol principal + roles secundarios (desde colección roles)
-// ✅ Descuentos (tieneDescuento, descuentoUF, descuentoRazon)
-// ✅ Lectura/guardado con tu esquema Firestore profesionales/{rutId}
+// ✅ Descuentos: muestra Sí/No en tabla (no monto/razón)
+// ✅ Buscador con coma "," como AND (Y)
 
 import { db } from './firebase-init.js';
 import { requireAuth } from './auth.js';
@@ -22,8 +22,8 @@ const state = {
   user: null,
   all: [],
   editRutId: null,
-  q: '',
-  rolesCatalog: [] // [{id, nombre}]
+  q: '',                 // ahora guardamos el texto crudo, no normalizado
+  rolesCatalog: []       // [{id, nombre}]
 };
 
 const $ = (id)=> document.getElementById(id);
@@ -96,6 +96,7 @@ function applyTipoPersonaUI(){
   const onlyJ = ['razonSocial','rutEmpresa','correoEmpresa','direccionEmpresa','ciudadEmpresa','telefonoEmpresa'];
   for(const id of onlyJ){
     const el = $(id);
+    if(!el) continue;
     el.disabled = !isJ;
     el.style.opacity = isJ ? '1' : '.55';
     if(!isJ) el.value = '';
@@ -113,7 +114,8 @@ function paintRolesUI(){
   if(!state.rolesCatalog.length){
     sel.innerHTML = `<option value="">(Sin roles)</option>`;
   }else{
-    sel.innerHTML = `<option value="">Selecciona rol principal…</option>` +
+    sel.innerHTML =
+      `<option value="">Selecciona rol principal…</option>` +
       state.rolesCatalog.map(r=> `<option value="${escapeHtml(r.id)}">${escapeHtml(r.nombre)}</option>`).join('');
   }
 
@@ -243,10 +245,20 @@ async function loadAll(){
 }
 
 /* =========================
-   Search
+   Search (coma = AND)
 ========================= */
-function rowMatches(p, q){
-  if(!q) return true;
+function queryTerms(raw){
+  // "ignovacion, cirujano" => ["ignovacion","cirujano"]
+  return (raw || '')
+    .toString()
+    .split(',')
+    .map(s=> normalize(s))
+    .filter(Boolean);
+}
+
+function rowMatches(p, rawQuery){
+  const terms = queryTerms(rawQuery);
+  if(!terms.length) return true;
 
   const showMain = (p.tipoPersona === 'juridica' && p.razonSocial) ? p.razonSocial : p.nombreProfesional;
 
@@ -258,10 +270,12 @@ function rowMatches(p, q){
     p.telefono, p.telefonoEmpresa,
     roleNameById(p.rolPrincipalId),
     ...(p.rolesSecundariosIds || []).map(roleNameById),
+    (p.tieneDescuento ? 'descuento si true' : 'descuento no false'),
     p.estado, p.tipoPersona
   ].join(' '));
 
-  return hay.includes(q);
+  // AND: todos los términos deben existir
+  return terms.every(t => hay.includes(t));
 }
 
 /* =========================
@@ -387,7 +401,6 @@ async function saveProfesional(){
     return;
   }
 
-  // Payload según tu esquema
   const payload = {
     tipoPersona,
     estado,
@@ -447,7 +460,7 @@ async function removeProfesional(rutId){
 }
 
 /* =========================
-   Paint table (TU FORMATO)
+   Paint table
 ========================= */
 function labelTipoEstado(p){
   const t = (p.tipoPersona || 'natural');
@@ -455,9 +468,28 @@ function labelTipoEstado(p){
   return `${t} · ${e}`;
 }
 
+function rolesMini(p){
+  const pri = p.rolPrincipalId ? roleNameById(p.rolPrincipalId) : '';
+  const secs = (p.rolesSecundariosIds || [])
+    .filter(Boolean)
+    .map(roleNameById)
+    .filter(Boolean);
+
+  const parts = [];
+  if(pri) parts.push(`Principal: <b>${escapeHtml(pri)}</b>`);
+  if(secs.length) parts.push(`Sec: ${secs.map(x=>`<span class="pill">${escapeHtml(x)}</span>`).join(' ')}`);
+
+  if(!parts.length) return `<span class="muted">—</span>`;
+  return parts.join(' <span class="dot">·</span> ');
+}
+
+function descuentoMini(p){
+  return p.tieneDescuento
+    ? `<span class="pill">Descuento: SÍ</span>`
+    : `<span class="muted">Descuento: NO</span>`;
+}
+
 function contactoBlock(p){
-  // Natural: 1 teléfono + correo personal
-  // Jurídica: 1 o 2 teléfonos (si hay telefonoEmpresa) + correo personal + correo empresa
   const rows = [];
 
   if(p.telefono) rows.push({ ico:'📞', val: p.telefono });
@@ -477,8 +509,6 @@ function contactoBlock(p){
 }
 
 function rutBlock(p){
-  // Natural: solo rut
-  // Jurídica: rut (profesional) + Emp: rutEmpresa
   const a = [];
   a.push(`<div class="mono"><b>${escapeHtml(p.rut || '')}</b></div>`);
   if(p.tipoPersona === 'juridica' && p.rutEmpresa){
@@ -488,19 +518,12 @@ function rutBlock(p){
 }
 
 function profEmpresaBlock(p){
-  // ✅ Tu pedido:
-  // - "Profesional / Empresa" = juntar, pero:
-  //   - si jurídica: mostrar RAZON SOCIAL primero (titulo) + "Contacto: {nombreProfesional}" abajo
-  //   - si natural: mostrar nombre profesional (titulo) + abajo "natural · activo"
   const isJ = (p.tipoPersona === 'juridica');
   const title = (isJ && p.razonSocial) ? p.razonSocial : (p.nombreProfesional || '—');
 
   const subLines = [];
-  if(isJ){
-    // contacto debajo (si existe)
-    if(p.nombreProfesional){
-      subLines.push(`<span>Contacto: <b>${escapeHtml(p.nombreProfesional)}</b></span>`);
-    }
+  if(isJ && p.nombreProfesional){
+    subLines.push(`<span>Contacto: <b>${escapeHtml(p.nombreProfesional)}</b></span>`);
   }
   subLines.push(`<span>${escapeHtml(labelTipoEstado(p))}</span>`);
 
@@ -510,13 +533,18 @@ function profEmpresaBlock(p){
       <div class="cellSub">
         ${subLines.join('<span class="dot">·</span>')}
       </div>
+      <div class="mini" style="margin-top:6px;">
+        🧩 ${rolesMini(p)}
+      </div>
+      <div class="mini" style="margin-top:6px;">
+        ${descuentoMini(p)}
+      </div>
     </div>
   `;
 }
 
 function paint(){
-  const q = state.q;
-  const rows = state.all.filter(p=>rowMatches(p,q));
+  const rows = state.all.filter(p=> rowMatches(p, state.q));
 
   $('count').textContent = `${rows.length} profesional${rows.length===1?'':'es'}`;
 
@@ -538,18 +566,15 @@ function paint(){
       </td>
     `;
 
-    const btnEdit = tr.querySelector('button[aria-label="Editar"]');
-    const btnDel  = tr.querySelector('button[aria-label="Eliminar"]');
-
-    btnEdit.addEventListener('click', ()=> openModal('edit', p));
-    btnDel.addEventListener('click', ()=> removeProfesional(p.rutId));
+    tr.querySelector('button[aria-label="Editar"]').addEventListener('click', ()=> openModal('edit', p));
+    tr.querySelector('button[aria-label="Eliminar"]').addEventListener('click', ()=> removeProfesional(p.rutId));
 
     tb.appendChild(tr);
   }
 }
 
 /* =========================
-   CSV (mantengo lo que ya funcionaba)
+   CSV
 ========================= */
 function download(filename, text, mime='text/plain'){
   const blob = new Blob([text], { type: mime });
@@ -713,15 +738,22 @@ requireAuth({
 
     $('tipoPersona').addEventListener('change', applyTipoPersonaUI);
 
-    // Search
+    // Search (coma=AND)
     $('buscador').addEventListener('input', (e)=>{
-      state.q = normalize(e.target.value);
+      state.q = (e.target.value || '').toString();
       paint();
     });
 
     // CSV
     $('btnExportar').addEventListener('click', exportCSV);
     $('btnDescargarPlantilla').addEventListener('click', plantillaCSV);
+
+    // ✅ Importar (botón real)
+    const btnImp = $('btnImportar');
+    if(btnImp){
+      btnImp.addEventListener('click', ()=> $('fileCSV').click());
+    }
+
     $('fileCSV').addEventListener('change', async (e)=>{
       const file = e.target.files?.[0];
       e.target.value = '';
