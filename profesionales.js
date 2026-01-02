@@ -470,8 +470,8 @@ function labelTipoEstado(p){
 
   const est = (p.estado || 'activo').toString().toLowerCase(); // activo / inactivo
   return `
-  ${tipo} · <span class="state ${est}">${est.toUpperCase()}</span>
-`;
+    ${tipo} · <span class="state ${est}">${est.toUpperCase()}</span>
+  `;
 }
 
 
