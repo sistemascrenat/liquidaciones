@@ -3,106 +3,132 @@
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
-  <title>Clínica Rennat – Producción</title>
-  <link rel="icon" type="image/png" href="logoCR.png">
-  <link rel="stylesheet" href="estilos.css"/>
+  <title>Clínica Rennat — Producción</title>
+  <link rel="icon" type="image/png" href="RennatLogo.png"/>
+
+  <!-- Tu CSS global (si ya existe) -->
+  <link rel="stylesheet" href="style.css"/>
+
+  <style>
+    /* Ajustes mínimos locales (no rompen tu estilo) */
+    .page { display:flex; min-height:100vh; background:var(--bg,#f4f6fb); }
+    .content { flex:1; padding:22px; }
+    .topbar { display:flex; align-items:flex-start; justify-content:space-between; gap:14px; margin-bottom:14px; }
+    .h1 { font-size:22px; font-weight:900; margin:0; }
+    .sub { color:var(--muted,#6b7280); margin-top:4px; font-size:13px; }
+    .pillCount { background:var(--accent-soft,#e0fffa); border:1px solid #bdeee8; padding:6px 10px; border-radius:999px; font-size:12px; }
+
+    .card { background:var(--card,#fff); border:1px solid rgba(0,0,0,.06); border-radius:14px; box-shadow:0 8px 24px rgba(15,23,42,.06); padding:14px; }
+    .grid2 { display:grid; grid-template-columns: 1fr 1fr; gap:12px; }
+    .grid3 { display:grid; grid-template-columns: 1fr 1fr 1fr; gap:12px; }
+    .field label { display:block; font-size:12px; color:var(--muted,#6b7280); margin-bottom:6px; font-weight:700; }
+    .field input, .field select {
+      width:100%; height:38px; border-radius:10px;
+      border:1px solid rgba(0,0,0,.12); padding:0 10px;
+      background:#fff; outline:none;
+    }
+    .rowActions { display:flex; gap:10px; align-items:flex-end; justify-content:flex-start; flex-wrap:wrap; }
+    .btn { height:38px; border-radius:10px; padding:0 14px; border:1px solid rgba(0,0,0,.12); background:#fff; cursor:pointer; font-weight:800; }
+    .btn.primary { background:var(--bg-strong,#00a89d); color:#fff; border-color:transparent; }
+    .btn.danger { background:#e11d48; color:#fff; border-color:transparent; }
+    .btn.soft { background:var(--accent-soft,#e0fffa); border-color:#bdeee8; }
+    .btn:disabled { opacity:.55; cursor:not-allowed; }
+
+    .tableWrap { margin-top:14px; overflow:auto; border-radius:12px; border:1px solid rgba(0,0,0,.08); }
+    table { width:100%; border-collapse:collapse; min-width:980px; background:#fff; }
+    th, td { padding:10px 10px; border-bottom:1px solid rgba(0,0,0,.06); vertical-align:top; font-size:12px; }
+    th { text-align:left; font-size:11px; color:var(--muted,#6b7280); text-transform:uppercase; letter-spacing:.04em; background:#fafafa; position:sticky; top:0; z-index:1; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+    .muted { color:var(--muted,#6b7280); }
+    .ok { color:#15803d; font-weight:900; }
+    .warn { color:#b45309; font-weight:900; }
+    .tiny { font-size:11px; }
+    .divider { height:1px; background:rgba(0,0,0,.06); margin:12px 0; }
+  </style>
 </head>
+
 <body>
+  <div class="page">
+    <!-- Sidebar común -->
+    <div id="sidebar-slot"></div>
 
-<div class="container">
-
-  <!-- SIDEBAR COMÚN -->
-  <div id="sidebar-slot"></div>
-
-  <!-- MAIN -->
-  <main class="main">
-
-    <div class="topbar">
-      <div>
-        <div class="h1">Producción</div>
-        <div class="muted" id="who"></div>
+    <main class="content">
+      <div class="topbar">
+        <div>
+          <h1 class="h1">Producción</h1>
+          <div class="sub" id="who">Conectado: —</div>
+        </div>
+        <div class="pillCount" id="countPill">0 filas</div>
       </div>
-      <div class="badge" id="estadoImport">—</div>
-    </div>
 
-    <!-- CARGA CSV -->
-    <section class="card" style="margin-bottom:14px;">
-      <div class="grid">
-        <div>
-          <label>Mes</label>
-          <select id="mes">
-            <option value="01">Enero</option><option value="02">Febrero</option>
-            <option value="03">Marzo</option><option value="04">Abril</option>
-            <option value="05">Mayo</option><option value="06">Junio</option>
-            <option value="07">Julio</option><option value="08">Agosto</option>
-            <option value="09">Septiembre</option><option value="10">Octubre</option>
-            <option value="11">Noviembre</option><option value="12">Diciembre</option>
-          </select>
+      <section class="card">
+        <div class="grid3">
+          <div class="field">
+            <label>Mes</label>
+            <select id="mes">
+              <option>Enero</option><option>Febrero</option><option>Marzo</option><option>Abril</option>
+              <option>Mayo</option><option>Junio</option><option>Julio</option><option>Agosto</option>
+              <option>Septiembre</option><option>Octubre</option><option>Noviembre</option><option>Diciembre</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>Año</label>
+            <input id="ano" type="number" min="2020" max="2100" value="2025"/>
+          </div>
+          <div class="field">
+            <label>Importación</label>
+            <input id="importId" class="mono" readonly placeholder="(se genera al cargar CSV)"/>
+          </div>
         </div>
 
-        <div>
-          <label>Año</label>
-          <input id="anio" type="number" min="2020" value="2025"/>
-        </div>
+        <div class="divider"></div>
 
-        <div>
-          <label>Archivo CSV</label>
-          <input id="fileCSV" type="file" accept=".csv"/>
-        </div>
+        <div class="rowActions">
+          <div class="field" style="min-width:380px;">
+            <label>Archivo CSV (todas las columnas)</label>
+            <input id="fileCSV" type="file" accept=".csv"/>
+          </div>
 
-        <div style="display:flex;align-items:end;">
           <button class="btn primary" id="btnCargar">Cargar CSV</button>
+
+          <button class="btn soft" id="btnConfirmar" disabled>Confirmar importación</button>
+          <button class="btn danger" id="btnAnular" disabled>Anular importación</button>
+
+          <span class="muted tiny" id="statusInfo">—</span>
         </div>
-      </div>
-    </section>
+      </section>
 
-    <!-- RESUMEN -->
-    <section class="card" id="resumenBox" style="display:none;margin-bottom:14px;">
-      <div class="grid">
-        <div><b>Total filas:</b> <span id="rTotal"></span></div>
-        <div><b>Monto total:</b> <span id="rMonto"></span></div>
-        <div><b>Filas con monto 0:</b> <span id="rCero"></span></div>
-        <div><b>Profesionales no encontrados:</b> <span id="rProfesionales"></span></div>
-        <div><b>Clínicas no encontradas:</b> <span id="rClinicas"></span></div>
-        <div><b>Roles no encontrados:</b> <span id="rRoles"></span></div>
-      </div>
-    </section>
+      <section class="card" style="margin-top:14px;">
+        <div class="muted tiny" style="margin-bottom:8px;">
+          Vista previa (primeras filas). Esto es “staging”: no afecta liquidaciones hasta confirmar.
+        </div>
 
-    <!-- TABLA -->
-    <section class="card">
-      <div class="tableWrap">
-        <table>
-          <thead>
-            <tr>
-              <th>#</th>
-              <th>Fecha</th>
-              <th>Profesional</th>
-              <th>Rol</th>
-              <th>Clínica</th>
-              <th>Procedimiento</th>
-              <th>Paciente</th>
-              <th>Monto</th>
-              <th>Estado</th>
-            </tr>
-          </thead>
-          <tbody id="tbody"></tbody>
-        </table>
-      </div>
-    </section>
+        <div class="tableWrap">
+          <table>
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Fecha</th>
+                <th>Hora</th>
+                <th>Clínica</th>
+                <th>Cirugía</th>
+                <th>Tipo Paciente</th>
+                <th>Valor</th>
+                <th>DP</th>
+                <th>HMQ</th>
+                <th>INS</th>
+                <th>Profesionales (resumen)</th>
+              </tr>
+            </thead>
+            <tbody id="tbody"></tbody>
+          </table>
+        </div>
+      </section>
 
-    <!-- ACCIONES -->
-    <section class="card" style="margin-top:14px;">
-      <div class="actions">
-        <button class="btn" id="btnConfirmar">Confirmar Importación</button>
-        <button class="btn danger" id="btnAnular">Anular Importación</button>
-      </div>
-    </section>
-
-  </main>
-</div>
-
-<div id="toast" class="toast"></div>
-
-<script type="module" src="produccion.js"></script>
+      <!-- layout -->
+      <script type="module" src="layout.js"></script>
+      <script type="module" src="produccion.js"></script>
+    </main>
+  </div>
 </body>
 </html>
