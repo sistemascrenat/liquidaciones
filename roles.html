@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Clínica Rennat – Roles</title>
+  <link rel="icon" type="image/png" href="logoCR.png">
+  <link rel="stylesheet" href="estilos.css"/>
+</head>
+<body>
+  <div class="container">
+
+    <!-- SIDEBAR común -->
+    <div id="sidebar-slot"></div>
+
+    <!-- MAIN -->
+    <main class="main">
+      <div class="topbar">
+        <div>
+          <div class="h1">Roles</div>
+          <div class="muted" id="who"></div>
+        </div>
+        <div class="badge" id="count">0 roles</div>
+      </div>
+
+      <!-- TOOLBAR -->
+      <section class="card" style="margin-bottom:14px;">
+        <div class="actions" style="gap:10px;">
+          <button class="btn primary" id="btnCrear">+ Crear Nuevo Rol</button>
+
+          <button class="btn" id="btnDescargarPlantilla">⬇️ Plantilla CSV</button>
+          <button class="btn" id="btnExportar">⬇️ Exportar CSV</button>
+          <button class="btn" id="btnImportar">⬆️ Importar CSV</button>
+          <input id="fileCSV" type="file" accept=".csv,text/csv" style="display:none;"/>
+
+          <span style="flex:1"></span>
+
+          <input
+            id="buscador"
+            placeholder='Buscar (ej: "cirujano-anestesista, activo")'
+            style="max-width:520px;"
+          />
+        </div>
+
+        <div class="mini" style="margin-top:10px;">
+          <span class="muted"><b>Reglas:</b> coma <b>,</b> = AND · guion <b>-</b> = OR</span>
+        </div>
+      </section>
+
+      <!-- TABLE -->
+      <section class="card">
+        <div class="tableWrap">
+          <table class="simpleTable">
+            <thead>
+              <tr>
+                <th style="min-width:360px;">Rol</th>
+                <th style="min-width:220px;">Aplica a</th>
+                <th style="min-width:160px;">Estado</th>
+                <th style="width:110px;">Acciones</th>
+              </tr>
+            </thead>
+            <tbody id="tbody"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div id="toast" class="toast"></div>
+
+  <!-- MODAL -->
+  <div id="modalBackdrop" class="modalBackdrop" style="display:none;">
+    <div class="modalCard" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+      <div class="modalHead">
+        <div>
+          <div class="h1" id="modalTitle" style="margin:0;font-size:18px;">Crear rol</div>
+          <div class="muted" id="modalSub" style="font-size:12px;margin-top:2px;"></div>
+        </div>
+        <button class="iconBtn" id="btnModalClose" type="button" aria-label="Cerrar" title="Cerrar">✖️</button>
+      </div>
+
+      <div class="modalBody">
+        <div class="grid">
+          <div style="grid-column:1/-1;">
+            <label>Nombre del rol</label>
+            <input id="nombre" placeholder="Ej: Cirujano"/>
+            <div class="mini" style="margin-top:6px;">
+              <span class="muted">ID sugerido: </span><b id="idSugerido">r_</b>
+            </div>
+          </div>
+
+          <div>
+            <label>Aplica a</label>
+            <select id="aplicaA">
+              <option value="ambos">Ambos</option>
+              <option value="cirugias">Cirugías</option>
+              <option value="ambulatorios">Ambulatorios</option>
+            </select>
+          </div>
+
+          <div>
+            <label>Estado</label>
+            <select id="estado">
+              <option value="activo">Activo</option>
+              <option value="inactivo">Inactivo</option>
+            </select>
+          </div>
+
+          <div style="grid-column:1/-1;">
+            <label>Nota (opcional)</label>
+            <input id="nota" placeholder="Ej: Rol válido para procedimientos especiales..."/>
+          </div>
+        </div>
+      </div>
+
+      <div class="modalFoot">
+        <button class="btn" id="btnModalCancelar" type="button">Cancelar</button>
+        <span style="flex:1"></span>
+        <button class="btn primary" id="btnModalGuardar" type="button">Guardar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- layout primero para montar sidebar -->
+  <script type="module" src="layout.js"></script>
+
+  <!-- módulo específico -->
+  <script type="module" src="roles.js"></script>
+</body>
+</html>
