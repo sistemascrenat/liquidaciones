@@ -8,8 +8,9 @@
   <link rel="stylesheet" href="estilos.css"/>
 </head>
 <body>
+
   <div class="container">
-    <!-- SIDEBAR común -->
+    <!-- SIDEBAR (inyectado por layout.js) -->
     <div id="sidebar-slot"></div>
 
     <!-- MAIN -->
@@ -43,12 +44,12 @@
           <table class="simpleTable">
             <thead>
               <tr>
-                <th style="min-width:170px;">Código</th>
-                <th style="min-width:420px;">Cirugía</th>
-                <th style="min-width:300px;">Roles</th>
-                <th style="min-width:160px;">Clínicas</th>
-                <th style="min-width:140px;">Estado</th>
-                <th style="width:160px;">Acciones</th>
+                <th style="min-width:140px;">Código</th>
+                <th style="min-width:320px;">Cirugía</th>
+                <th style="min-width:260px;">Roles</th>
+                <th style="min-width:120px;">Clínicas</th>
+                <th style="min-width:120px;">Estado</th>
+                <th style="width:150px;">Acciones</th>
               </tr>
             </thead>
             <tbody id="tbody"></tbody>
@@ -60,7 +61,7 @@
 
   <div id="toast" class="toast"></div>
 
-  <!-- MODAL: Crear / Editar cirugía -->
+  <!-- MODAL: Crear/Editar cirugía -->
   <div id="modalBackdrop" class="modalBackdrop" style="display:none;">
     <div class="modalCard" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
       <div class="modalHead">
@@ -87,18 +88,25 @@
           </div>
 
           <div style="grid-column:1/-1;">
-            <label>Nombre de la cirugía</label>
-            <input id="nombre" placeholder="Ej: Apendicectomía"/>
+            <label>Nombre cirugía</label>
+            <input id="nombre" placeholder="Ej: Manga / Bypass / Hernia..."/>
           </div>
         </div>
 
         <hr style="border:none;border-top:1px solid rgba(0,0,0,.08);margin:14px 0;"/>
 
-        <div>
-          <label>Roles (catálogo)</label>
-          <div id="rolesWrap" class="rolesWrap"></div>
-          <div class="mini" style="margin-top:8px;">
-            * Aquí solo definimos <b>qué roles aplican</b> a la cirugía. Los precios se editan en “Tarifario”.
+        <div class="grid" style="grid-template-columns:1fr 1fr; gap:12px;">
+          <div>
+            <label>Roles (desde catálogo)</label>
+            <div id="rolesWrap" class="rolesWrap"></div>
+          </div>
+
+          <div>
+            <label>Clínicas donde aplica (para tarifario)</label>
+            <div id="clinicasWrap" class="rolesWrap"></div>
+            <div class="muted" style="font-size:12px;margin-top:8px;">
+              Puedes crear la cirugía aunque no tenga tarifario listo.
+            </div>
           </div>
         </div>
       </div>
@@ -111,7 +119,7 @@
     </div>
   </div>
 
-  <!-- MODAL: Tarifario -->
+  <!-- MODAL: Tarifario (por clínica + tipo paciente) -->
   <div id="tarBackdrop" class="modalBackdrop" style="display:none;">
     <div class="modalCard" role="dialog" aria-modal="true" aria-labelledby="tarTitle">
       <div class="modalHead">
@@ -123,51 +131,79 @@
       </div>
 
       <div class="modalBody">
-        <div class="grid" style="grid-template-columns: 1fr 1fr; gap:12px;">
+        <div class="grid" style="grid-template-columns:1fr 1fr 1fr; gap:12px;">
           <div>
             <label>Clínica</label>
-            <select id="selClinica"></select>
+            <select id="tarClinica"></select>
           </div>
           <div>
-            <label>Indicador</label>
-            <div class="mini" id="tarHint" style="padding:10px 12px;border:1px solid rgba(0,0,0,.08);border-radius:12px;background:#fafafa;">
-              Selecciona una clínica para editar precios.
-            </div>
+            <label>Tipo de paciente</label>
+            <select id="tarPaciente">
+              <option value="particular">Particular</option>
+              <option value="isapre">Isapre</option>
+              <option value="fonasa">Fonasa</option>
+            </select>
+          </div>
+          <div>
+            <label>Resumen</label>
+            <div class="pill" id="tarResumen">HMQ: $0 · DP: $0 · INS: $0 · TOTAL: $0</div>
           </div>
         </div>
 
         <hr style="border:none;border-top:1px solid rgba(0,0,0,.08);margin:14px 0;"/>
 
-        <div class="tableWrap">
-          <table class="simpleTable" style="min-width:860px;">
-            <thead>
-              <tr>
-                <th style="min-width:280px;">Rol</th>
-                <th style="min-width:190px;">Particular</th>
-                <th style="min-width:190px;">Isapre</th>
-                <th style="min-width:190px;">Fonasa</th>
-              </tr>
-            </thead>
-            <tbody id="tarBody"></tbody>
-          </table>
-        </div>
+        <div class="grid" style="grid-template-columns: 2fr 1fr; gap:12px;">
+          <div>
+            <label>Honorarios médicos (por rol) — suma = HMQ</label>
+            <div class="tableWrap" style="min-width:auto;">
+              <table style="min-width:520px;">
+                <thead>
+                  <tr>
+                    <th>Rol</th>
+                    <th style="width:180px;">Monto</th>
+                  </tr>
+                </thead>
+                <tbody id="tarRolesBody"></tbody>
+              </table>
+            </div>
+            <div class="muted" style="font-size:12px;margin-top:8px;">
+              * Si hay Ayudante 1 / Ayudante 2, se paga igual: puedes poner el mismo monto en ambos.
+            </div>
+          </div>
 
-        <div class="mini" style="margin-top:10px;">
-          * Valores fijos. Puede quedar vacío (pendiente).
+          <div>
+            <label>Derechos de pabellón (DP)</label>
+            <input id="tarDerechos" type="number" min="0" step="1" value="0"/>
+
+            <div style="height:10px"></div>
+
+            <label>Insumos (INS)</label>
+            <input id="tarInsumos" type="number" min="0" step="1" value="0"/>
+
+            <div style="height:14px"></div>
+
+            <div class="pill" style="display:block;">
+              <div><b>HMQ:</b> <span id="sumHmq">$0</span></div>
+              <div><b>DP:</b> <span id="sumDp">$0</span></div>
+              <div><b>INS:</b> <span id="sumIns">$0</span></div>
+              <div style="margin-top:6px;"><b>TOTAL:</b> <span id="sumTotal">$0</span></div>
+            </div>
+
+            <div class="muted" style="font-size:12px;margin-top:10px;">
+              Para “TARIFARIO: OK (CLÍNICA)” se exige que Particular/Isapre/Fonasa tengan HMQ + DP + INS completos.
+            </div>
+          </div>
         </div>
       </div>
 
       <div class="modalFoot">
-        <button class="btn" id="btnTarCancelar" type="button">Cerrar</button>
+        <button class="btn" id="btnTarCancelar" type="button">Cancelar</button>
         <span style="flex:1"></span>
         <button class="btn primary" id="btnTarGuardar" type="button">Guardar tarifario</button>
       </div>
     </div>
   </div>
 
-  <!-- Sidebar común -->
-  <script type="module" src="layout.js"></script>
-  <!-- Página -->
   <script type="module" src="cirugias.js"></script>
 </body>
 </html>
