@@ -265,12 +265,20 @@ async function loadAll(){
    Search (coma = AND)
 ========================= */
 function queryTerms(raw){
-  // "ignovacion, cirujano" => ["ignovacion","cirujano"]
+  // coma = AND. Ej: "ignovacion, cirujano" => ["ignovacion","cirujano"]
+  // permite varias comas y limpia espacios
   return (raw || '')
     .toString()
     .split(',')
-    .map(s=> normalize(s))
+    .map(s => normalize(s))
     .filter(Boolean);
+}
+
+// helpers para búsquedas más robustas (rut/teléfono/roles)
+function digitsOnly(s=''){ return (s ?? '').toString().replace(/\D/g,''); }
+function normRoleId(s=''){
+  // r_cirujano => "r cirujano" => "r cirujano" normalizado
+  return normalize((s ?? '').toString().replace(/[_-]+/g,' '));
 }
 
 function rowMatches(p, rawQuery){
@@ -279,21 +287,50 @@ function rowMatches(p, rawQuery){
 
   const showMain = (p.tipoPersona === 'juridica' && p.razonSocial) ? p.razonSocial : p.nombreProfesional;
 
+  // roles: buscamos por nombre (catálogo) y también por id (por si el catálogo no está o no calza)
+  const priName = roleNameById(p.rolPrincipalId);
+  const secNames = (p.rolesSecundariosIds || []).map(roleNameById);
+
+  const priId = p.rolPrincipalId || '';
+  const secIds = (p.rolesSecundariosIds || []);
+
+  // rut: agregamos rut “bonito” y también solo dígitos
+  const rutDigits = digitsOnly(p.rut);
+  const rutEmpDigits = digitsOnly(p.rutEmpresa);
+
   const hay = normalize([
+    // nombre visible + (si jurídica) nombre del contacto
     showMain,
     (p.tipoPersona === 'juridica' ? p.nombreProfesional : ''),
+
+    // rut / rut empresa (con formato y sin formato)
     p.rut, p.rutEmpresa,
+    rutDigits, rutEmpDigits,
+    p.rutId, // por si buscas directo el ID
+
+    // correos / teléfonos (normal y solo dígitos)
     p.correoPersonal, p.correoEmpresa,
     p.telefono, p.telefonoEmpresa,
-    roleNameById(p.rolPrincipalId),
-    ...(p.rolesSecundariosIds || []).map(roleNameById),
+    digitsOnly(p.telefono), digitsOnly(p.telefonoEmpresa),
+
+    // roles por nombre
+    priName,
+    ...secNames,
+
+    // roles por id (y “normalizados” por si buscas "cirujano" y el rol es r_cirujano)
+    priId, ...secIds,
+    normRoleId(priId),
+    ...secIds.map(normRoleId),
+
+    // flags
     (p.tieneDescuento ? 'descuento si true' : 'descuento no false'),
     p.estado, p.tipoPersona
   ].join(' '));
 
-  // AND: todos los términos deben existir
+  // AND real: todos los términos deben aparecer
   return terms.every(t => hay.includes(t));
 }
+
 
 /* =========================
    Form set/clear
