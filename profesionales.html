@@ -46,18 +46,51 @@
       <!-- FORM -->
       <section class="card" style="margin-bottom:14px;">
         <div class="grid">
+
           <div>
-            <label>Nombre</label>
-            <input id="nombre" placeholder="Ej: Juan Pérez"/>
+            <label>Tipo</label>
+            <select id="tipoPersona">
+              <option value="NATURAL">Persona natural</option>
+              <option value="JURIDICA">Persona jurídica (empresa)</option>
+            </select>
           </div>
+
           <div>
-            <label>RUT</label>
-            <input id="rut" placeholder="Ej: 12.345.678-9"/>
+            <label>Nombre (natural) / Razón social (jurídica)</label>
+            <input id="nombre" placeholder="Ej: Juan Pérez / Clínica X SpA"/>
           </div>
+
+          <div>
+            <label>RUT (persona o empresa)</label>
+            <input id="rut" placeholder="Ej: 12.345.678-9 / 76.123.456-7"/>
+          </div>
+
           <div>
             <label>Email</label>
             <input id="email" placeholder="correo@dominio.cl"/>
           </div>
+
+          <div>
+            <label>Teléfono</label>
+            <input id="telefono" placeholder="+56 9 1234 5678"/>
+          </div>
+
+          <div>
+            <label>Dirección</label>
+            <input id="direccion" placeholder="Dirección (persona o empresa)"/>
+          </div>
+
+          <!-- Empresa (solo si Jurídica) -->
+          <div id="boxEmpresa" style="display:none;">
+            <label>Giro (empresa)</label>
+            <input id="giro" placeholder="Ej: Prestación de servicios médicos"/>
+          </div>
+
+          <div id="boxEmpresa2" style="display:none;">
+            <label>Contacto empresa (opcional)</label>
+            <input id="contactoEmpresa" placeholder="Ej: María Soto / Encargada"/>
+          </div>
+
           <div>
             <label>Rol</label>
             <select id="rol">
@@ -67,6 +100,7 @@
               <option value="OTRO">Otro</option>
             </select>
           </div>
+
         </div>
 
         <div class="actions" style="margin-top:12px;">
@@ -75,7 +109,11 @@
 
           <span style="flex:1"></span>
 
-          <input id="buscador" placeholder="Buscar (nombre, rut, email, rol)" style="max-width:420px;"/>
+          <input id="buscador" placeholder="Buscar (nombre, rut, email, teléfono, dirección, giro, rol)" style="max-width:520px;"/>
+        </div>
+
+        <div class="muted" style="margin-top:10px;">
+          * Si seleccionas <b>Persona jurídica</b>, se habilitan los campos de empresa.
         </div>
       </section>
 
@@ -91,7 +129,7 @@
           </label>
 
           <div class="muted">
-            Columnas esperadas: <b>nombre,rut,email,rol</b>
+            Columnas esperadas: <b>tipoPersona,nombre,rut,email,telefono,direccion,giro,contactoEmpresa,rol</b>
           </div>
         </div>
       </section>
@@ -102,9 +140,11 @@
           <table>
             <thead>
               <tr>
-                <th>Nombre</th>
+                <th>Tipo</th>
+                <th>Nombre / Razón social</th>
                 <th>RUT</th>
                 <th>Email</th>
+                <th>Teléfono</th>
                 <th>Rol</th>
                 <th style="width:220px;">Acciones</th>
               </tr>
@@ -112,6 +152,7 @@
             <tbody id="tbody"></tbody>
           </table>
         </div>
+
         <div class="muted" style="margin-top:10px;">
           Guardado en Firestore: colección <b>profesionales</b>.
         </div>
