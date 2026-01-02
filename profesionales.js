@@ -233,12 +233,29 @@ async function loadAll(){
   });
 
   // Orden: si es jurídica, por razón social; si es natural, por nombre profesional
-  out.sort((a,b)=>{
-    const A = normalize(a.tipoPersona==='juridica' ? a.razonSocial : a.nombreProfesional);
-    const B = normalize(b.tipoPersona==='juridica' ? b.razonSocial : b.nombreProfesional);
-    if(A !== B) return A.localeCompare(B);
-    return normalize(a.nombreProfesional || '').localeCompare(normalize(b.nombreProfesional || ''));
+  out.sort((a, b) => {
+    // 1️⃣ Estado: activos primero
+    if (a.estado !== b.estado) {
+      if (a.estado === 'activo') return -1;
+      if (b.estado === 'activo') return 1;
+    }
+  
+    // 2️⃣ Nombre visible (empresa o persona)
+    const nameA = normalize(
+      a.tipoPersona === 'juridica' && a.razonSocial
+        ? a.razonSocial
+        : a.nombreProfesional
+    );
+  
+    const nameB = normalize(
+      b.tipoPersona === 'juridica' && b.razonSocial
+        ? b.razonSocial
+        : b.nombreProfesional
+    );
+  
+    return nameA.localeCompare(nameB);
   });
+
 
   state.all = out;
   paint();
