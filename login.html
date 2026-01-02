@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Clínica Rennat – Login</title>
+  <link rel="icon" type="image/png" href="logo.png"/>
+  <link rel="stylesheet" href="estilos.css"/>
+</head>
+<body>
+  <div class="main" style="max-width:520px;margin:48px auto;">
+    <div class="card">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;">
+        <div class="pill" style="font-weight:900;">Clínica Rennat</div>
+        <div class="muted">Acceso privado</div>
+      </div>
+
+      <div class="h1" style="margin-bottom:14px;">Ingresar</div>
+
+      <div class="row">
+        <div>
+          <label>Email</label>
+          <input id="email" type="email" placeholder="correo@dominio.cl" autocomplete="username"/>
+        </div>
+        <div>
+          <label>Contraseña</label>
+          <input id="pass" type="password" placeholder="••••••••" autocomplete="current-password"/>
+        </div>
+      </div>
+
+      <div class="actions" style="margin-top:14px;">
+        <button class="btn primary" id="btnLogin">Entrar</button>
+        <div class="muted" id="msg"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast"></div>
+
+  <script type="module">
+    import { login } from './auth.js';
+    import { toast } from './ui.js';
+
+    const $ = (id)=> document.getElementById(id);
+
+    $('btnLogin').addEventListener('click', async ()=>{
+      $('msg').textContent = '';
+      try{
+        await login($('email').value.trim(), $('pass').value);
+        toast('Bienvenido');
+        location.href = 'profesionales.html';
+      }catch(e){
+        console.error(e);
+        $('msg').textContent = 'No se pudo iniciar sesión. Revisa tus credenciales.';
+      }
+    });
+  </script>
+</body>
+</html>
