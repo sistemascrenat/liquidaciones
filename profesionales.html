@@ -1,3 +1,4 @@
+<!-- profesionales.html — COMPLETO (tabla estilo 3 columnas como tu ejemplo + modal form) -->
 <!doctype html>
 <html lang="es">
 <head>
@@ -7,7 +8,6 @@
   <link rel="icon" type="image/png" href="logoCR.png">
   <link rel="stylesheet" href="estilos.css"/>
 </head>
-
 <body>
   <div class="container">
 
@@ -46,10 +46,63 @@
         <div class="badge" id="count">0 profesionales</div>
       </div>
 
-      <!-- FORM -->
+      <!-- TOOLBAR -->
       <section class="card" style="margin-bottom:14px;">
-        <div class="grid">
+        <div class="actions" style="gap:10px;">
+          <button class="btn primary" id="btnCrear">➕ Crear profesional</button>
 
+          <button class="btn" id="btnDescargarPlantilla">⬇️ Plantilla CSV</button>
+          <button class="btn" id="btnExportar">⬇️ Exportar CSV</button>
+
+          <label class="btn" style="display:inline-flex;gap:8px;align-items:center;">
+            ⬆️ Importar CSV
+            <input id="fileCSV" type="file" accept=".csv,text/csv" style="display:none;"/>
+          </label>
+
+          <span style="flex:1"></span>
+
+          <input id="buscador" placeholder="Buscar (profesional/empresa, rut, contacto, correo, roles)" style="max-width:520px;"/>
+        </div>
+
+        <div class="muted" style="margin-top:10px;">
+          Firestore: <b>profesionales/{rutId}</b> + catálogo <b>roles</b>.
+        </div>
+      </section>
+
+      <!-- TABLE (como tu ejemplo: 3 columnas) -->
+      <section class="card">
+        <div class="tableWrap">
+          <table class="simpleTable">
+            <thead>
+              <tr>
+                <th style="min-width:320px;">Profesional / Empresa</th>
+                <th style="min-width:220px;">RUT</th>
+                <th style="min-width:320px;">Contacto</th>
+                <th style="width:110px;">Acciones</th>
+              </tr>
+            </thead>
+            <tbody id="tbody"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div id="toast" class="toast"></div>
+
+  <!-- MODAL -->
+  <div id="modalBackdrop" class="modalBackdrop" style="display:none;">
+    <div class="modalCard" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+      <div class="modalHead">
+        <div>
+          <div class="h1" id="modalTitle" style="margin:0;font-size:18px;">Crear profesional</div>
+          <div class="muted" id="modalSub" style="font-size:12px;margin-top:2px;"></div>
+        </div>
+        <button class="iconBtn" id="btnModalClose" type="button" aria-label="Cerrar" title="Cerrar">✖️</button>
+      </div>
+
+      <div class="modalBody">
+        <div class="grid">
           <div>
             <label>Tipo persona</label>
             <select id="tipoPersona">
@@ -68,30 +121,22 @@
 
           <div>
             <label>Nombre profesional</label>
-            <input id="nombreProfesional" placeholder="Ej: Ignacio Pastor / Paloma Martínez"/>
+            <input id="nombreProfesional" placeholder="Ej: Juan Pérez"/>
           </div>
 
-          <div id="wrapRazonSocial" style="display:none;">
+          <div>
             <label>Razón social (solo jurídica)</label>
-            <input id="razonSocial" placeholder="Ej: Ignovacion SPA"/>
+            <input id="razonSocial" placeholder="Ej: Ignovacion SpA"/>
           </div>
 
           <div>
-            <label>RUT</label>
-            <input id="rut" placeholder="Ej: 16.128.922-1"/>
-            <div class="muted" style="margin-top:6px;font-size:12px;">
-              Se guarda con <b>rutId</b> automático (RUT sin puntos/guión).
-            </div>
-          </div>
-
-          <div id="wrapRutEmpresa" style="display:none;">
-            <label>RUT Empresa (solo jurídica)</label>
-            <input id="rutEmpresa" placeholder="Ej: 77.644.246-1"/>
+            <label>RUT (profesional)</label>
+            <input id="rut" placeholder="Ej: 12.345.678-9"/>
           </div>
 
           <div>
-            <label>Teléfono</label>
-            <input id="telefono" placeholder="+56912345678"/>
+            <label>RUT empresa (solo jurídica)</label>
+            <input id="rutEmpresa" placeholder="Ej: 76.123.456-7"/>
           </div>
 
           <div>
@@ -99,138 +144,100 @@
             <input id="correoPersonal" placeholder="correo@dominio.cl"/>
           </div>
 
-          <div id="wrapCorreoEmpresa" style="display:none;">
+          <div>
             <label>Correo empresa (solo jurídica)</label>
             <input id="correoEmpresa" placeholder="pagos@empresa.cl"/>
           </div>
 
-          <div id="wrapDireccionEmpresa" style="display:none;">
+          <div>
+            <label>Teléfono (principal)</label>
+            <input id="telefono" placeholder="+56 9 1234 5678"/>
+          </div>
+
+          <div>
+            <label>Teléfono empresa (opcional, solo jurídica)</label>
+            <input id="telefonoEmpresa" placeholder="+56 2 2xxx xxxx"/>
+          </div>
+
+          <div>
+            <label>Dirección (personal)</label>
+            <input id="direccion" placeholder="Dirección (si aplica)"/>
+          </div>
+
+          <div>
             <label>Dirección empresa (solo jurídica)</label>
-            <input id="direccionEmpresa" placeholder="Ej: Monjitas 360"/>
+            <input id="direccionEmpresa" placeholder="Dirección empresa (si aplica)"/>
           </div>
 
-          <div id="wrapCiudadEmpresa" style="display:none;">
+          <div>
             <label>Ciudad empresa (solo jurídica)</label>
-            <input id="ciudadEmpresa" placeholder="Ej: Santiago"/>
+            <input id="ciudadEmpresa" placeholder="Ciudad (si aplica)"/>
           </div>
 
-          <!-- ROLES -->
-          <div style="grid-column:1 / -1; margin-top:6px;">
+          <div>
+            <label>Giro</label>
+            <input id="giro" placeholder="Giro (si aplica)"/>
+          </div>
+        </div>
+
+        <hr style="border:none;border-top:1px solid rgba(0,0,0,.08);margin:14px 0;"/>
+
+        <div class="grid" style="grid-template-columns: 1fr 1fr; gap:12px;">
+          <div>
             <label>Rol principal</label>
-            <select id="rolPrincipalId"></select>
+            <select id="rolPrincipal"></select>
             <div class="muted" style="margin-top:6px;font-size:12px;">
-              El rol principal se guarda en <b>rolPrincipalId</b>. Los secundarios en <b>rolesSecundariosIds</b>.
+              Se guarda como <b>rolPrincipalId</b>.
             </div>
           </div>
 
-          <div style="grid-column:1 / -1;">
-            <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px;">
-              <label style="margin:0;">Roles secundarios (selección múltiple)</label>
-              <span class="muted" style="font-size:12px;">
-                (Se cargan desde la colección <b>roles</b>)
-              </span>
-            </div>
-            <div id="rolesWrap" class="rolesWrap"></div>
-          </div>
-
-          <!-- CLÍNICAS -->
-          <div style="grid-column:1 / -1;">
-            <div style="display:flex; align-items:center; gap:10px; margin-bottom:8px;">
-              <label style="margin:0;">Clínicas asociadas (clinicasIds)</label>
-              <span class="muted" style="font-size:12px;">
-                (Se cargan desde la colección <b>clinicas</b>)
-              </span>
-            </div>
-            <div id="clinicasWrap" class="rolesWrap"></div>
-          </div>
-
-          <!-- DESCUENTOS -->
-          <div style="grid-column:1 / -1; margin-top:8px;">
-            <label style="margin-bottom:8px;">Descuento</label>
-
-            <div class="row" style="grid-template-columns: 1fr 1fr; gap:12px;">
-              <div>
-                <label style="margin-bottom:6px;">¿Tiene descuento?</label>
-                <select id="tieneDescuento">
-                  <option value="false">No</option>
-                  <option value="true">Sí</option>
-                </select>
-              </div>
-
-              <div>
-                <label style="margin-bottom:6px;">Descuento UF (descuentoUF)</label>
-                <input id="descuentoUF" type="number" step="0.01" value="0"/>
-              </div>
-            </div>
-
-            <div style="margin-top:10px;">
-              <label>Razón del descuento (descuentoRazon)</label>
-              <input id="descuentoRazon" placeholder="Ej: convenio / descuento especial / etc."/>
-            </div>
-
+          <div>
+            <label>Roles secundarios (multi)</label>
+            <div id="rolesSecWrap" class="rolesWrap"></div>
             <div class="muted" style="margin-top:6px;font-size:12px;">
-              Se guarda en Firestore como: <b>tieneDescuento</b>, <b>descuentoUF</b>, <b>descuentoRazon</b>
+              Se guarda como <b>rolesSecundariosIds[]</b>.
+            </div>
+          </div>
+        </div>
+
+        <hr style="border:none;border-top:1px solid rgba(0,0,0,.08);margin:14px 0;"/>
+
+        <div class="grid" style="grid-template-columns: 1fr 1fr; gap:12px;">
+          <div>
+            <label style="display:flex;align-items:center;gap:8px;">
+              <input type="checkbox" id="tieneDescuento" style="width:auto;margin:0;">
+              Tiene descuento
+            </label>
+            <div class="muted" style="font-size:12px;margin-top:6px;">
+              Se guarda como <b>tieneDescuento</b>.
             </div>
           </div>
 
-        </div>
+          <div>
+            <label>Descuento UF</label>
+            <input id="descuentoUF" type="number" step="0.01" min="0" value="0"/>
+            <div class="muted" style="font-size:12px;margin-top:6px;">
+              Se guarda como <b>descuentoUF</b>.
+            </div>
+          </div>
 
-        <div class="actions" style="margin-top:12px;">
-          <button class="btn primary" id="btnGuardar">Guardar profesional</button>
-          <button class="btn" id="btnLimpiar">Limpiar</button>
-
-          <span style="flex:1"></span>
-
-          <input id="buscador" placeholder="Buscar (nombre, razón social, rut, roles)" style="max-width:420px;"/>
-        </div>
-      </section>
-
-      <!-- IMPORT / EXPORT -->
-      <section class="card" style="margin-bottom:14px;">
-        <div class="actions">
-          <button class="btn" id="btnDescargarPlantilla">⬇️ Plantilla CSV</button>
-          <button class="btn" id="btnExportar">⬇️ Exportar CSV</button>
-
-          <label class="btn" style="display:inline-flex;gap:8px;align-items:center;">
-            ⬆️ Importar CSV
-            <input id="fileCSV" type="file" accept=".csv,text/csv" style="display:none;"/>
-          </label>
-
-          <div class="muted">
-            Columnas clave: <b>rut,nombreProfesional,tipoPersona,razonSocial,rolPrincipalId,rolesSecundariosIds,clinicasIds</b>
-            <span class="muted"> (arrays separados por “|”)</span>
+          <div style="grid-column:1/-1;">
+            <label>Razón del descuento</label>
+            <input id="descuentoRazon" placeholder="Ej: Convenio / Promoción / Ajuste especial"/>
+            <div class="muted" style="font-size:12px;margin-top:6px;">
+              Se guarda como <b>descuentoRazon</b>.
+            </div>
           </div>
         </div>
-      </section>
+      </div>
 
-      <!-- TABLE -->
-      <section class="card">
-        <div class="tableWrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Profesional / Empresa</th>
-                <th>RUT</th>
-                <th>Contacto</th>
-                <th>Rol principal</th>
-                <th>Roles secundarios</th>
-                <th>Clínicas</th>
-                <th style="width:220px;">Acciones</th>
-              </tr>
-            </thead>
-            <tbody id="tbody"></tbody>
-          </table>
-        </div>
-
-        <div class="muted" style="margin-top:10px;">
-          Firestore: colección <b>profesionales</b> (docId = <b>rutId</b>). Roles vienen de <b>roles</b>.
-        </div>
-      </section>
-
-    </main>
+      <div class="modalFoot">
+        <button class="btn" id="btnModalCancelar" type="button">Cancelar</button>
+        <span style="flex:1"></span>
+        <button class="btn primary" id="btnModalGuardar" type="button">Guardar</button>
+      </div>
+    </div>
   </div>
-
-  <div id="toast" class="toast"></div>
 
   <script type="module" src="profesionales.js"></script>
 </body>
