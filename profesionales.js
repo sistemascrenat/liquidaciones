@@ -262,51 +262,78 @@ async function loadAll(){
 }
 
 /* =========================
-   Search (coma = AND)
+   Search
+   - coma "," = AND (Y)
+   - guion "-" = OR (O) dentro de cada grupo AND
+   Ej:
+     "rodrigo-ignacio"            => rodrigo OR ignacio
+     "cirujano, activo"           => cirujano AND activo
+     "cirujano, activo-inactivo"  => cirujano AND (activo OR inactivo)
 ========================= */
-function queryTerms(raw){
-  // coma = AND. Ej: "ignovacion, cirujano" => ["ignovacion","cirujano"]
-  // permite varias comas y limpia espacios
-  return (raw || '')
-    .toString()
-    .split(',')
-    .map(s => normalize(s))
-    .filter(Boolean);
-}
 
 // helpers para búsquedas más robustas (rut/teléfono/roles)
 function digitsOnly(s=''){ return (s ?? '').toString().replace(/\D/g,''); }
 function normRoleId(s=''){
-  // r_cirujano => "r cirujano" => "r cirujano" normalizado
+  // r_cirujano => "r cirujano" (y también soporta r-cirujano)
   return normalize((s ?? '').toString().replace(/[_-]+/g,' '));
 }
 
+/**
+ * Devuelve grupos AND, donde cada grupo contiene términos OR.
+ * - Se separa por coma para AND
+ * - Dentro de cada parte, se separa por "-" para OR
+ *
+ * raw: "a-b, c, d-e-f"
+ * => [ ["a","b"], ["c"], ["d","e","f"] ]
+ */
+function parseQuery(raw){
+  const text = (raw || '').toString();
+
+  // AND groups
+  const andParts = text
+    .split(',')
+    .map(s => s.trim())
+    .filter(Boolean);
+
+  // dentro de cada AND group: OR terms
+  const groups = andParts.map(part =>
+    part
+      .split('-')
+      .map(s => normalize(s))
+      .filter(Boolean)
+  );
+
+  // elimina grupos vacíos por si hay cosas raras tipo ", ,"
+  return groups.filter(g => g.length);
+}
+
 function rowMatches(p, rawQuery){
-  const terms = queryTerms(rawQuery);
-  if(!terms.length) return true;
+  const groups = parseQuery(rawQuery);
+  if(!groups.length) return true;
 
   const showMain = (p.tipoPersona === 'juridica' && p.razonSocial) ? p.razonSocial : p.nombreProfesional;
 
-  // roles: buscamos por nombre (catálogo) y también por id (por si el catálogo no está o no calza)
+  // roles: nombre (catálogo) + id (por si el catálogo no calza)
   const priName = roleNameById(p.rolPrincipalId);
   const secNames = (p.rolesSecundariosIds || []).map(roleNameById);
 
   const priId = p.rolPrincipalId || '';
   const secIds = (p.rolesSecundariosIds || []);
 
-  // rut: agregamos rut “bonito” y también solo dígitos
+  // rut: con formato + solo dígitos
   const rutDigits = digitsOnly(p.rut);
   const rutEmpDigits = digitsOnly(p.rutEmpresa);
 
+  // "hay" es todo el texto donde buscamos
   const hay = normalize([
     // nombre visible + (si jurídica) nombre del contacto
     showMain,
     (p.tipoPersona === 'juridica' ? p.nombreProfesional : ''),
 
-    // rut / rut empresa (con formato y sin formato)
+    // rut / rut empresa (con y sin formato)
     p.rut, p.rutEmpresa,
     rutDigits, rutEmpDigits,
-    p.rutId, // por si buscas directo el ID
+    p.rutId,
 
     // correos / teléfonos (normal y solo dígitos)
     p.correoPersonal, p.correoEmpresa,
@@ -317,7 +344,7 @@ function rowMatches(p, rawQuery){
     priName,
     ...secNames,
 
-    // roles por id (y “normalizados” por si buscas "cirujano" y el rol es r_cirujano)
+    // roles por id (y “normalizados”)
     priId, ...secIds,
     normRoleId(priId),
     ...secIds.map(normRoleId),
@@ -327,8 +354,10 @@ function rowMatches(p, rawQuery){
     p.estado, p.tipoPersona
   ].join(' '));
 
-  // AND real: todos los términos deben aparecer
-  return terms.every(t => hay.includes(t));
+  // Lógica:
+  // - AND: todos los grupos deben cumplirse
+  // - un grupo se cumple si alguno de sus términos OR aparece
+  return groups.every(orTerms => orTerms.some(t => hay.includes(t)));
 }
 
 
