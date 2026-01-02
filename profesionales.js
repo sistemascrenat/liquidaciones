@@ -469,7 +469,9 @@ function labelTipoEstado(p){
     : 'PERSONA NATURAL';
 
   const est = (p.estado || 'activo').toString().toLowerCase(); // activo / inactivo
-  return `${tipo} · ${est}`;
+  return `
+  ${tipo} · <span class="state ${est}">${est.toUpperCase()}</span>
+`;
 }
 
 
