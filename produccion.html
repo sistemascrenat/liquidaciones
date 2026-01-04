@@ -181,9 +181,27 @@
       <!-- Preview -->
       <section class="card" style="margin-top:14px;">
         <div class="muted tiny" style="margin-bottom:8px;">
-          Vista previa (primeras filas). Esto es “staging”: no afecta liquidaciones hasta confirmar.
+          Vista previa (staging). Puedes buscar entre todas las filas y navegar de 60 en 60.
         </div>
-
+        
+        <!-- Barra de búsqueda + paginación -->
+        <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-bottom:10px;">
+          <div class="field" style="min-width:320px; margin:0;">
+            <label>Buscar (todas las filas)</label>
+            <input id="q" placeholder="Ej: bypass, rut, clínica, apellido, fonasa, etc." />
+          </div>
+        
+          <span class="muted tiny" id="pagerInfo">—</span>
+        
+          <span style="flex:1"></span>
+        
+          <div style="display:flex; gap:8px; align-items:center;">
+            <button class="btn" id="btnPrev" type="button">⬅️ Anterior</button>
+            <div id="pagerTabs" style="display:flex; gap:6px; flex-wrap:wrap;"></div>
+            <button class="btn" id="btnNext" type="button">Siguiente ➡️</button>
+          </div>
+        </div>
+        
         <div class="tableWrap">
           <table>
             <thead>
