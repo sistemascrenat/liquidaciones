@@ -249,6 +249,15 @@ const state = {
     amb: new Map()
   },
 
+  ui: {
+    pageSize: 60,
+    page: 1,
+    query: ''
+  },
+  view: {
+    filtered: [] // cache de filas filtradas (referencias a stagedItems)
+  },
+
   pending: {
     clinicas: [], // [{csvName, norm}]
     cirugias: [], // [{key, csvName, normCir, tipoPaciente, tipoPacienteNorm, clinTxt, clinNorm, clinicaId, suggestions}]
@@ -327,132 +336,180 @@ function boolMark(v){
   return '<span class="muted">—</span>';
 }
 
+function buildSearchText(it){
+  // Texto gigante para búsqueda (sobre todas las columnas raw + normalizado)
+  const raw = it.raw || {};
+  const n = it.normalizado || {};
+
+  // raw contiene TODAS las columnas del CSV (sin vacíos)
+  const rawText = Object.entries(raw)
+    .map(([k,v]) => `${k}:${v}`)
+    .join(' | ');
+
+  const normText = [
+    n.fecha, n.hora, n.clinica, n.cirugia, n.tipoPaciente,
+    n.profesionalesResumen
+  ].filter(Boolean).join(' | ');
+
+  return normalizeKey(`${rawText} | ${normText}`);
+}
+
+function applyFilter(){
+  const q = normalizeKey(state.ui.query || '');
+  if(!q){
+    state.view.filtered = [...state.stagedItems];
+  } else {
+    state.view.filtered = state.stagedItems.filter(it => {
+      const hay = buildSearchText(it);
+      return hay.includes(q);
+    });
+  }
+
+  // si el filtro achica resultados, corregimos página
+  const total = state.view.filtered.length;
+  const pages = Math.max(1, Math.ceil(total / state.ui.pageSize));
+  if(state.ui.page > pages) state.ui.page = pages;
+  if(state.ui.page < 1) state.ui.page = 1;
+}
+
+function paintPager(){
+  const total = state.view.filtered.length;
+  const pageSize = state.ui.pageSize;
+  const pages = Math.max(1, Math.ceil(total / pageSize));
+  const page = state.ui.page;
+
+  // info
+  const from = total === 0 ? 0 : ((page - 1) * pageSize + 1);
+  const to = Math.min(total, page * pageSize);
+
+  $('pagerInfo').textContent = total === 0
+    ? `0 resultados`
+    : `Mostrando ${from}-${to} de ${total} · Página ${page}/${pages}`;
+
+  // prev/next
+  $('btnPrev').disabled = (page <= 1);
+  $('btnNext').disabled = (page >= pages);
+
+  // tabs (pestañas de páginas)
+  const tabs = $('pagerTabs');
+  tabs.innerHTML = '';
+
+  // mostramos un rango acotado de páginas para no llenar (ej: 1 ... 4 5 6 ... 20)
+  const maxTabs = 9;
+  const half = Math.floor(maxTabs / 2);
+  let start = Math.max(1, page - half);
+  let end = Math.min(pages, start + maxTabs - 1);
+  start = Math.max(1, end - maxTabs + 1);
+
+  function addTab(label, targetPage, active=false){
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'btn' + (active ? ' primary' : '');
+    b.style.height = '34px';
+    b.style.padding = '0 10px';
+    b.textContent = label;
+    b.addEventListener('click', ()=>{
+      state.ui.page = targetPage;
+      paintPreview();
+    });
+    tabs.appendChild(b);
+  }
+
+  if(start > 1){
+    addTab('1', 1, page === 1);
+    if(start > 2){
+      const dot = document.createElement('span');
+      dot.className = 'muted tiny';
+      dot.style.alignSelf = 'center';
+      dot.textContent = '…';
+      tabs.appendChild(dot);
+    }
+  }
+
+  for(let p=start; p<=end; p++){
+    addTab(String(p), p, p === page);
+  }
+
+  if(end < pages){
+    if(end < pages - 1){
+      const dot = document.createElement('span');
+      dot.className = 'muted tiny';
+      dot.style.alignSelf = 'center';
+      dot.textContent = '…';
+      tabs.appendChild(dot);
+    }
+    addTab(String(pages), pages, page === pages);
+  }
+}
+
 function paintPreview(){
+  applyFilter();
+
   const tb = $('tbody');
   tb.innerHTML = '';
 
-  const rows = state.stagedItems || [];
-  $('countPill').textContent = `${rows.length} fila${rows.length===1?'':'s'}`;
+  const rows = state.view.filtered || [];
+  const total = rows.length;
 
-  const max = Math.min(rows.length, 80);
+  // count pill (mantén tu estilo)
+  $('countPill').textContent = `${state.stagedItems.length} fila${state.stagedItems.length===1?'':'s'}`;
 
-  for(let i=0;i<max;i++){
-    const it = rows[i];
+  const pageSize = state.ui.pageSize;
+  const page = state.ui.page;
+
+  const start = (page - 1) * pageSize;
+  const slice = rows.slice(start, start + pageSize);
+
+  for(let i=0;i<slice.length;i++){
+    const it = slice[i];
     const n = it.normalizado || {};
     const r = it.resolved || {};
-    const raw = it.raw || {};
     const prof = n.profesionalesResumen || '';
 
     const flags = [];
     if(r.clinicaOk === false) flags.push('Clínica');
     if(r.cirugiaOk === false) flags.push('Cirugía');
+    if(r.ambOk === false) flags.push('Amb');
 
-    const st = (flags.length === 0)
-      ? `<span class="ok">OK</span>`
-      : `<span class="warn">Pendiente: ${flags.join(', ')}</span>`;
+    const st =
+      flags.length === 0
+        ? `<span class="ok">OK</span>`
+        : `<span class="warn">Pendiente: ${flags.join(', ')}</span>`;
 
     const tr = document.createElement('tr');
-
-    const idxTxt = raw['#'] ?? pad(i+1,2);
-    const clinTxt = n.clinica || '—';
-    const cirTxt  = n.cirugia || '—';
-
     tr.innerHTML = `
-      <td class="mono">${escapeHtml(idxTxt)}</td>
-      <td>${boolMark(n.suspendida)}</td>
-      <td>${boolMark(n.confirmado)}</td>
-      <td>${escapeHtml(n.fecha || '—')}</td>
-      <td>${escapeHtml(n.hora || '—')}</td>
-
+      <td class="mono">${pad(start + i + 1,2)}</td>
+      <td>${n.fecha || '<span class="muted">—</span>'}</td>
+      <td>${n.hora || '<span class="muted">—</span>'}</td>
       <td>
-        <div><b>${escapeHtml(clinTxt)}</b></div>
-        <div class="tiny muted">ID: ${escapeHtml(r.clinicaId || '—')}</div>
+        <div><b>${n.clinica || '<span class="muted">—</span>'}</b></div>
+        <div class="tiny muted">${r.clinicaId ? `ID: ${r.clinicaId}` : 'ID: —'}</div>
       </td>
-
       <td>
-        <div><b>${escapeHtml(cirTxt)}</b></div>
-        <div class="tiny muted">ID: ${escapeHtml(r.cirugiaId || '—')}</div>
-        <div class="tiny muted">Key: ${escapeHtml(r.cirugiaKey || '—')}</div>
+        <div><b>${n.cirugia || '<span class="muted">—</span>'}</b></div>
+        <div class="tiny muted">${r.cirugiaId ? `ID: ${r.cirugiaId}` : 'ID: —'}</div>
       </td>
-
-      <td>${escapeHtml(n.tipoPaciente || '—')}</td>
-      <td>${escapeHtml(raw['Previsión'] || '—')}</td>
-      <td>${escapeHtml(raw['Nombre Paciente'] || '—')}</td>
-      <td class="mono">${escapeHtml(raw['RUT'] || '—')}</td>
-      <td>${escapeHtml(raw['Teléfono'] || '—')}</td>
-      <td>${escapeHtml(raw['Dirección'] || '—')}</td>
-      <td>${escapeHtml(raw['e-mail'] || '—')}</td>
-      <td>${escapeHtml(raw['Sexo'] || '—')}</td>
-      <td>${escapeHtml(raw['Fecha nac. (dd/mm/aaaa)'] || '—')}</td>
-      <td>${escapeHtml(raw['Edad'] || '—')}</td>
-
+      <td>${n.tipoPaciente || '<span class="muted">—</span>'}</td>
       <td><b>${clp(n.valor || 0)}</b></td>
       <td>${clp(n.dp || 0)}</td>
       <td>${clp(n.hmq || 0)}</td>
       <td>${clp(n.ins || 0)}</td>
-
-      <td>${boolMark(n.pagado)}</td>
-      <td>${escapeHtml(n.fechaPago || '—')}</td>
-
-      <td class="tiny">${prof ? escapeHtml(prof) : '<span class="muted">—</span>'}</td>
+      <td class="tiny">${prof ? prof : '<span class="muted">—</span>'}</td>
       <td>${st}</td>
-      <td>
-        <button class="btn sm" data-ver="${i}">Ver</button>
-      </td>
     `;
-
     tb.appendChild(tr);
   }
 
-  // bind botones "Ver"
-  tb.querySelectorAll('[data-ver]').forEach(btn=>{
-    btn.addEventListener('click', ()=>{
-      const i = Number(btn.getAttribute('data-ver'));
-      const it = state.stagedItems[i];
-      if(!it) return;
-
-      const raw = it.raw || {};
-      const n = it.normalizado || {};
-      const r = it.resolved || {};
-
-      const pairs = EXPECTED_COLS
-        .filter(k => raw[k] !== undefined)
-        .map(k => `
-          <div style="display:grid;grid-template-columns:220px 1fr;gap:10px;padding:8px;border-bottom:1px solid rgba(0,0,0,.06);">
-            <div class="muted tiny"><b>${escapeHtml(k)}</b></div>
-            <div>${escapeHtml(String(raw[k]))}</div>
-          </div>
-        `).join('');
-
-      const header = `
-        <div class="card" style="padding:12px;">
-          <div style="font-weight:900;">${escapeHtml(raw['Nombre Paciente'] || '(Sin nombre)')}</div>
-          <div class="muted tiny" style="margin-top:4px;">
-            ${escapeHtml(n.fecha || '—')} · ${escapeHtml(n.hora || '—')} · ${escapeHtml(n.clinica || '—')} · ${escapeHtml(n.tipoPaciente || '—')}
-          </div>
-          <div class="help" style="margin-top:8px;">
-            <b>IDs resueltos:</b> Clínica=${escapeHtml(r.clinicaId || '—')} · Cirugía=${escapeHtml(r.cirugiaId || '—')}
-          </div>
-        </div>
-        <div style="height:10px;"></div>
-      `;
-
-      openDetalleModal(header + `<div class="card" style="padding:0;">${pairs}</div>`,
-        `Fila ${raw['#'] || (i+1)} · ImportID ${state.importId || '—'}`
-      );
-    });
-  });
-
-  if(rows.length > max){
+  // si no hay resultados
+  if(total === 0){
     const tr = document.createElement('tr');
-    tr.innerHTML = `
-      <td colspan="26" class="muted tiny">
-        Mostrando ${max} de ${rows.length}. (El resto igual quedó en staging)
-      </td>
-    `;
+    tr.innerHTML = `<td colspan="12" class="muted tiny">Sin resultados para el filtro.</td>`;
     tb.appendChild(tr);
   }
+
+  paintPager();
 }
+
 
 /* =========================
    Header index / raw / normalizado
@@ -1286,12 +1343,17 @@ async function handleLoadCSV(file){
   state.ym = ym;
   state.filename = file.name;
   state.stagedItems = staged;
+  state.ui.page = 1;
+  state.ui.query = '';
+  if($('q')) $('q').value = '';
 
   $('importId').value = importId;
 
   setStatus(`🟡 Staging listo: ${staged.length} pacientes (YM ${ym})`);
   await saveStagingToFirestore();
   toast('Staging guardado en Firestore');
+
+
 
   await refreshAfterMapping();
 }
@@ -1355,6 +1417,31 @@ requireAuth({
     $('btnDetalleCerrar').addEventListener('click', closeDetalleModal);
     $('modalDetalleBackdrop').addEventListener('click', (e)=>{
       if(e.target === $('modalDetalleBackdrop')) closeDetalleModal();
+    });
+
+    // Buscador global
+    $('q').addEventListener('input', ()=>{
+      state.ui.query = $('q').value || '';
+      state.ui.page = 1; // al buscar, vuelve a página 1
+      paintPreview();
+    });
+    
+    // Pager prev/next
+    $('btnPrev').addEventListener('click', ()=>{
+      if(state.ui.page > 1){
+        state.ui.page--;
+        paintPreview();
+      }
+    });
+    
+    $('btnNext').addEventListener('click', ()=>{
+      // total páginas en base al filtrado actual
+      applyFilter();
+      const pages = Math.max(1, Math.ceil(state.view.filtered.length / state.ui.pageSize));
+      if(state.ui.page < pages){
+        state.ui.page++;
+        paintPreview();
+      }
     });
   }
 });
