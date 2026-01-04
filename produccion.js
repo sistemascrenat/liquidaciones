@@ -1,10 +1,11 @@
-// produccion.js — COMPLETO (mejorado)
+// produccion.js — COMPLETO (mejorado + cirugías con contexto Tipo Paciente + Clínica)
 // ✅ Importación CSV (staging + confirmar + anular)
 // ✅ Guarda TODAS las columnas del CSV en raw, pero NUNCA guarda strings vacíos
-// ✅ Ahora incluye "Resolución" (Clínicas / Cirugías / Ambulatorios) con mappings persistentes
+// ✅ Incluye "Resolución" (Clínicas / Cirugías / Ambulatorios) con mappings persistentes
 // ✅ Confirmar queda bloqueado si hay pendientes
 // ✅ Confirmar escribe IDs resueltos: clinicaId / cirugiaId / ambulatorioId
-// ✅ Anular paginado (sin límite 2000)
+// ✅ Cirugías pendientes muestran CONTEXTO: Tipo Paciente + Clínica (sin romper mappings por nombre exacto)
+// ✅ Anular paginado (sin límite fijo)
 
 import { db } from './firebase-init.js';
 import { requireAuth } from './auth.js';
@@ -12,7 +13,7 @@ import { setActiveNav, toast, wireLogout } from './ui.js';
 import { loadSidebar } from './layout.js';
 
 import {
-  collection, doc, setDoc, getDoc, getDocs, writeBatch, updateDoc,
+  collection, doc, setDoc, getDoc, getDocs, writeBatch,
   serverTimestamp, query, where, limit, orderBy, startAfter
 } from 'https://www.gstatic.com/firebasejs/11.7.3/firebase-firestore.js';
 
@@ -36,10 +37,6 @@ const EXPECTED_COLS = [
   'Eco Abdominal','Test de Esfuerzo','Grupo Sangre RH','Valor','Pagado','Fecha de Pago',
   'Derechos de Pabellón','HMQ','Insumos'
 ];
-
-// (Opcional futuro) Si agregas columna ambulatorio en tu CSV,
-// solo añade el nombre aquí y en buildNormalizado().
-// const OPTIONAL_AMB_COL = 'Ambulatorio'; // ejemplo
 
 /* =========================
    Utils
@@ -105,6 +102,48 @@ function monthIndex(name){
 }
 
 /* =========================
+   Tipo Paciente (normalización)
+   - NO rompe nada: es solo un "helper" para contexto + futura tarifación.
+   - Se guarda como tipoPacienteKey en produccion al confirmar.
+========================= */
+function normalizePacienteKey(tipoPaciente, cirugiaName=''){
+  const t = normalizeKey(tipoPaciente);
+  const s = normalizeKey(cirugiaName);
+
+  // 1) por columna Tipo de Paciente
+  const byCol = (() => {
+    if(!t) return '';
+    if(t.includes('fonasa')) return 'fonasa';
+    if(t.includes('isapre')) return 'isapre';
+    if(t.includes('part')) return 'particular';
+    if(t.includes('priv')) return 'particular';
+    if(t.includes('particular')) return 'particular';
+    // si viene otra cosa, lo dejamos "t" (compacto)
+    return t;
+  })();
+
+  if(byCol) return byCol;
+
+  // 2) fallback por texto de cirugía (casos tipo "part bypass")
+  // (solo para CONTEXTO visual; NO alteramos el mapeo por nombre exacto)
+  if(s.startsWith('part ') || s.startsWith('particular ')) return 'particular';
+  if(s.startsWith('fona ') || s.startsWith('fonasa ')) return 'fonasa';
+  if(s.startsWith('isa ') || s.startsWith('isapre ')) return 'isapre';
+
+  return '';
+}
+
+function pacienteLabel(key){
+  const k = normalizeKey(key);
+  if(k === 'particular' || k === 'part') return 'Particular';
+  if(k === 'fonasa') return 'Fonasa';
+  if(k === 'isapre') return 'Isapre';
+  if(!k) return '—';
+  // capitaliza simple
+  return k.charAt(0).toUpperCase() + k.slice(1);
+}
+
+/* =========================
    CSV parsing
 ========================= */
 function detectDelimiter(text){
@@ -165,7 +204,7 @@ function parseCSV(text){
 const colImports = collection(db, 'produccion_imports');
 const colProduccion = collection(db, 'produccion');
 
-// Catálogos (usamos los mismos nombres que ya usas en cirugias.js)
+// Catálogos (mismos nombres que ya vienes usando)
 const colClinicas = collection(db, 'clinicas');
 const colProcedimientos = collection(db, 'procedimientos');
 const colAmbulatorios = collection(db, 'ambulatorios');
@@ -192,15 +231,15 @@ const state = {
 
   // catálogos cargados
   catalogs: {
-    clinicas: [],          // [{id, nombre}]
-    clinicasByNorm: new Map(), // norm(nombre)-> {id,nombre}
-    clinicasById: new Map(),   // id -> {id,nombre}
+    clinicas: [],             // [{id, nombre}]
+    clinicasByNorm: new Map(),// norm(nombre)-> {id,nombre}
+    clinicasById: new Map(),  // id -> {id,nombre}
 
-    cirugias: [],          // [{id, nombre, codigo}]
-    cirugiasByNorm: new Map(), // norm(nombre)-> {id,nombre,codigo}
+    cirugias: [],             // [{id, nombre, codigo}]
+    cirugiasByNorm: new Map(),// norm(nombre)-> {id,nombre,codigo}
     cirugiasById: new Map(),
 
-    amb: [],               // [{id, nombre}]
+    amb: [],                  // [{id, nombre}]
     ambByNorm: new Map(),
     ambById: new Map()
   },
@@ -208,14 +247,14 @@ const state = {
   // mappings
   maps: {
     clinicas: new Map(),   // normCsv -> {id}
-    cirugias: new Map(),   // normCsv -> {id}
+    cirugias: new Map(),   // normCsv -> {id}   (por NOMBRE EXACTO normalizado)
     amb: new Map()
   },
 
-  // pendientes detectados
+  // pendientes detectados (UI)
   pending: {
     clinicas: [], // [{csvName, norm}]
-    cirugias: [], // [{csvName, norm, suggestions:[{id,nombre}]}]
+    cirugias: [], // [{csvName, norm, suggestions, contexts:[{clinicaText, clinicaId, pacienteKey}] }]
     amb: []       // [{csvName, norm}]
   }
 };
@@ -261,7 +300,7 @@ function setButtons(){
 
   $('btnResolver').disabled = !(staged && totalPend > 0);
   $('btnConfirmar').disabled = !(staged && totalPend === 0);
-  $('btnAnular').disabled = !(staged || confirmed); // puedes anular staged o confirmada
+  $('btnAnular').disabled = !(staged || confirmed);
 }
 
 function paintPreview(){
@@ -279,7 +318,6 @@ function paintPreview(){
     const r = it.resolved || {};
     const prof = n.profesionalesResumen || '';
 
-    // estado de resolución por fila
     const flags = [];
     if(r.clinicaOk === false) flags.push('Clínica');
     if(r.cirugiaOk === false) flags.push('Cirugía');
@@ -290,25 +328,47 @@ function paintPreview(){
         ? `<span class="ok">OK</span>`
         : `<span class="warn">Pendiente: ${flags.join(', ')}</span>`;
 
+    const clinicaNice = (() => {
+      if(r.clinicaId){
+        const c = state.catalogs.clinicasById.get(r.clinicaId);
+        return c?.nombre ? `${escapeHtml(c.nombre)} <span class="muted tiny mono">(${escapeHtml(r.clinicaId)})</span>` : escapeHtml(r.clinicaId);
+      }
+      return escapeHtml(n.clinica || '—');
+    })();
+
+    const cirugiaNice = (() => {
+      if(r.cirugiaId){
+        const s = state.catalogs.cirugiasById.get(r.cirugiaId);
+        return s?.nombre ? `${escapeHtml(s.nombre)} <span class="muted tiny mono">(${escapeHtml(s.codigo || s.id)})</span>` : escapeHtml(r.cirugiaId);
+      }
+      return escapeHtml(n.cirugia || '—');
+    })();
+
+    const pacKey = n.tipoPacienteKey || '';
+    const pacNice = pacienteLabel(pacKey);
+
     const tr = document.createElement('tr');
     tr.innerHTML = `
       <td class="mono">${pad(i+1,2)}</td>
-      <td>${n.fecha || '<span class="muted">—</span>'}</td>
-      <td>${n.hora || '<span class="muted">—</span>'}</td>
+      <td>${escapeHtml(n.fecha || '—')}</td>
+      <td>${escapeHtml(n.hora || '—')}</td>
       <td>
-        <div><b>${n.clinica || '<span class="muted">—</span>'}</b></div>
-        <div class="tiny muted">${r.clinicaId ? `ID: ${r.clinicaId}` : 'ID: —'}</div>
+        <div><b>${clinicaNice}</b></div>
+        <div class="tiny muted">${r.clinicaId ? `ID: ${escapeHtml(r.clinicaId)}` : 'ID: —'}</div>
       </td>
       <td>
-        <div><b>${n.cirugia || '<span class="muted">—</span>'}</b></div>
-        <div class="tiny muted">${r.cirugiaId ? `ID: ${r.cirugiaId}` : 'ID: —'}</div>
+        <div><b>${cirugiaNice}</b></div>
+        <div class="tiny muted">${r.cirugiaId ? `ID: ${escapeHtml(r.cirugiaId)}` : 'ID: —'}</div>
       </td>
-      <td>${n.tipoPaciente || '<span class="muted">—</span>'}</td>
+      <td>
+        <div>${escapeHtml(n.tipoPaciente || '—')}</div>
+        <div class="tiny muted">Key: ${escapeHtml(pacKey || '—')} · ${escapeHtml(pacNice)}</div>
+      </td>
       <td><b>${clp(n.valor || 0)}</b></td>
       <td>${clp(n.dp || 0)}</td>
       <td>${clp(n.hmq || 0)}</td>
       <td>${clp(n.ins || 0)}</td>
-      <td class="tiny">${prof ? prof : '<span class="muted">—</span>'}</td>
+      <td class="tiny">${prof ? escapeHtml(prof) : '<span class="muted">—</span>'}</td>
       <td>${st}</td>
     `;
     tb.appendChild(tr);
@@ -329,7 +389,7 @@ function paintPreview(){
    Core: header mapping
 ========================= */
 function buildHeaderIndex(headerRow){
-  const idx = new Map(); // expectedCol -> index
+  const idx = new Map();
   const headerNorm = headerRow.map(h=> normalizeKey(h));
 
   for(const col of EXPECTED_COLS){
@@ -387,12 +447,17 @@ function buildNormalizado(raw){
   if(prof.ayudante2) parts.push(`Ay2: ${prof.ayudante2}`);
   if(prof.arsenalera) parts.push(`Ars: ${prof.arsenalera}`);
 
+  const tipoPacienteKey = normalizePacienteKey(tipoPaciente, cirugia);
+
   return {
     fecha: fecha || null,
     hora: hora || null,
     clinica: clinica || null,
     cirugia: cirugia || null,
     tipoPaciente: tipoPaciente || null,
+
+    // nuevo (no rompe)
+    tipoPacienteKey: tipoPacienteKey || null,
 
     valor,
     dp,
@@ -411,15 +476,13 @@ function buildNormalizado(raw){
 
 function validateMinimum(headerIdx){
   const needed = ['Fecha','Clínica','Cirugía','Tipo de Paciente','Valor'];
-  const missing = needed.filter(k => headerIdx.get(k) === undefined);
-  return missing;
+  return needed.filter(k => headerIdx.get(k) === undefined);
 }
 
 /* =========================
    Load catalogs + mappings
 ========================= */
 async function loadMappings(){
-  // documentos con forma: { map: { [normName]: { id, ... } } }
   async function loadOne(docRef){
     const snap = await getDoc(docRef);
     if(!snap.exists()) return new Map();
@@ -497,7 +560,6 @@ async function loadCatalogs(){
    Resolution engine
 ========================= */
 function suggestCirugias(normName){
-  // devuelve top sugerencias simples por "includes"
   const all = state.catalogs.cirugias || [];
   const out = [];
   for(const s of all){
@@ -542,11 +604,10 @@ function resolveOneItem(normalizado){
       }
     }
   } else {
-    // si no viene clínica, lo tratamos como pendiente (porque el CSV mínimo la trae, pero por si acaso)
     resolved.clinicaOk = false;
   }
 
-  // --- Cirugía ---
+  // --- Cirugía (mapping por NOMBRE EXACTO normalizado, pero con CONTEXTO visual) ---
   const cirTxt = clean(normalizado.cirugia || '');
   if(cirTxt){
     const norm = normalizeKey(cirTxt);
@@ -569,10 +630,6 @@ function resolveOneItem(normalizado){
   }
 
   // --- Ambulatorio (placeholder) ---
-  // Hoy no lo extraemos del CSV (porque no hay columna).
-  // Si en el futuro lo agregas, aquí haces:
-  // const ambTxt = clean(normalizado.ambulatorio || '');
-  // ...
   resolved.ambOk = true;
   resolved.ambulatorioId = null;
 
@@ -584,20 +641,21 @@ function recomputePending(){
   state.pending.cirugias = [];
   state.pending.amb = [];
 
-  // recalcula resolved por cada fila
   for(const it of state.stagedItems){
     it.resolved = resolveOneItem(it.normalizado || {});
   }
 
-  // arma sets únicos pendientes
   const seenClin = new Set();
-  const seenCir  = new Set();
-  const seenAmb  = new Set();
+
+  // Cirugías: agrupamos por nombre exacto (norm), PERO agregamos contextos (tipo paciente + clínica)
+  const seenCir = new Map(); // norm -> {csvName,norm,suggestions,contextsMap}
+  // contextsMap key: `${clinicaId||clinicaText}||${pacienteKey||''}`
 
   for(const it of state.stagedItems){
     const n = it.normalizado || {};
     const r = it.resolved || {};
 
+    // Clínicas pendientes
     const clinTxt = clean(n.clinica || '');
     if(clinTxt && r.clinicaOk === false){
       const norm = normalizeKey(clinTxt);
@@ -607,22 +665,57 @@ function recomputePending(){
       }
     }
 
+    // Cirugías pendientes (con contexto)
     const cirTxt = clean(n.cirugia || '');
     if(cirTxt && r.cirugiaOk === false){
       const norm = normalizeKey(cirTxt);
-      if(!seenCir.has(norm)){
-        seenCir.add(norm);
-        state.pending.cirugias.push({ csvName: cirTxt, norm, suggestions: suggestCirugias(norm) });
+
+      let bucket = seenCir.get(norm);
+      if(!bucket){
+        bucket = {
+          csvName: cirTxt,
+          norm,
+          suggestions: suggestCirugias(norm),
+          contextsMap: new Map()
+        };
+        seenCir.set(norm, bucket);
+      }
+
+      const clinicaId = r.clinicaId || '';
+      const clinicaText = clean(n.clinica || '') || '—';
+      const pacienteKey = clean(n.tipoPacienteKey || '') || clean(normalizePacienteKey(n.tipoPaciente, n.cirugia)) || '';
+
+      const ck = `${clinicaId || clinicaText}||${pacienteKey || ''}`;
+      if(!bucket.contextsMap.has(ck)){
+        bucket.contextsMap.set(ck, {
+          clinicaId: clinicaId || null,
+          clinicaText,
+          pacienteKey: pacienteKey || null
+        });
       }
     }
 
-    // ambulatorios: por ahora no bloquea (no hay columna)
-    // si agregas ambulatorio, usa lógica similar y setea ambOk false.
+    // ambulatorios: hoy no bloquea
   }
 
-  // ordena
+  // Ordena
   state.pending.clinicas.sort((a,b)=> a.norm.localeCompare(b.norm));
-  state.pending.cirugias.sort((a,b)=> a.norm.localeCompare(b.norm));
+
+  // Construye array final de cirugías pendientes
+  const cirPend = [];
+  for(const bucket of seenCir.values()){
+    const contexts = Array.from(bucket.contextsMap.values())
+      .slice(0, 12); // límite visual razonable
+    cirPend.push({
+      csvName: bucket.csvName,
+      norm: bucket.norm,
+      suggestions: bucket.suggestions,
+      contexts
+    });
+  }
+  cirPend.sort((a,b)=> a.norm.localeCompare(b.norm));
+  state.pending.cirugias = cirPend;
+
   state.pending.amb.sort((a,b)=> a.norm.localeCompare(b.norm));
 
   setPills();
@@ -635,7 +728,7 @@ function recomputePending(){
 ========================= */
 async function persistMapping(docRef, normKey, id){
   if(!normKey || !id) return;
-  // setDoc merge con path dinámico
+
   await setDoc(docRef, {
     map: {
       [normKey]: { id, actualizadoEl: serverTimestamp(), actualizadoPor: state.user?.email || '' }
@@ -644,14 +737,13 @@ async function persistMapping(docRef, normKey, id){
     actualizadoPor: state.user?.email || ''
   }, { merge: true });
 
-  // refresca el mapa local (para no re-cargar todo)
   if(docRef === docMapClinicas) state.maps.clinicas.set(normKey, { id });
   if(docRef === docMapCirugias)  state.maps.cirugias.set(normKey, { id });
   if(docRef === docMapAmb)       state.maps.amb.set(normKey, { id });
 }
 
 /* =========================
-   Modal Resolver: paint
+   Modal Resolver
 ========================= */
 function openResolverModal(){
   $('modalResolverBackdrop').style.display = 'grid';
@@ -673,7 +765,7 @@ function paintResolverModal(){
     Clínicas: <b>${pc}</b> · Cirugías: <b>${ps}</b> · Ambulatorios: <b>${pa}</b>
   `;
 
-  // CLINICAS
+  /* -------- CLINICAS -------- */
   const wrapC = $('resolverClinicasList');
   wrapC.innerHTML = '';
   if(pc === 0){
@@ -684,7 +776,7 @@ function paintResolverModal(){
       row.className = 'miniRow';
 
       const options = state.catalogs.clinicas
-        .map(c=> `<option value="${c.id}">${escapeHtml(`${c.nombre} (${c.id})`)}</option>`)
+        .map(c=> `<option value="${escapeHtml(c.id)}">${escapeHtml(`${c.nombre} (${c.id})`)}</option>`)
         .join('');
 
       row.innerHTML = `
@@ -707,7 +799,6 @@ function paintResolverModal(){
         </div>
       `;
 
-      // Guardar asociación
       row.querySelector(`[data-save-clin="${CSS.escape(item.norm)}"]`).addEventListener('click', async ()=>{
         const sel = row.querySelector(`select[data-assoc-clin="${CSS.escape(item.norm)}"]`);
         const id = sel.value || '';
@@ -715,17 +806,16 @@ function paintResolverModal(){
         await persistMapping(docMapClinicas, item.norm, id);
         toast('Clínica asociada');
         await refreshAfterMapping();
+        paintResolverModal();
       });
 
-      // Crear clínica
       row.querySelector(`[data-create-clin="${CSS.escape(item.norm)}"]`).addEventListener('click', async ()=>{
         const nombre = item.csvName;
         const suggested = suggestClinicaId();
-        const id = prompt('ID de clínica (ej: C001). Puedes editar:', suggested) || '';
+        const id = prompt('ID de clínica (ej: CLINICA_4 o C004). Puedes editar:', suggested) || '';
         const finalId = clean(id);
         if(!finalId){ toast('Cancelado'); return; }
 
-        // crea doc clínica
         await setDoc(doc(db,'clinicas', finalId), {
           id: finalId,
           nombre,
@@ -735,23 +825,22 @@ function paintResolverModal(){
           actualizadoPor: state.user?.email || ''
         }, { merge:true });
 
-        // mapea csv->id
         await persistMapping(docMapClinicas, item.norm, finalId);
 
         toast('Clínica creada y asociada');
         await refreshAfterMapping();
+        paintResolverModal();
       });
 
       wrapC.appendChild(row);
     }
   }
 
-  // AMBULATORIOS (placeholder - no bloquea hoy, pero dejamos UI por si agregas columna futuro)
+  /* -------- AMBULATORIOS (placeholder) -------- */
   const wrapA = $('resolverAmbList');
-  wrapA.innerHTML = '';
   wrapA.innerHTML = `<div class="muted tiny">— (Tu CSV actual no trae ambulatorios. Cuando lo agregues, aquí aparecerán.)</div>`;
 
-  // CIRUGIAS
+  /* -------- CIRUGIAS -------- */
   const wrapS = $('resolverCirugiasList');
   wrapS.innerHTML = '';
   if(ps === 0){
@@ -762,18 +851,39 @@ function paintResolverModal(){
       row.className = 'miniRow';
 
       const options = state.catalogs.cirugias
-        .map(s=> `<option value="${s.id}">${escapeHtml(`${s.nombre} (${s.codigo})`)}</option>`)
+        .map(s=> `<option value="${escapeHtml(s.id)}">${escapeHtml(`${s.nombre} (${s.codigo})`)}</option>`)
         .join('');
 
       const sug = (item.suggestions || [])
         .map(x=> `<span class="pill warn" style="cursor:pointer;" data-sug-cir="${escapeHtml(item.norm)}" data-sug-id="${escapeHtml(x.id)}">${escapeHtml(x.nombre)}</span>`)
         .join(' ');
 
+      // Contextos: clínica + tipo paciente (esto era tu requerimiento)
+      const contexts = (item.contexts || []).map(ctx=>{
+        const clin = ctx.clinicaId
+          ? (state.catalogs.clinicasById.get(ctx.clinicaId)?.nombre || ctx.clinicaId)
+          : (ctx.clinicaText || '—');
+        const clinShow = ctx.clinicaId ? `${clin} (${ctx.clinicaId})` : clin;
+        const pacShow = pacienteLabel(ctx.pacienteKey || '');
+        return `<span class="pill" title="Contexto"><b>${escapeHtml(pacShow)}</b> · ${escapeHtml(clinShow)}</span>`;
+      }).join(' ');
+
       row.innerHTML = `
         <div>
           <div style="font-weight:900;">${escapeHtml(item.csvName)}</div>
           <div class="muted tiny mono">key: ${escapeHtml(item.norm)}</div>
-          ${sug ? `<div style="margin-top:8px; display:flex; flex-wrap:wrap; gap:8px;">${sug}</div>` : `<div class="muted tiny" style="margin-top:8px;">Sin sugerencias.</div>`}
+
+          <div class="help" style="margin-top:8px;">
+            Contexto detectado (Tipo Paciente + Clínica):
+          </div>
+          <div style="margin-top:8px; display:flex; flex-wrap:wrap; gap:8px;">
+            ${contexts || `<span class="muted tiny">—</span>`}
+          </div>
+
+          ${sug ? `
+            <div class="help" style="margin-top:10px;">Sugerencias rápidas:</div>
+            <div style="margin-top:8px; display:flex; flex-wrap:wrap; gap:8px;">${sug}</div>
+          ` : `<div class="muted tiny" style="margin-top:10px;">Sin sugerencias.</div>`}
         </div>
 
         <div class="field" style="margin:0;">
@@ -801,7 +911,7 @@ function paintResolverModal(){
         });
       });
 
-      // guardar asociación
+      // guardar asociación (por nombre exacto normalizado)
       row.querySelector(`[data-save-cir="${CSS.escape(item.norm)}"]`).addEventListener('click', async ()=>{
         const sel = row.querySelector(`select[data-assoc-cir="${CSS.escape(item.norm)}"]`);
         const id = sel.value || '';
@@ -809,6 +919,7 @@ function paintResolverModal(){
         await persistMapping(docMapCirugias, item.norm, id);
         toast('Cirugía asociada');
         await refreshAfterMapping();
+        paintResolverModal();
       });
 
       // ir a cirugías para crear (prefill)
@@ -827,9 +938,8 @@ function paintResolverModal(){
 }
 
 function suggestClinicaId(){
-  // sugerencia simple: C + último 3 dígitos de timestamp
   const tail = (Date.now() % 1000).toString().padStart(3,'0');
-  return `C${tail}`;
+  return `CLINICA_${tail}`;
 }
 
 /* =========================
@@ -884,9 +994,8 @@ async function saveStagingToFirestore(){
         itemId,
         idx: idx + k + 1,
         estado: 'staged',
-        raw: it.raw,                 // raw compacto
-        normalizado: it.normalizado, // normalizado
-        // resolved se recalcula localmente, no lo guardamos aquí para no duplicar
+        raw: it.raw,
+        normalizado: it.normalizado,
         creadoEl: serverTimestamp(),
         creadoPor: state.user?.email || ''
       }, { merge: true });
@@ -906,7 +1015,6 @@ async function confirmarImportacion(){
     return;
   }
 
-  // Bloqueo duro por pendientes
   const totalPend = state.pending.clinicas.length + state.pending.cirugias.length + state.pending.amb.length;
   if(totalPend > 0){
     toast('Aún hay pendientes. Resuélvelos antes de confirmar.');
@@ -916,7 +1024,6 @@ async function confirmarImportacion(){
   const importId = state.importId;
   const refImport = doc(db, 'produccion_imports', importId);
 
-  // Leer items staging
   const itemsCol = collection(db, 'produccion_imports', importId, 'items');
   const itemsSnap = await getDocs(itemsCol);
 
@@ -928,7 +1035,7 @@ async function confirmarImportacion(){
   const y = state.year;
   const m = pad(state.monthNum, 2);
 
-  const batchSize = 350; // un poco más conservador
+  const batchSize = 350;
   const docs = [];
   itemsSnap.forEach(d => docs.push({ id: d.id, data: d.data() || {} }));
 
@@ -941,7 +1048,6 @@ async function confirmarImportacion(){
       const n = data.normalizado || {};
       const raw = data.raw || {};
 
-      // resolvemos con el motor actual (mappings + catálogos)
       const resolved = resolveOneItem(n);
 
       const prodId = `PROD_${y}_${m}_${importId}_${id}`;
@@ -955,19 +1061,22 @@ async function confirmarImportacion(){
         mesNum: state.monthNum,
         ano: state.year,
 
-        // claves texto (human)
+        // human
         fecha: n.fecha ?? null,
         hora: n.hora ?? null,
         clinica: n.clinica ?? null,
         cirugia: n.cirugia ?? null,
         tipoPaciente: n.tipoPaciente ?? null,
 
-        // IDs resueltos (para liquidaciones / joins)
+        // NUEVO (no rompe): key normalizada del tipo paciente
+        tipoPacienteKey: n.tipoPacienteKey ?? null,
+
+        // IDs resueltos
         clinicaId: resolved.clinicaId ?? null,
         cirugiaId: resolved.cirugiaId ?? null,
         ambulatorioId: resolved.ambulatorioId ?? null,
 
-        // valores numéricos
+        // números
         valor: Number(n.valor || 0) || 0,
         derechosPabellon: Number(n.dp || 0) || 0,
         hmq: Number(n.hmq || 0) || 0,
@@ -979,12 +1088,9 @@ async function confirmarImportacion(){
         pagado: n.pagado ?? null,
         fechaPago: n.fechaPago ?? null,
 
-        // profesionales
         profesionales: n.profesionales || {},
 
-        // RAW completo (compacto, sin vacíos)
         raw,
-
         estado: 'activa',
         creadoEl: serverTimestamp(),
         creadoPor: state.user?.email || ''
@@ -1029,7 +1135,6 @@ async function anularImportacion(){
     actualizadoPor: state.user?.email || ''
   }, { merge: true });
 
-  // paginado en produccion por importId
   let last = null;
   let total = 0;
 
@@ -1100,11 +1205,9 @@ async function handleLoadCSV(file){
   for(let i=1;i<rows.length;i++){
     const row = rows[i];
     const raw = compactRaw(row, headerIdx);
-
     if(Object.keys(raw).length === 0) continue;
 
     const normalizado = buildNormalizado(raw);
-
     staged.push({ idx: i, raw, normalizado, resolved: null });
   }
 
@@ -1128,23 +1231,18 @@ async function handleLoadCSV(file){
 
   setStatus(`🟡 Staging listo: ${staged.length} filas (sin afectar liquidaciones)`);
 
-  // Guardar staging en Firestore (como antes)
   await saveStagingToFirestore();
   toast('Staging guardado en Firestore');
 
-  // Recalcular pendientes con catálogos + mappings
   await refreshAfterMapping();
 }
 
 /* =========================
-   Refresh pipeline after changes
+   Refresh pipeline
 ========================= */
 async function refreshAfterMapping(){
-  // recarga catálogos (por si creaste clínica) + mappings
   await loadMappings();
   await loadCatalogs();
-
-  // recalcula resolved + pendientes + UI
   recomputePending();
 
   setStatus(state.status === 'staged'
@@ -1166,14 +1264,12 @@ requireAuth({
   onUser: async (user)=>{
     state.user = user;
 
-    // Sidebar común
     await loadSidebar({ active: 'produccion' });
     setActiveNav('produccion');
 
     $('who').textContent = `Conectado: ${user.email}`;
     wireLogout();
 
-    // defaults
     $('mes').value = 'Octubre';
 
     setStatus('—');
@@ -1186,7 +1282,6 @@ requireAuth({
     setButtons();
     paintPreview();
 
-    // eventos
     $('btnCargar').addEventListener('click', async ()=>{
       const f = $('fileCSV').files?.[0];
       try{
