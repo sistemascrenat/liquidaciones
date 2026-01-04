@@ -1,10 +1,10 @@
-// produccion.js — COMPLETO
+// produccion.js — COMPLETO (mejorado)
 // ✅ Importación CSV (staging + confirmar + anular)
 // ✅ Guarda TODAS las columnas del CSV en raw, pero NUNCA guarda strings vacíos
-// ✅ Estructura:
-//   - produccion_imports/{importId}  (estado: staged/confirmada/anulada)
-//   - produccion_imports/{importId}/items/{ITEM_0001...} (raw + normalizado)
-//   - produccion/{prodId} (solo cuando confirmas) -> fuente única para Liquidaciones
+// ✅ Ahora incluye "Resolución" (Clínicas / Cirugías / Ambulatorios) con mappings persistentes
+// ✅ Confirmar queda bloqueado si hay pendientes
+// ✅ Confirmar escribe IDs resueltos: clinicaId / cirugiaId / ambulatorioId
+// ✅ Anular paginado (sin límite 2000)
 
 import { db } from './firebase-init.js';
 import { requireAuth } from './auth.js';
@@ -12,8 +12,8 @@ import { setActiveNav, toast, wireLogout } from './ui.js';
 import { loadSidebar } from './layout.js';
 
 import {
-  collection, doc, setDoc, getDoc, getDocs, writeBatch,
-  serverTimestamp, query, where, orderBy, limit
+  collection, doc, setDoc, getDoc, getDocs, writeBatch, updateDoc,
+  serverTimestamp, query, where, limit, orderBy, startAfter
 } from 'https://www.gstatic.com/firebasejs/11.7.3/firebase-firestore.js';
 
 /* =========================
@@ -23,7 +23,6 @@ const $ = (id)=> document.getElementById(id);
 
 /* =========================
    Columnas EXACTAS del CSV (como tú las listaste)
-   (OJO: el CSV puede venir con "Clínica" con tilde, etc.)
 ========================= */
 const EXPECTED_COLS = [
   '#','Suspendida','Confirmado','Fecha','Hora','Clínica',
@@ -38,17 +37,21 @@ const EXPECTED_COLS = [
   'Derechos de Pabellón','HMQ','Insumos'
 ];
 
+// (Opcional futuro) Si agregas columna ambulatorio en tu CSV,
+// solo añade el nombre aquí y en buildNormalizado().
+// const OPTIONAL_AMB_COL = 'Ambulatorio'; // ejemplo
+
 /* =========================
    Utils
 ========================= */
-function clean(s){
-  return (s ?? '').toString().trim();
-}
+function clean(s){ return (s ?? '').toString().trim(); }
 
 function normalizeKey(s){
   return clean(s)
     .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
-    .toLowerCase();
+    .toLowerCase()
+    .replace(/\s+/g,' ')
+    .trim();
 }
 
 // Firestore NO permite campos vacíos "" dentro de maps.
@@ -66,7 +69,6 @@ function toBool(v){
 }
 
 function parseCLPNumber(v){
-  // acepta "$ 1.234.567" / "1.234.567" / "1234567"
   const s = (v ?? '').toString().replace(/[^\d]/g,'');
   return Number(s || 0) || 0;
 }
@@ -83,7 +85,6 @@ function pad(n, w=4){
 }
 
 function nowId(){
-  // 2026-01-02T03:04:05.123Z -> 20260102_030405
   const d = new Date();
   const yyyy = d.getFullYear();
   const mm = pad(d.getMonth()+1,2);
@@ -103,7 +104,9 @@ function monthIndex(name){
   return map[m] || 0;
 }
 
-// Detecta delimitador por conteo
+/* =========================
+   CSV parsing
+========================= */
 function detectDelimiter(text){
   const head = text.split(/\r?\n/).slice(0,5).join('\n');
   const semis = (head.match(/;/g) || []).length;
@@ -111,7 +114,6 @@ function detectDelimiter(text){
   return semis > commas ? ';' : ',';
 }
 
-// Parser CSV básico con soporte de comillas
 function parseCSV(text){
   const delim = detectDelimiter(text);
   const rows = [];
@@ -147,13 +149,11 @@ function parseCSV(text){
     cur += ch;
   }
 
-  // último campo
   if(cur.length || row.length){
     row.push(cur);
     rows.push(row);
   }
 
-  // limpiar filas vacías
   return rows
     .map(r=> r.map(c=> (c ?? '').toString()))
     .filter(r=> r.some(c=> clean(c) !== ''));
@@ -165,34 +165,103 @@ function parseCSV(text){
 const colImports = collection(db, 'produccion_imports');
 const colProduccion = collection(db, 'produccion');
 
+// Catálogos (usamos los mismos nombres que ya usas en cirugias.js)
+const colClinicas = collection(db, 'clinicas');
+const colProcedimientos = collection(db, 'procedimientos');
+const colAmbulatorios = collection(db, 'ambulatorios');
+
+// Mappings persistentes
+const docMapClinicas = doc(db, 'produccion_mappings', 'clinicas');
+const docMapCirugias  = doc(db, 'produccion_mappings', 'cirugias');
+const docMapAmb       = doc(db, 'produccion_mappings', 'ambulatorios');
+
 /* =========================
    State
 ========================= */
 const state = {
   user: null,
+
   importId: '',
   status: 'idle', // idle | staged | confirmada | anulada
   monthName: '',
   monthNum: 0,
   year: 0,
   filename: '',
-  stagedItems: [] // [{ idx, normalizado, rawCompact }]
+
+  stagedItems: [], // [{ idx, raw, normalizado, resolved }]
+
+  // catálogos cargados
+  catalogs: {
+    clinicas: [],          // [{id, nombre}]
+    clinicasByNorm: new Map(), // norm(nombre)-> {id,nombre}
+    clinicasById: new Map(),   // id -> {id,nombre}
+
+    cirugias: [],          // [{id, nombre, codigo}]
+    cirugiasByNorm: new Map(), // norm(nombre)-> {id,nombre,codigo}
+    cirugiasById: new Map(),
+
+    amb: [],               // [{id, nombre}]
+    ambByNorm: new Map(),
+    ambById: new Map()
+  },
+
+  // mappings
+  maps: {
+    clinicas: new Map(),   // normCsv -> {id}
+    cirugias: new Map(),   // normCsv -> {id}
+    amb: new Map()
+  },
+
+  // pendientes detectados
+  pending: {
+    clinicas: [], // [{csvName, norm}]
+    cirugias: [], // [{csvName, norm, suggestions:[{id,nombre}]}]
+    amb: []       // [{csvName, norm}]
+  }
 };
 
 /* =========================
-   UI render
+   UI helpers
 ========================= */
-function setStatus(text){
-  $('statusInfo').textContent = text || '—';
+function setStatus(text){ $('statusInfo').textContent = text || '—'; }
+
+function setPills(){
+  const pc = state.pending.clinicas.length;
+  const ps = state.pending.cirugias.length;
+  const pa = state.pending.amb.length;
+  const total = pc + ps + pa;
+
+  const pillPend = $('pillPendientes');
+  pillPend.textContent = `Pendientes: ${total}`;
+  pillPend.className = 'pill ' + (total === 0 ? 'ok' : 'warn');
+
+  const pillC = $('pillClinicas');
+  pillC.textContent = `Clínicas: ${pc}`;
+  pillC.className = 'pill ' + (pc === 0 ? 'ok' : 'warn');
+
+  const pillS = $('pillCirugias');
+  pillS.textContent = `Cirugías: ${ps}`;
+  pillS.className = 'pill ' + (ps === 0 ? 'ok' : 'warn');
+
+  const pillA = $('pillAmb');
+  pillA.textContent = `Ambulatorios: ${pa}`;
+  pillA.className = 'pill ' + (pa === 0 ? 'ok' : 'warn');
+
+  const hint = $('hintResolver');
+  hint.textContent = (state.status === 'staged')
+    ? (total === 0 ? '✅ Todo resuelto. Puedes confirmar.' : '⚠️ Resuelve pendientes para confirmar.')
+    : 'Cargar CSV → resolver faltantes → confirmar.';
 }
 
 function setButtons(){
   const staged = state.status === 'staged';
   const confirmed = state.status === 'confirmada';
-  const anulada = state.status === 'anulada';
 
-  $('btnConfirmar').disabled = !staged;
-  $('btnAnular').disabled = !(staged || confirmed); // puedes anular también confirmada (tú dijiste que sí)
+  const totalPend = state.pending.clinicas.length + state.pending.cirugias.length + state.pending.amb.length;
+
+  $('btnResolver').disabled = !(staged && totalPend > 0);
+  $('btnConfirmar').disabled = !(staged && totalPend === 0);
+  $('btnAnular').disabled = !(staged || confirmed); // puedes anular staged o confirmada
 }
 
 function paintPreview(){
@@ -207,21 +276,40 @@ function paintPreview(){
   for(let i=0;i<max;i++){
     const it = rows[i];
     const n = it.normalizado || {};
+    const r = it.resolved || {};
     const prof = n.profesionalesResumen || '';
+
+    // estado de resolución por fila
+    const flags = [];
+    if(r.clinicaOk === false) flags.push('Clínica');
+    if(r.cirugiaOk === false) flags.push('Cirugía');
+    if(r.ambOk === false) flags.push('Amb');
+
+    const st =
+      flags.length === 0
+        ? `<span class="ok">OK</span>`
+        : `<span class="warn">Pendiente: ${flags.join(', ')}</span>`;
 
     const tr = document.createElement('tr');
     tr.innerHTML = `
       <td class="mono">${pad(i+1,2)}</td>
       <td>${n.fecha || '<span class="muted">—</span>'}</td>
       <td>${n.hora || '<span class="muted">—</span>'}</td>
-      <td>${n.clinica || '<span class="muted">—</span>'}</td>
-      <td><b>${n.cirugia || '<span class="muted">—</span>'}</b></td>
+      <td>
+        <div><b>${n.clinica || '<span class="muted">—</span>'}</b></div>
+        <div class="tiny muted">${r.clinicaId ? `ID: ${r.clinicaId}` : 'ID: —'}</div>
+      </td>
+      <td>
+        <div><b>${n.cirugia || '<span class="muted">—</span>'}</b></div>
+        <div class="tiny muted">${r.cirugiaId ? `ID: ${r.cirugiaId}` : 'ID: —'}</div>
+      </td>
       <td>${n.tipoPaciente || '<span class="muted">—</span>'}</td>
       <td><b>${clp(n.valor || 0)}</b></td>
       <td>${clp(n.dp || 0)}</td>
       <td>${clp(n.hmq || 0)}</td>
       <td>${clp(n.ins || 0)}</td>
       <td class="tiny">${prof ? prof : '<span class="muted">—</span>'}</td>
+      <td>${st}</td>
     `;
     tb.appendChild(tr);
   }
@@ -229,7 +317,7 @@ function paintPreview(){
   if(rows.length > max){
     const tr = document.createElement('tr');
     tr.innerHTML = `
-      <td colspan="11" class="muted tiny">
+      <td colspan="12" class="muted tiny">
         Mostrando ${max} de ${rows.length}. (El resto igual quedó en staging)
       </td>
     `;
@@ -238,10 +326,9 @@ function paintPreview(){
 }
 
 /* =========================
-   Core: convertir CSV -> staging items
+   Core: header mapping
 ========================= */
 function buildHeaderIndex(headerRow){
-  // Normalizamos headers del archivo para mapearlos a EXPECTED_COLS.
   const idx = new Map(); // expectedCol -> index
   const headerNorm = headerRow.map(h=> normalizeKey(h));
 
@@ -260,7 +347,6 @@ function readCell(row, headerIdx, colName){
 }
 
 function compactRaw(row, headerIdx){
-  // Guarda TODAS las columnas, pero SOLO si tienen valor (no string vacío)
   const raw = {};
   for(const col of EXPECTED_COLS){
     const val = nonEmptyOrUndef(readCell(row, headerIdx, col));
@@ -270,7 +356,6 @@ function compactRaw(row, headerIdx){
 }
 
 function buildNormalizado(raw){
-  // Campos clave para UI / Liquidaciones:
   const fecha = raw['Fecha'] ?? null;
   const hora = raw['Hora'] ?? null;
   const clinica = raw['Clínica'] ?? null;
@@ -287,7 +372,6 @@ function buildNormalizado(raw){
   const pagado = toBool(raw['Pagado']);
   const fechaPago = raw['Fecha de Pago'] ?? null;
 
-  // Profesionales por rol (texto como venga en CSV)
   const prof = {
     cirujano: raw['Cirujano'] ?? null,
     anestesista: raw['Anestesista'] ?? null,
@@ -296,7 +380,6 @@ function buildNormalizado(raw){
     arsenalera: raw['Arsenalera'] ?? null
   };
 
-  // Resumen legible para tabla
   const parts = [];
   if(prof.cirujano) parts.push(`Cirujano: ${prof.cirujano}`);
   if(prof.anestesista) parts.push(`Anest: ${prof.anestesista}`);
@@ -304,8 +387,7 @@ function buildNormalizado(raw){
   if(prof.ayudante2) parts.push(`Ay2: ${prof.ayudante2}`);
   if(prof.arsenalera) parts.push(`Ars: ${prof.arsenalera}`);
 
-  // Normalizado sin strings vacíos:
-  const n = {
+  return {
     fecha: fecha || null,
     hora: hora || null,
     clinica: clinica || null,
@@ -325,17 +407,441 @@ function buildNormalizado(raw){
     profesionales: prof,
     profesionalesResumen: parts.join(' · ') || null
   };
-
-  // Limpieza final: removemos keys con null si quieres “ultra compacto”
-  // (Firestore sí acepta null, así que lo dejamos; sirve para consistencia)
-  return n;
 }
 
 function validateMinimum(headerIdx){
-  // No forzamos “todas”, pero sí que existan las claves base
   const needed = ['Fecha','Clínica','Cirugía','Tipo de Paciente','Valor'];
   const missing = needed.filter(k => headerIdx.get(k) === undefined);
   return missing;
+}
+
+/* =========================
+   Load catalogs + mappings
+========================= */
+async function loadMappings(){
+  // documentos con forma: { map: { [normName]: { id, ... } } }
+  async function loadOne(docRef){
+    const snap = await getDoc(docRef);
+    if(!snap.exists()) return new Map();
+    const data = snap.data() || {};
+    const m = data.map && typeof data.map === 'object' ? data.map : {};
+    const out = new Map();
+    for(const k of Object.keys(m)){
+      const v = m[k] || {};
+      if(v.id) out.set(k, { id: v.id });
+    }
+    return out;
+  }
+
+  state.maps.clinicas = await loadOne(docMapClinicas);
+  state.maps.cirugias  = await loadOne(docMapCirugias);
+  state.maps.amb       = await loadOne(docMapAmb);
+}
+
+async function loadCatalogs(){
+  // CLINICAS
+  {
+    const snap = await getDocs(colClinicas);
+    const out = [];
+    snap.forEach(d=>{
+      const x = d.data() || {};
+      const id = clean(x.id) || d.id;
+      const nombre = clean(x.nombre) || id;
+      if(!id) return;
+      out.push({ id, nombre });
+    });
+    out.sort((a,b)=> normalizeKey(a.nombre).localeCompare(normalizeKey(b.nombre)));
+    state.catalogs.clinicas = out;
+    state.catalogs.clinicasByNorm = new Map(out.map(c=> [normalizeKey(c.nombre), c]));
+    state.catalogs.clinicasById   = new Map(out.map(c=> [c.id, c]));
+  }
+
+  // AMBULATORIOS (si no existe colección, quedará vacío)
+  {
+    const snap = await getDocs(colAmbulatorios);
+    const out = [];
+    snap.forEach(d=>{
+      const x = d.data() || {};
+      const id = clean(x.id) || d.id;
+      const nombre = clean(x.nombre) || id;
+      if(!id) return;
+      out.push({ id, nombre });
+    });
+    out.sort((a,b)=> normalizeKey(a.nombre).localeCompare(normalizeKey(b.nombre)));
+    state.catalogs.amb = out;
+    state.catalogs.ambByNorm = new Map(out.map(a=> [normalizeKey(a.nombre), a]));
+    state.catalogs.ambById   = new Map(out.map(a=> [a.id, a]));
+  }
+
+  // CIRUGIAS (procedimientos tipo cirugia)
+  {
+    const qy = query(colProcedimientos, where('tipo','==','cirugia'));
+    const snap = await getDocs(qy);
+    const out = [];
+    snap.forEach(d=>{
+      const x = d.data() || {};
+      const id = d.id;
+      const nombre = clean(x.nombre) || '';
+      const codigo = clean(x.codigo) || id;
+      if(!id || !nombre) return;
+      out.push({ id, nombre, codigo });
+    });
+    out.sort((a,b)=> normalizeKey(a.nombre).localeCompare(normalizeKey(b.nombre)));
+    state.catalogs.cirugias = out;
+    state.catalogs.cirugiasByNorm = new Map(out.map(s=> [normalizeKey(s.nombre), s]));
+    state.catalogs.cirugiasById   = new Map(out.map(s=> [s.id, s]));
+  }
+}
+
+/* =========================
+   Resolution engine
+========================= */
+function suggestCirugias(normName){
+  // devuelve top sugerencias simples por "includes"
+  const all = state.catalogs.cirugias || [];
+  const out = [];
+  for(const s of all){
+    const nn = normalizeKey(s.nombre);
+    if(nn.includes(normName) || normName.includes(nn)){
+      out.push({ id: s.id, nombre: s.nombre });
+      if(out.length >= 6) break;
+    }
+  }
+  return out;
+}
+
+function resolveOneItem(normalizado){
+  const resolved = {
+    clinicaId: null,
+    cirugiaId: null,
+    ambulatorioId: null,
+
+    clinicaOk: true,
+    cirugiaOk: true,
+    ambOk: true
+  };
+
+  // --- Clínica ---
+  const clinTxt = clean(normalizado.clinica || '');
+  if(clinTxt){
+    const norm = normalizeKey(clinTxt);
+
+    // 1) mapping explícito
+    const mapped = state.maps.clinicas.get(norm);
+    if(mapped?.id){
+      resolved.clinicaId = mapped.id;
+      resolved.clinicaOk = true;
+    } else {
+      // 2) match por catálogo (nombre exacto normalizado)
+      const found = state.catalogs.clinicasByNorm.get(norm);
+      if(found?.id){
+        resolved.clinicaId = found.id;
+        resolved.clinicaOk = true;
+      } else {
+        resolved.clinicaOk = false;
+      }
+    }
+  } else {
+    // si no viene clínica, lo tratamos como pendiente (porque el CSV mínimo la trae, pero por si acaso)
+    resolved.clinicaOk = false;
+  }
+
+  // --- Cirugía ---
+  const cirTxt = clean(normalizado.cirugia || '');
+  if(cirTxt){
+    const norm = normalizeKey(cirTxt);
+
+    const mapped = state.maps.cirugias.get(norm);
+    if(mapped?.id){
+      resolved.cirugiaId = mapped.id;
+      resolved.cirugiaOk = true;
+    } else {
+      const found = state.catalogs.cirugiasByNorm.get(norm);
+      if(found?.id){
+        resolved.cirugiaId = found.id;
+        resolved.cirugiaOk = true;
+      } else {
+        resolved.cirugiaOk = false;
+      }
+    }
+  } else {
+    resolved.cirugiaOk = false;
+  }
+
+  // --- Ambulatorio (placeholder) ---
+  // Hoy no lo extraemos del CSV (porque no hay columna).
+  // Si en el futuro lo agregas, aquí haces:
+  // const ambTxt = clean(normalizado.ambulatorio || '');
+  // ...
+  resolved.ambOk = true;
+  resolved.ambulatorioId = null;
+
+  return resolved;
+}
+
+function recomputePending(){
+  state.pending.clinicas = [];
+  state.pending.cirugias = [];
+  state.pending.amb = [];
+
+  // recalcula resolved por cada fila
+  for(const it of state.stagedItems){
+    it.resolved = resolveOneItem(it.normalizado || {});
+  }
+
+  // arma sets únicos pendientes
+  const seenClin = new Set();
+  const seenCir  = new Set();
+  const seenAmb  = new Set();
+
+  for(const it of state.stagedItems){
+    const n = it.normalizado || {};
+    const r = it.resolved || {};
+
+    const clinTxt = clean(n.clinica || '');
+    if(clinTxt && r.clinicaOk === false){
+      const norm = normalizeKey(clinTxt);
+      if(!seenClin.has(norm)){
+        seenClin.add(norm);
+        state.pending.clinicas.push({ csvName: clinTxt, norm });
+      }
+    }
+
+    const cirTxt = clean(n.cirugia || '');
+    if(cirTxt && r.cirugiaOk === false){
+      const norm = normalizeKey(cirTxt);
+      if(!seenCir.has(norm)){
+        seenCir.add(norm);
+        state.pending.cirugias.push({ csvName: cirTxt, norm, suggestions: suggestCirugias(norm) });
+      }
+    }
+
+    // ambulatorios: por ahora no bloquea (no hay columna)
+    // si agregas ambulatorio, usa lógica similar y setea ambOk false.
+  }
+
+  // ordena
+  state.pending.clinicas.sort((a,b)=> a.norm.localeCompare(b.norm));
+  state.pending.cirugias.sort((a,b)=> a.norm.localeCompare(b.norm));
+  state.pending.amb.sort((a,b)=> a.norm.localeCompare(b.norm));
+
+  setPills();
+  setButtons();
+  paintPreview();
+}
+
+/* =========================
+   Mappings: persist
+========================= */
+async function persistMapping(docRef, normKey, id){
+  if(!normKey || !id) return;
+  // setDoc merge con path dinámico
+  await setDoc(docRef, {
+    map: {
+      [normKey]: { id, actualizadoEl: serverTimestamp(), actualizadoPor: state.user?.email || '' }
+    },
+    actualizadoEl: serverTimestamp(),
+    actualizadoPor: state.user?.email || ''
+  }, { merge: true });
+
+  // refresca el mapa local (para no re-cargar todo)
+  if(docRef === docMapClinicas) state.maps.clinicas.set(normKey, { id });
+  if(docRef === docMapCirugias)  state.maps.cirugias.set(normKey, { id });
+  if(docRef === docMapAmb)       state.maps.amb.set(normKey, { id });
+}
+
+/* =========================
+   Modal Resolver: paint
+========================= */
+function openResolverModal(){
+  $('modalResolverBackdrop').style.display = 'grid';
+  paintResolverModal();
+}
+
+function closeResolverModal(){
+  $('modalResolverBackdrop').style.display = 'none';
+}
+
+function paintResolverModal(){
+  const pc = state.pending.clinicas.length;
+  const ps = state.pending.cirugias.length;
+  const pa = state.pending.amb.length;
+  const total = pc + ps + pa;
+
+  $('resolverResumen').innerHTML = `
+    Pendientes totales: <b>${total}</b><br/>
+    Clínicas: <b>${pc}</b> · Cirugías: <b>${ps}</b> · Ambulatorios: <b>${pa}</b>
+  `;
+
+  // CLINICAS
+  const wrapC = $('resolverClinicasList');
+  wrapC.innerHTML = '';
+  if(pc === 0){
+    wrapC.innerHTML = `<div class="muted tiny">✅ Sin pendientes de clínicas.</div>`;
+  } else {
+    for(const item of state.pending.clinicas){
+      const row = document.createElement('div');
+      row.className = 'miniRow';
+
+      const options = state.catalogs.clinicas
+        .map(c=> `<option value="${c.id}">${escapeHtml(`${c.nombre} (${c.id})`)}</option>`)
+        .join('');
+
+      row.innerHTML = `
+        <div>
+          <div style="font-weight:900;">${escapeHtml(item.csvName)}</div>
+          <div class="muted tiny mono">key: ${escapeHtml(item.norm)}</div>
+        </div>
+
+        <div class="field" style="margin:0;">
+          <label>Asociar a</label>
+          <select data-assoc-clin="${escapeHtml(item.norm)}">
+            <option value="">(Seleccionar clínica)</option>
+            ${options}
+          </select>
+        </div>
+
+        <div style="display:flex; gap:8px; justify-content:flex-end;">
+          <button class="btn soft" data-create-clin="${escapeHtml(item.norm)}" type="button">+ Crear</button>
+          <button class="btn primary" data-save-clin="${escapeHtml(item.norm)}" type="button">Guardar</button>
+        </div>
+      `;
+
+      // Guardar asociación
+      row.querySelector(`[data-save-clin="${CSS.escape(item.norm)}"]`).addEventListener('click', async ()=>{
+        const sel = row.querySelector(`select[data-assoc-clin="${CSS.escape(item.norm)}"]`);
+        const id = sel.value || '';
+        if(!id){ toast('Selecciona una clínica'); return; }
+        await persistMapping(docMapClinicas, item.norm, id);
+        toast('Clínica asociada');
+        await refreshAfterMapping();
+      });
+
+      // Crear clínica
+      row.querySelector(`[data-create-clin="${CSS.escape(item.norm)}"]`).addEventListener('click', async ()=>{
+        const nombre = item.csvName;
+        const suggested = suggestClinicaId();
+        const id = prompt('ID de clínica (ej: C001). Puedes editar:', suggested) || '';
+        const finalId = clean(id);
+        if(!finalId){ toast('Cancelado'); return; }
+
+        // crea doc clínica
+        await setDoc(doc(db,'clinicas', finalId), {
+          id: finalId,
+          nombre,
+          creadoEl: serverTimestamp(),
+          creadoPor: state.user?.email || '',
+          actualizadoEl: serverTimestamp(),
+          actualizadoPor: state.user?.email || ''
+        }, { merge:true });
+
+        // mapea csv->id
+        await persistMapping(docMapClinicas, item.norm, finalId);
+
+        toast('Clínica creada y asociada');
+        await refreshAfterMapping();
+      });
+
+      wrapC.appendChild(row);
+    }
+  }
+
+  // AMBULATORIOS (placeholder - no bloquea hoy, pero dejamos UI por si agregas columna futuro)
+  const wrapA = $('resolverAmbList');
+  wrapA.innerHTML = '';
+  wrapA.innerHTML = `<div class="muted tiny">— (Tu CSV actual no trae ambulatorios. Cuando lo agregues, aquí aparecerán.)</div>`;
+
+  // CIRUGIAS
+  const wrapS = $('resolverCirugiasList');
+  wrapS.innerHTML = '';
+  if(ps === 0){
+    wrapS.innerHTML = `<div class="muted tiny">✅ Sin pendientes de cirugías.</div>`;
+  } else {
+    for(const item of state.pending.cirugias){
+      const row = document.createElement('div');
+      row.className = 'miniRow';
+
+      const options = state.catalogs.cirugias
+        .map(s=> `<option value="${s.id}">${escapeHtml(`${s.nombre} (${s.codigo})`)}</option>`)
+        .join('');
+
+      const sug = (item.suggestions || [])
+        .map(x=> `<span class="pill warn" style="cursor:pointer;" data-sug-cir="${escapeHtml(item.norm)}" data-sug-id="${escapeHtml(x.id)}">${escapeHtml(x.nombre)}</span>`)
+        .join(' ');
+
+      row.innerHTML = `
+        <div>
+          <div style="font-weight:900;">${escapeHtml(item.csvName)}</div>
+          <div class="muted tiny mono">key: ${escapeHtml(item.norm)}</div>
+          ${sug ? `<div style="margin-top:8px; display:flex; flex-wrap:wrap; gap:8px;">${sug}</div>` : `<div class="muted tiny" style="margin-top:8px;">Sin sugerencias.</div>`}
+        </div>
+
+        <div class="field" style="margin:0;">
+          <label>Asociar a</label>
+          <select data-assoc-cir="${escapeHtml(item.norm)}">
+            <option value="">(Seleccionar cirugía)</option>
+            ${options}
+          </select>
+          <div class="help">
+            o <button class="linkBtn" data-go-cir="${escapeHtml(item.norm)}" type="button">crear en Cirugías</button>
+          </div>
+        </div>
+
+        <div style="display:flex; gap:8px; justify-content:flex-end;">
+          <button class="btn primary" data-save-cir="${escapeHtml(item.norm)}" type="button">Guardar</button>
+        </div>
+      `;
+
+      // click sugerencias => setea select
+      row.querySelectorAll('[data-sug-cir]').forEach(pill=>{
+        pill.addEventListener('click', ()=>{
+          const id = pill.getAttribute('data-sug-id') || '';
+          const sel = row.querySelector(`select[data-assoc-cir="${CSS.escape(item.norm)}"]`);
+          sel.value = id;
+        });
+      });
+
+      // guardar asociación
+      row.querySelector(`[data-save-cir="${CSS.escape(item.norm)}"]`).addEventListener('click', async ()=>{
+        const sel = row.querySelector(`select[data-assoc-cir="${CSS.escape(item.norm)}"]`);
+        const id = sel.value || '';
+        if(!id){ toast('Selecciona una cirugía'); return; }
+        await persistMapping(docMapCirugias, item.norm, id);
+        toast('Cirugía asociada');
+        await refreshAfterMapping();
+      });
+
+      // ir a cirugías para crear (prefill)
+      row.querySelector(`[data-go-cir="${CSS.escape(item.norm)}"]`).addEventListener('click', ()=>{
+        try{
+          localStorage.setItem('CR_PREFILL_CIRUGIA_NOMBRE', item.csvName);
+          localStorage.setItem('CR_RETURN_TO', 'produccion.html');
+          localStorage.setItem('CR_RETURN_IMPORTID', state.importId || '');
+        }catch(e){ /* ignore */ }
+        window.location.href = 'cirugias.html';
+      });
+
+      wrapS.appendChild(row);
+    }
+  }
+}
+
+function suggestClinicaId(){
+  // sugerencia simple: C + último 3 dígitos de timestamp
+  const tail = (Date.now() % 1000).toString().padStart(3,'0');
+  return `C${tail}`;
+}
+
+/* =========================
+   Escape HTML
+========================= */
+function escapeHtml(s=''){
+  return (s ?? '').toString()
+    .replaceAll('&','&amp;')
+    .replaceAll('<','&lt;')
+    .replaceAll('>','&gt;')
+    .replaceAll('"','&quot;')
+    .replaceAll("'","&#039;");
 }
 
 /* =========================
@@ -359,10 +865,8 @@ async function saveStagingToFirestore(){
     actualizadoPor: state.user?.email || ''
   };
 
-  // 1) guarda cabecera
   await setDoc(refImport, meta, { merge: true });
 
-  // 2) guarda items en subcolección (batch en chunks)
   const itemsCol = collection(db, 'produccion_imports', importId, 'items');
   const chunkSize = 400;
   let idx = 0;
@@ -372,21 +876,17 @@ async function saveStagingToFirestore(){
     const slice = state.stagedItems.slice(idx, idx + chunkSize);
 
     slice.forEach((it, k)=>{
-      const n = it.normalizado;
-      const raw = it.raw;
-
-      // docId determinístico
       const itemId = `ITEM_${pad(idx + k + 1, 4)}`;
       const refItem = doc(itemsCol, itemId);
 
-      // IMPORTANTE: raw NO tiene campos vacíos.
       batch.set(refItem, {
         importId,
         itemId,
         idx: idx + k + 1,
-        estado: 'staged',          // por si después quieres anular a nivel item
-        raw,
-        normalizado: n,
+        estado: 'staged',
+        raw: it.raw,                 // raw compacto
+        normalizado: it.normalizado, // normalizado
+        // resolved se recalcula localmente, no lo guardamos aquí para no duplicar
         creadoEl: serverTimestamp(),
         creadoPor: state.user?.email || ''
       }, { merge: true });
@@ -406,6 +906,13 @@ async function confirmarImportacion(){
     return;
   }
 
+  // Bloqueo duro por pendientes
+  const totalPend = state.pending.clinicas.length + state.pending.cirugias.length + state.pending.amb.length;
+  if(totalPend > 0){
+    toast('Aún hay pendientes. Resuélvelos antes de confirmar.');
+    return;
+  }
+
   const importId = state.importId;
   const refImport = doc(db, 'produccion_imports', importId);
 
@@ -418,12 +925,10 @@ async function confirmarImportacion(){
     return;
   }
 
-  // Crear registros en "produccion" (fuente única para liquidaciones)
-  // prodId: PROD_{YYYY}_{MM}_{importId}_{ITEM_0001}
   const y = state.year;
   const m = pad(state.monthNum, 2);
 
-  const batchSize = 400;
+  const batchSize = 350; // un poco más conservador
   const docs = [];
   itemsSnap.forEach(d => docs.push({ id: d.id, data: d.data() || {} }));
 
@@ -436,6 +941,9 @@ async function confirmarImportacion(){
       const n = data.normalizado || {};
       const raw = data.raw || {};
 
+      // resolvemos con el motor actual (mappings + catálogos)
+      const resolved = resolveOneItem(n);
+
       const prodId = `PROD_${y}_${m}_${importId}_${id}`;
       const refProd = doc(db, 'produccion', prodId);
 
@@ -447,14 +955,19 @@ async function confirmarImportacion(){
         mesNum: state.monthNum,
         ano: state.year,
 
-        // claves para queries (liquidaciones)
+        // claves texto (human)
         fecha: n.fecha ?? null,
         hora: n.hora ?? null,
         clinica: n.clinica ?? null,
         cirugia: n.cirugia ?? null,
         tipoPaciente: n.tipoPaciente ?? null,
 
-        // valores numéricos (CLP)
+        // IDs resueltos (para liquidaciones / joins)
+        clinicaId: resolved.clinicaId ?? null,
+        cirugiaId: resolved.cirugiaId ?? null,
+        ambulatorioId: resolved.ambulatorioId ?? null,
+
+        // valores numéricos
         valor: Number(n.valor || 0) || 0,
         derechosPabellon: Number(n.dp || 0) || 0,
         hmq: Number(n.hmq || 0) || 0,
@@ -469,10 +982,10 @@ async function confirmarImportacion(){
         // profesionales
         profesionales: n.profesionales || {},
 
-        // RAW completo (pero compacto, sin vacíos)
+        // RAW completo (compacto, sin vacíos)
         raw,
 
-        estado: 'activa', // para anulación futura
+        estado: 'activa',
         creadoEl: serverTimestamp(),
         creadoPor: state.user?.email || ''
       }, { merge: true });
@@ -482,7 +995,6 @@ async function confirmarImportacion(){
     i += batchSize;
   }
 
-  // Marcar import confirmada
   await setDoc(refImport, {
     estado: 'confirmada',
     confirmadoEl: serverTimestamp(),
@@ -509,7 +1021,6 @@ async function anularImportacion(){
   const importId = state.importId;
   const refImport = doc(db, 'produccion_imports', importId);
 
-  // Marca cabecera anulada
   await setDoc(refImport, {
     estado: 'anulada',
     anuladaEl: serverTimestamp(),
@@ -518,32 +1029,34 @@ async function anularImportacion(){
     actualizadoPor: state.user?.email || ''
   }, { merge: true });
 
-  // Además, desactiva filas en "produccion" asociadas a importId (sin borrar)
-  // (en produccion guardamos importId)
-  // Firestore no permite update masivo sin leer, así que lo hacemos por query + batches.
-  const qy = query(colProduccion, where('importId','==', importId), limit(2000));
-  const snap = await getDocs(qy);
+  // paginado en produccion por importId
+  let last = null;
+  let total = 0;
 
-  if(!snap.empty){
-    const all = [];
-    snap.forEach(d=> all.push(d));
-    let i = 0;
-    while(i < all.length){
-      const batch = writeBatch(db);
-      all.slice(i, i+400).forEach(d=>{
-        batch.set(d.ref, {
-          estado: 'anulada',
-          anuladaEl: serverTimestamp(),
-          anuladaPor: state.user?.email || ''
-        }, { merge: true });
-      });
-      await batch.commit();
-      i += 400;
-    }
+  while(true){
+    const qy = last
+      ? query(colProduccion, where('importId','==', importId), orderBy('__name__'), startAfter(last), limit(400))
+      : query(colProduccion, where('importId','==', importId), orderBy('__name__'), limit(400));
+
+    const snap = await getDocs(qy);
+    if(snap.empty) break;
+
+    const batch = writeBatch(db);
+    snap.forEach(d=>{
+      batch.set(d.ref, {
+        estado: 'anulada',
+        anuladaEl: serverTimestamp(),
+        anuladaPor: state.user?.email || ''
+      }, { merge:true });
+      total++;
+    });
+
+    await batch.commit();
+    last = snap.docs[snap.docs.length - 1];
   }
 
   state.status = 'anulada';
-  setStatus(`⛔ Importación anulada: ${importId}`);
+  setStatus(`⛔ Importación anulada: ${importId} (${total} filas desactivadas)`);
   setButtons();
   toast('Importación anulada');
 }
@@ -583,26 +1096,16 @@ async function handleLoadCSV(file){
     return;
   }
 
-  // construir staging items
   const staged = [];
   for(let i=1;i<rows.length;i++){
     const row = rows[i];
-
-    // raw compacto SIN campos vacíos
     const raw = compactRaw(row, headerIdx);
 
-    // si una fila viene totalmente vacía (salvo #), la ignoramos
-    const rawKeys = Object.keys(raw);
-    if(rawKeys.length === 0) continue;
+    if(Object.keys(raw).length === 0) continue;
 
-    // normalizado (con números)
     const normalizado = buildNormalizado(raw);
 
-    staged.push({
-      idx: i,
-      raw,
-      normalizado
-    });
+    staged.push({ idx: i, raw, normalizado, resolved: null });
   }
 
   if(!staged.length){
@@ -610,7 +1113,6 @@ async function handleLoadCSV(file){
     return;
   }
 
-  // generar importId
   const mm = pad(monthIndex(mes), 2);
   const importId = `PROD_${ano}_${mm}_${nowId()}`;
 
@@ -625,12 +1127,36 @@ async function handleLoadCSV(file){
   $('importId').value = importId;
 
   setStatus(`🟡 Staging listo: ${staged.length} filas (sin afectar liquidaciones)`);
-  setButtons();
-  paintPreview();
 
-  // guardar staging en Firestore
+  // Guardar staging en Firestore (como antes)
   await saveStagingToFirestore();
   toast('Staging guardado en Firestore');
+
+  // Recalcular pendientes con catálogos + mappings
+  await refreshAfterMapping();
+}
+
+/* =========================
+   Refresh pipeline after changes
+========================= */
+async function refreshAfterMapping(){
+  // recarga catálogos (por si creaste clínica) + mappings
+  await loadMappings();
+  await loadCatalogs();
+
+  // recalcula resolved + pendientes + UI
+  recomputePending();
+
+  setStatus(state.status === 'staged'
+    ? `🟡 Staging: ${state.stagedItems.length} filas · ImportID: ${state.importId}`
+    : (state.status === 'confirmada'
+        ? `✅ Confirmada: ${state.importId}`
+        : (state.status === 'anulada'
+            ? `⛔ Anulada: ${state.importId}`
+            : '—'
+          )
+      )
+  );
 }
 
 /* =========================
@@ -647,13 +1173,20 @@ requireAuth({
     $('who').textContent = `Conectado: ${user.email}`;
     wireLogout();
 
-    // default mes/año (si quieres)
+    // defaults
     $('mes').value = 'Octubre';
 
     setStatus('—');
+
+    // carga inicial catálogos + mappings (por si entras sin cargar CSV)
+    await loadMappings();
+    await loadCatalogs();
+
+    recomputePending();
     setButtons();
     paintPreview();
 
+    // eventos
     $('btnCargar').addEventListener('click', async ()=>{
       const f = $('fileCSV').files?.[0];
       try{
@@ -662,6 +1195,10 @@ requireAuth({
         console.error(err);
         toast('Error cargando CSV (ver consola)');
       }
+    });
+
+    $('btnResolver').addEventListener('click', ()=>{
+      openResolverModal();
     });
 
     $('btnConfirmar').addEventListener('click', async ()=>{
@@ -680,6 +1217,19 @@ requireAuth({
         console.error(err);
         toast('Error anulando (ver consola)');
       }
+    });
+
+    // modal resolver
+    $('btnResolverClose').addEventListener('click', closeResolverModal);
+    $('btnResolverCancelar').addEventListener('click', closeResolverModal);
+    $('btnResolverRevisar').addEventListener('click', async ()=>{
+      await refreshAfterMapping();
+      toast('Pendientes recalculados');
+      paintResolverModal();
+    });
+
+    $('modalResolverBackdrop').addEventListener('click', (e)=>{
+      if(e.target === $('modalResolverBackdrop')) closeResolverModal();
     });
   }
 });
