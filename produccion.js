@@ -1,13 +1,10 @@
-// produccion.js — COMPLETO (mejorado, sin romper lo que ya funciona)
-// ✅ Importación CSV (staging + confirmar + anular)
-// ✅ Guarda TODAS las columnas del CSV en raw, pero NUNCA guarda strings vacíos
-// ✅ Resolución persistente (Clínicas / Cirugías / Ambulatorios placeholder)
-// ✅ Cirugías: pendientes se resuelven por CONTEXTO real: Clínica + Tipo Paciente + Cirugía (CSV)
-// ✅ Confirmar bloqueado si hay pendientes
-// ✅ Confirmar guarda en Firestore: produccion/{YYYY-MM}/items/{...}  (como pediste)
-// ✅ Preview: muestra TODAS las columnas del CSV + Estado
-// ✅ Preview paginado: 60 por página + tabs + buscador global
-// ✅ Modal resolver scrolleable (HTML ya lo corrige)
+// produccion.js — COMPLETO (renovado)
+// ✅ Sidebar mantiene ancho (HTML)
+// ✅ Ignora filas "basura": si Nombre Paciente y RUT vienen vacíos => NO se importa esa línea
+// ✅ Resolución cirugías por contexto: Clínica + Tipo Paciente + Cirugía
+// ✅ Preview paginado (60) + buscador global
+// ✅ Confirmar guarda en Firestore como: produccion/{YYYY}/meses/{MM}/pacientes/{RUT}/items/{FECHAISO}_{HHMM}
+// ✅ Anular: marca import como anulada + marca items por importId vía collectionGroup('items') (filtrado por ano/mesNum)
 
 import { db } from './firebase-init.js';
 import { requireAuth } from './auth.js';
@@ -16,16 +13,17 @@ import { loadSidebar } from './layout.js';
 
 import {
   collection, doc, setDoc, getDoc, getDocs, writeBatch,
-  serverTimestamp, query, where, limit, orderBy, startAfter
+  serverTimestamp, query, where, limit, orderBy, startAfter,
+  collectionGroup
 } from 'https://www.gstatic.com/firebasejs/11.7.3/firebase-firestore.js';
 
 /* =========================
-   DOM helpers
+   DOM
 ========================= */
 const $ = (id)=> document.getElementById(id);
 
 /* =========================
-   Columnas EXACTAS del CSV (como tú las listaste)
+   Columnas esperadas (como pediste)
 ========================= */
 const EXPECTED_COLS = [
   '#','Suspendida','Confirmado','Fecha','Hora','Clínica',
@@ -102,7 +100,52 @@ function monthIndex(name){
 }
 
 function monthId(year, monthNum){
-  return `${year}-${pad(monthNum,2)}`; // YYYY-MM
+  return `${year}-${pad(monthNum,2)}`;
+}
+
+/* ---- Fecha/Hora para docId FECHAISO_HHMM ---- */
+function parseDateToISO(s){
+  const t = clean(s);
+  if(!t) return '';
+  // yyyy-mm-dd
+  let m = t.match(/^(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})$/);
+  if(m){
+    const yyyy = m[1], mm = pad(m[2],2), dd = pad(m[3],2);
+    return `${yyyy}-${mm}-${dd}`;
+  }
+  // dd-mm-yyyy o dd/mm/yyyy
+  m = t.match(/^(\d{1,2})[-\/](\d{1,2})[-\/](\d{4})$/);
+  if(m){
+    const dd = pad(m[1],2), mm = pad(m[2],2), yyyy = m[3];
+    return `${yyyy}-${mm}-${dd}`;
+  }
+  return '';
+}
+
+function parseHora24(s){
+  const t = normalizeKey(s);
+  if(!t) return '';
+  // ej: "8:00 a.m." / "8:00 am" / "08:00" / "20:15"
+  let m = t.match(/^(\d{1,2})[:.](\d{2})\s*(a\.?m\.?|p\.?m\.?|am|pm)?$/);
+  if(!m) return '';
+  let hh = Number(m[1]);
+  const mm = Number(m[2]);
+  const ap = (m[3] || '').replace(/\./g,'');
+  if(ap === 'am'){
+    if(hh === 12) hh = 0;
+  } else if(ap === 'pm'){
+    if(hh < 12) hh += 12;
+  }
+  return `${pad(hh,2)}${pad(mm,2)}`; // HHMM (para docId)
+}
+
+function normalizeRutKey(rut){
+  // DocId seguro: sin puntos/espacios, mayúscula, conserva dígitos y K
+  const t = clean(rut).toUpperCase();
+  if(!t) return '';
+  // quita todo excepto 0-9 y K
+  const base = t.replace(/[^0-9K]/g,'');
+  return base;
 }
 
 /* =========================
@@ -131,22 +174,14 @@ function parseCSV(text){
       else inQuotes = !inQuotes;
       continue;
     }
-
     if(!inQuotes && ch === delim){
-      row.push(cur);
-      cur = '';
-      continue;
+      row.push(cur); cur=''; continue;
     }
-
     if(!inQuotes && (ch === '\n' || ch === '\r')){
       if(ch === '\r' && next === '\n') i++;
-      row.push(cur);
-      rows.push(row);
-      row = [];
-      cur = '';
-      continue;
+      row.push(cur); rows.push(row);
+      row=[]; cur=''; continue;
     }
-
     cur += ch;
   }
 
@@ -165,15 +200,13 @@ function parseCSV(text){
 ========================= */
 const colImports = collection(db, 'produccion_imports');
 
-// Catálogos (compatibles con tu cirugias.js)
 const colClinicas = collection(db, 'clinicas');
 const colProcedimientos = collection(db, 'procedimientos');
 const colAmbulatorios = collection(db, 'ambulatorios');
 
-// Mappings persistentes
 const docMapClinicas = doc(db, 'produccion_mappings', 'clinicas');
-const docMapCirugias  = doc(db, 'produccion_mappings', 'cirugias');      // key compuesto
-const docMapAmb       = doc(db, 'produccion_mappings', 'ambulatorios');  // placeholder
+const docMapCirugias  = doc(db, 'produccion_mappings', 'cirugias');
+const docMapAmb       = doc(db, 'produccion_mappings', 'ambulatorios');
 
 /* =========================
    State
@@ -188,42 +221,24 @@ const state = {
   year: 0,
   filename: '',
 
-  stagedItems: [], // [{ idx, raw, normalizado, resolved, _search }]
+  stagedItems: [],
 
-  ui: {
-    pageSize: 60,
-    page: 1,
-    query: ''
-  },
-  view: {
-    filtered: []
-  },
+  ui: { pageSize: 60, page: 1, query: '' },
+  view: { filtered: [] },
 
   catalogs: {
-    clinicas: [],
-    clinicasByNorm: new Map(),
-    clinicasById: new Map(),
-
-    cirugias: [],
-    cirugiasByNorm: new Map(),
-    cirugiasById: new Map(),
-
-    amb: [],
-    ambByNorm: new Map(),
-    ambById: new Map()
+    clinicas: [], clinicasByNorm: new Map(), clinicasById: new Map(),
+    cirugias: [], cirugiasByNorm: new Map(), cirugiasById: new Map(),
+    amb: [], ambByNorm: new Map(), ambById: new Map()
   },
 
   maps: {
-    clinicas: new Map(),  // normClinicaCsv -> {id}
-    cirugias: new Map(),  // keyCompuesto -> {id}
+    clinicas: new Map(),
+    cirugias: new Map(),
     amb: new Map()
   },
 
-  pending: {
-    clinicas: [], // [{csvName, norm}]
-    cirugias: [], // [{key, csvName, normCir, clinicaCsv, normClin, tipoCsv, normTipo, suggestions:[]}]
-    amb: []
-  }
+  pending: { clinicas: [], cirugias: [], amb: [] }
 };
 
 /* =========================
@@ -253,8 +268,7 @@ function setPills(){
   pillA.textContent = `Ambulatorios: ${pa}`;
   pillA.className = 'pill ' + (pa === 0 ? 'ok' : 'warn');
 
-  const hint = $('hintResolver');
-  hint.textContent = (state.status === 'staged')
+  $('hintResolver').textContent = (state.status === 'staged')
     ? (total === 0 ? '✅ Todo resuelto. Puedes confirmar.' : '⚠️ Resuelve pendientes para confirmar.')
     : 'Cargar CSV → resolver faltantes → confirmar.';
 }
@@ -271,15 +285,23 @@ function setButtons(){
 }
 
 /* =========================
-   Preview table: header + pagination + search
+   Preview table
 ========================= */
+function escapeHtml(s=''){
+  return (s ?? '').toString()
+    .replaceAll('&','&amp;')
+    .replaceAll('<','&lt;')
+    .replaceAll('>','&gt;')
+    .replaceAll('"','&quot;')
+    .replaceAll("'","&#039;");
+}
+
 function buildThead(){
   const ths = [
     `<th>#</th>`,
     ...EXPECTED_COLS.map(c => `<th>${escapeHtml(c)}</th>`),
     `<th>Estado</th>`
   ].join('');
-
   $('thead').innerHTML = `<tr>${ths}</tr>`;
 }
 
@@ -289,8 +311,8 @@ function buildSearchText(it){
   const n = it.normalizado || {};
   const rawText = Object.entries(raw).map(([k,v])=>`${k}:${v}`).join(' | ');
   const normText = [
-    n.fecha,n.hora,n.clinica,n.cirugia,n.tipoPaciente,
-    n.profesionalesResumen
+    n.fechaISO,n.horaHM,n.clinica,n.cirugia,n.tipoPaciente,
+    n.nombrePaciente,n.rut
   ].filter(Boolean).join(' | ');
 
   it._search = normalizeKey(`${rawText} | ${normText}`);
@@ -299,11 +321,9 @@ function buildSearchText(it){
 
 function applyFilter(){
   const q = normalizeKey(state.ui.query || '');
-  if(!q){
-    state.view.filtered = [...state.stagedItems];
-  } else {
-    state.view.filtered = state.stagedItems.filter(it => buildSearchText(it).includes(q));
-  }
+  state.view.filtered = !q
+    ? [...state.stagedItems]
+    : state.stagedItems.filter(it => buildSearchText(it).includes(q));
 
   const total = state.view.filtered.length;
   const pages = Math.max(1, Math.ceil(total / state.ui.pageSize));
@@ -359,9 +379,7 @@ function paintPager(){
     }
   }
 
-  for(let p=start;p<=end;p++){
-    addTab(String(p), p, p===page);
-  }
+  for(let p=start;p<=end;p++) addTab(String(p), p, p===page);
 
   if(end < pages){
     if(end < pages-1){
@@ -381,41 +399,31 @@ function estadoCell(it){
   if(r.clinicaOk === false) flags.push('Clínica');
   if(r.cirugiaOk === false) flags.push('Cirugía');
   if(r.ambOk === false) flags.push('Amb');
-
   if(flags.length === 0) return `<span class="ok">OK</span>`;
   return `<span class="warn">Pendiente: ${escapeHtml(flags.join(', '))}</span>`;
 }
 
 function formatCell(colName, rawVal){
-  // formateos útiles sin alterar el raw
   if(rawVal === undefined || rawVal === null || clean(rawVal) === '') return `<span class="muted">—</span>`;
 
-  const v = rawVal;
-
   if(colName === 'Valor' || colName === 'Derechos de Pabellón' || colName === 'HMQ' || colName === 'Insumos'){
-    const num = parseCLPNumber(v);
-    return `<b>${clp(num)}</b>`;
+    return `<b>${clp(parseCLPNumber(rawVal))}</b>`;
   }
-
   if(colName === 'Suspendida' || colName === 'Confirmado' || colName === 'Pagado'){
-    const b = toBool(v);
+    const b = toBool(rawVal);
     if(b === true) return `<span class="ok">Sí</span>`;
     if(b === false) return `<span class="muted">No</span>`;
-    return escapeHtml(v);
   }
-
-  // texto
-  return escapeHtml(v);
+  return escapeHtml(rawVal);
 }
 
 function paintPreview(){
   applyFilter();
 
+  $('countPill').textContent = `${state.stagedItems.length} fila${state.stagedItems.length===1?'':'s'}`;
+
   const tb = $('tbody');
   tb.innerHTML = '';
-
-  // pill cuenta total cargada (no filtrada)
-  $('countPill').textContent = `${state.stagedItems.length} fila${state.stagedItems.length===1?'':'s'}`;
 
   const rows = state.view.filtered || [];
   const total = rows.length;
@@ -428,16 +436,13 @@ function paintPreview(){
   for(let i=0;i<slice.length;i++){
     const it = slice[i];
     const raw = it.raw || {};
-
     const tr = document.createElement('tr');
 
     const tds = [];
     tds.push(`<td class="mono">${pad(start + i + 1,2)}</td>`);
 
-    // TODAS las columnas del CSV, en orden esperado
     for(const col of EXPECTED_COLS){
       const val = raw[col];
-      // algunos campos largos mejor wrap
       const wrapClass = (col === 'Dirección' || col === 'Otras' || col === 'Ex. Laboratorio') ? 'wrap' : '';
       tds.push(`<td class="${wrapClass}">${formatCell(col, val)}</td>`);
     }
@@ -458,12 +463,11 @@ function paintPreview(){
 }
 
 /* =========================
-   Core: header mapping
+   Header mapping
 ========================= */
 function buildHeaderIndex(headerRow){
   const idx = new Map();
   const headerNorm = headerRow.map(h=> normalizeKey(h));
-
   for(const col of EXPECTED_COLS){
     const want = normalizeKey(col);
     const j = headerNorm.indexOf(want);
@@ -488,21 +492,23 @@ function compactRaw(row, headerIdx){
 }
 
 function buildNormalizado(raw){
-  const fecha = raw['Fecha'] ?? null;
-  const hora = raw['Hora'] ?? null;
+  const fechaTxt = raw['Fecha'] ?? '';
+  const horaTxt  = raw['Hora'] ?? '';
+
+  const fechaISO = parseDateToISO(fechaTxt);
+  const horaHM   = parseHora24(horaTxt); // HHMM
+
   const clinica = raw['Clínica'] ?? null;
   const cirugia = raw['Cirugía'] ?? null;
   const tipoPaciente = raw['Tipo de Paciente'] ?? null;
+
+  const nombrePaciente = raw['Nombre Paciente'] ?? null;
+  const rut = raw['RUT'] ?? null;
 
   const valor = parseCLPNumber(raw['Valor'] ?? 0);
   const dp = parseCLPNumber(raw['Derechos de Pabellón'] ?? 0);
   const hmq = parseCLPNumber(raw['HMQ'] ?? 0);
   const ins = parseCLPNumber(raw['Insumos'] ?? 0);
-
-  const suspendida = toBool(raw['Suspendida']);
-  const confirmado = toBool(raw['Confirmado']);
-  const pagado = toBool(raw['Pagado']);
-  const fechaPago = raw['Fecha de Pago'] ?? null;
 
   const prof = {
     cirujano: raw['Cirujano'] ?? null,
@@ -512,29 +518,22 @@ function buildNormalizado(raw){
     arsenalera: raw['Arsenalera'] ?? null
   };
 
-  const parts = [];
-  if(prof.cirujano) parts.push(`Cirujano: ${prof.cirujano}`);
-  if(prof.anestesista) parts.push(`Anest: ${prof.anestesista}`);
-  if(prof.ayudante1) parts.push(`Ay1: ${prof.ayudante1}`);
-  if(prof.ayudante2) parts.push(`Ay2: ${prof.ayudante2}`);
-  if(prof.arsenalera) parts.push(`Ars: ${prof.arsenalera}`);
-
   return {
-    fecha: fecha || null,
-    hora: hora || null,
+    fechaISO,
+    horaHM,
     clinica: clinica || null,
     cirugia: cirugia || null,
     tipoPaciente: tipoPaciente || null,
+    nombrePaciente: nombrePaciente || null,
+    rut: rut || null,
 
     valor, dp, hmq, ins,
+    suspendida: toBool(raw['Suspendida']) ?? null,
+    confirmado: toBool(raw['Confirmado']) ?? null,
+    pagado: toBool(raw['Pagado']) ?? null,
+    fechaPago: raw['Fecha de Pago'] ?? null,
 
-    suspendida: suspendida ?? null,
-    confirmado: confirmado ?? null,
-    pagado: pagado ?? null,
-    fechaPago: fechaPago || null,
-
-    profesionales: prof,
-    profesionalesResumen: parts.join(' · ') || null
+    profesionales: prof
   };
 }
 
@@ -544,7 +543,7 @@ function validateMinimum(headerIdx){
 }
 
 /* =========================
-   Load mappings + catalogs
+   Catalogs + mappings
 ========================= */
 async function loadMappings(){
   async function loadOne(docRef){
@@ -559,14 +558,13 @@ async function loadMappings(){
     }
     return out;
   }
-
   state.maps.clinicas = await loadOne(docMapClinicas);
   state.maps.cirugias  = await loadOne(docMapCirugias);
   state.maps.amb       = await loadOne(docMapAmb);
 }
 
 async function loadCatalogs(){
-  // CLINICAS
+  // Clínicas
   {
     const snap = await getDocs(colClinicas);
     const out = [];
@@ -580,10 +578,10 @@ async function loadCatalogs(){
     out.sort((a,b)=> normalizeKey(a.nombre).localeCompare(normalizeKey(b.nombre)));
     state.catalogs.clinicas = out;
     state.catalogs.clinicasByNorm = new Map(out.map(c=> [normalizeKey(c.nombre), c]));
-    state.catalogs.clinicasById   = new Map(out.map(c=> [c.id, c]));
+    state.catalogs.clinicasById = new Map(out.map(c=> [c.id, c]));
   }
 
-  // AMBULATORIOS (placeholder)
+  // Ambulatorios (placeholder)
   {
     const snap = await getDocs(colAmbulatorios);
     const out = [];
@@ -597,10 +595,10 @@ async function loadCatalogs(){
     out.sort((a,b)=> normalizeKey(a.nombre).localeCompare(normalizeKey(b.nombre)));
     state.catalogs.amb = out;
     state.catalogs.ambByNorm = new Map(out.map(a=> [normalizeKey(a.nombre), a]));
-    state.catalogs.ambById   = new Map(out.map(a=> [a.id, a]));
+    state.catalogs.ambById = new Map(out.map(a=> [a.id, a]));
   }
 
-  // CIRUGIAS (procedimientos tipo cirugia)
+  // Cirugías (procedimientos tipo cirugia)
   {
     const qy = query(colProcedimientos, where('tipo','==','cirugia'));
     const snap = await getDocs(qy);
@@ -616,12 +614,12 @@ async function loadCatalogs(){
     out.sort((a,b)=> normalizeKey(a.nombre).localeCompare(normalizeKey(b.nombre)));
     state.catalogs.cirugias = out;
     state.catalogs.cirugiasByNorm = new Map(out.map(s=> [normalizeKey(s.nombre), s]));
-    state.catalogs.cirugiasById   = new Map(out.map(s=> [s.id, s]));
+    state.catalogs.cirugiasById = new Map(out.map(s=> [s.id, s]));
   }
 }
 
 /* =========================
-   Resolución: clave compuesta para cirugías
+   Resolución cirugías por contexto
 ========================= */
 function cirKey(normClin, normTipo, normCir){
   return `${normClin}||${normTipo}||${normCir}`;
@@ -650,71 +648,49 @@ function resolveOneItem(n){
     cirugiaOk: true,
     ambOk: true,
 
-    // context norm (útil para debug)
-    _normClin: '',
-    _normTipo: '',
-    _normCir: '',
     _cirKey: ''
   };
 
-  // --- Clínica ---
+  // Clínica
   const clinTxt = clean(n.clinica || '');
   if(clinTxt){
     const normClin = normalizeKey(clinTxt);
-    resolved._normClin = normClin;
-
     const mapped = state.maps.clinicas.get(normClin);
     if(mapped?.id){
       resolved.clinicaId = mapped.id;
-      resolved.clinicaOk = true;
     } else {
       const found = state.catalogs.clinicasByNorm.get(normClin);
-      if(found?.id){
-        resolved.clinicaId = found.id;
-        resolved.clinicaOk = true;
-      } else {
-        resolved.clinicaOk = false;
-      }
+      if(found?.id) resolved.clinicaId = found.id;
+      else resolved.clinicaOk = false;
     }
   } else {
     resolved.clinicaOk = false;
   }
 
-  // --- Cirugía (por Clínica + Tipo Paciente + Cirugía CSV) ---
+  // Cirugía por contexto: clínica + tipo + cirugía
   const cirTxt = clean(n.cirugia || '');
   const tipoTxt = clean(n.tipoPaciente || '');
   if(cirTxt){
+    const normClin = normalizeKey(clinTxt || '');
+    const normTipo = normalizeKey(tipoTxt || '');
     const normCir = normalizeKey(cirTxt);
-    const normTipo = normalizeKey(tipoTxt || ''); // si viene vacío, igual forma parte de la key
-    const normClin = resolved._normClin || normalizeKey(clinTxt || '');
-
-    resolved._normCir = normCir;
-    resolved._normTipo = normTipo;
 
     const key = cirKey(normClin, normTipo, normCir);
     resolved._cirKey = key;
 
-    // 1) mapping por key compuesta
     const mapped = state.maps.cirugias.get(key);
     if(mapped?.id){
       resolved.cirugiaId = mapped.id;
-      resolved.cirugiaOk = true;
     } else {
-      // 2) fallback: match exacto por nombre (solo si existe un procedimiento con ese nombre exacto)
       const found = state.catalogs.cirugiasByNorm.get(normCir);
-      if(found?.id){
-        // OJO: esto resuelve solo si coincide exacto.
-        resolved.cirugiaId = found.id;
-        resolved.cirugiaOk = true;
-      } else {
-        resolved.cirugiaOk = false;
-      }
+      if(found?.id) resolved.cirugiaId = found.id; // solo match exacto por nombre
+      else resolved.cirugiaOk = false;
     }
   } else {
     resolved.cirugiaOk = false;
   }
 
-  // --- Ambulatorio placeholder ---
+  // Ambulatorios placeholder
   resolved.ambOk = true;
   resolved.ambulatorioId = null;
 
@@ -726,19 +702,17 @@ function recomputePending(){
   state.pending.cirugias = [];
   state.pending.amb = [];
 
-  // recalcula resolved por cada fila
   for(const it of state.stagedItems){
     it.resolved = resolveOneItem(it.normalizado || {});
   }
 
   const seenClin = new Set();
-  const seenCir  = new Set();
+  const seenCir = new Set();
 
   for(const it of state.stagedItems){
     const n = it.normalizado || {};
     const r = it.resolved || {};
 
-    // clínicas
     const clinTxt = clean(n.clinica || '');
     if(clinTxt && r.clinicaOk === false){
       const norm = normalizeKey(clinTxt);
@@ -748,26 +722,18 @@ function recomputePending(){
       }
     }
 
-    // cirugías por contexto
     const cirTxt = clean(n.cirugia || '');
     const tipoTxt = clean(n.tipoPaciente || '');
-    const normClin = normalizeKey(clinTxt);
-    const normTipo = normalizeKey(tipoTxt);
-    const normCir = normalizeKey(cirTxt);
-
     if(cirTxt && r.cirugiaOk === false){
-      const key = cirKey(normClin, normTipo, normCir);
+      const key = cirKey(normalizeKey(clinTxt), normalizeKey(tipoTxt), normalizeKey(cirTxt));
       if(!seenCir.has(key)){
         seenCir.add(key);
         state.pending.cirugias.push({
           key,
           csvName: cirTxt,
-          normCir,
           clinicaCsv: clinTxt || '(sin clínica)',
-          normClin,
           tipoCsv: tipoTxt || '(sin tipo)',
-          normTipo,
-          suggestions: suggestCirugias(normCir)
+          suggestions: suggestCirugias(normalizeKey(cirTxt))
         });
       }
     }
@@ -781,23 +747,16 @@ function recomputePending(){
   paintPreview();
 }
 
-/* =========================
-   Mappings: persist
-========================= */
 async function persistMapping(docRef, key, id){
-  if(!key || !id) return;
-
   await setDoc(docRef, {
-    map: {
-      [key]: { id, actualizadoEl: serverTimestamp(), actualizadoPor: state.user?.email || '' }
-    },
+    map: { [key]: { id, actualizadoEl: serverTimestamp(), actualizadoPor: state.user?.email || '' } },
     actualizadoEl: serverTimestamp(),
     actualizadoPor: state.user?.email || ''
-  }, { merge: true });
+  }, { merge:true });
 
   if(docRef === docMapClinicas) state.maps.clinicas.set(key, { id });
-  if(docRef === docMapCirugias)  state.maps.cirugias.set(key, { id });
-  if(docRef === docMapAmb)       state.maps.amb.set(key, { id });
+  if(docRef === docMapCirugias) state.maps.cirugias.set(key, { id });
+  if(docRef === docMapAmb) state.maps.amb.set(key, { id });
 }
 
 /* =========================
@@ -807,9 +766,13 @@ function openResolverModal(){
   $('modalResolverBackdrop').style.display = 'block';
   paintResolverModal();
 }
-
 function closeResolverModal(){
   $('modalResolverBackdrop').style.display = 'none';
+}
+
+function suggestClinicaId(){
+  const tail = (Date.now() % 1000).toString().padStart(3,'0');
+  return `C${tail}`;
 }
 
 function paintResolverModal(){
@@ -823,7 +786,7 @@ function paintResolverModal(){
     Clínicas: <b>${pc}</b> · Cirugías: <b>${ps}</b> · Ambulatorios: <b>${pa}</b>
   `;
 
-  // CLINICAS
+  // Clínicas
   const wrapC = $('resolverClinicasList');
   wrapC.innerHTML = '';
   if(pc === 0){
@@ -884,7 +847,6 @@ function paintResolverModal(){
         }, { merge:true });
 
         await persistMapping(docMapClinicas, item.norm, finalId);
-
         toast('Clínica creada y asociada');
         await refreshAfterMapping();
         paintResolverModal();
@@ -894,11 +856,10 @@ function paintResolverModal(){
     }
   }
 
-  // AMBULATORIOS (placeholder)
-  const wrapA = $('resolverAmbList');
-  wrapA.innerHTML = `<div class="muted tiny">— (Tu CSV actual no trae ambulatorios. Cuando lo agregues, aquí aparecerán.)</div>`;
+  // Ambulatorios (placeholder)
+  $('resolverAmbList').innerHTML = `<div class="muted tiny">— (Tu CSV actual no trae ambulatorios.)</div>`;
 
-  // CIRUGIAS (por contexto)
+  // Cirugías por contexto
   const wrapS = $('resolverCirugiasList');
   wrapS.innerHTML = '';
   if(ps === 0){
@@ -919,9 +880,7 @@ function paintResolverModal(){
       row.innerHTML = `
         <div>
           <div style="font-weight:900;">${escapeHtml(item.csvName)}</div>
-          <div class="muted tiny">
-            <b>Clínica:</b> ${escapeHtml(item.clinicaCsv)} · <b>Tipo:</b> ${escapeHtml(item.tipoCsv)}
-          </div>
+          <div class="muted tiny"><b>Clínica:</b> ${escapeHtml(item.clinicaCsv)} · <b>Tipo:</b> ${escapeHtml(item.tipoCsv)}</div>
           <div class="muted tiny mono">key: ${escapeHtml(item.key)}</div>
           ${sug ? `<div style="margin-top:8px; display:flex; flex-wrap:wrap; gap:8px;">${sug}</div>` : `<div class="muted tiny" style="margin-top:8px;">Sin sugerencias.</div>`}
         </div>
@@ -961,14 +920,13 @@ function paintResolverModal(){
       });
 
       row.querySelector(`[data-go-cir="${CSS.escape(item.key)}"]`).addEventListener('click', ()=>{
-        // prefill + contexto
         try{
           localStorage.setItem('CR_PREFILL_CIRUGIA_NOMBRE', item.csvName);
           localStorage.setItem('CR_PREFILL_TIPO_PACIENTE', item.tipoCsv);
           localStorage.setItem('CR_PREFILL_CLINICA', item.clinicaCsv);
           localStorage.setItem('CR_RETURN_TO', 'produccion.html');
           localStorage.setItem('CR_RETURN_IMPORTID', state.importId || '');
-        }catch(e){ /* ignore */ }
+        }catch(e){ }
         window.location.href = 'cirugias.html';
       });
 
@@ -977,31 +935,14 @@ function paintResolverModal(){
   }
 }
 
-function suggestClinicaId(){
-  const tail = (Date.now() % 1000).toString().padStart(3,'0');
-  return `C${tail}`;
-}
-
 /* =========================
-   Escape HTML
-========================= */
-function escapeHtml(s=''){
-  return (s ?? '').toString()
-    .replaceAll('&','&amp;')
-    .replaceAll('<','&lt;')
-    .replaceAll('>','&gt;')
-    .replaceAll('"','&quot;')
-    .replaceAll("'","&#039;");
-}
-
-/* =========================
-   Firestore: staging save
+   Staging save
 ========================= */
 async function saveStagingToFirestore(){
   const importId = state.importId;
   const refImport = doc(db, 'produccion_imports', importId);
 
-  const meta = {
+  await setDoc(refImport, {
     id: importId,
     mes: state.monthName,
     mesNum: state.monthNum,
@@ -1014,23 +955,19 @@ async function saveStagingToFirestore(){
     creadoPor: state.user?.email || '',
     actualizadoEl: serverTimestamp(),
     actualizadoPor: state.user?.email || ''
-  };
-
-  await setDoc(refImport, meta, { merge: true });
+  }, { merge:true });
 
   const itemsCol = collection(db, 'produccion_imports', importId, 'items');
+
   const chunkSize = 400;
   let idx = 0;
-
   while(idx < state.stagedItems.length){
     const batch = writeBatch(db);
     const slice = state.stagedItems.slice(idx, idx + chunkSize);
 
     slice.forEach((it, k)=>{
       const itemId = `ITEM_${pad(idx + k + 1, 4)}`;
-      const refItem = doc(itemsCol, itemId);
-
-      batch.set(refItem, {
+      batch.set(doc(itemsCol, itemId), {
         importId,
         itemId,
         idx: idx + k + 1,
@@ -1039,7 +976,7 @@ async function saveStagingToFirestore(){
         normalizado: it.normalizado,
         creadoEl: serverTimestamp(),
         creadoPor: state.user?.email || ''
-      }, { merge: true });
+      }, { merge:true });
     });
 
     await batch.commit();
@@ -1049,72 +986,83 @@ async function saveStagingToFirestore(){
 
 /* =========================
    Confirmar / Anular
-   ✅ NUEVO: Confirmar guarda en produccion/{YYYY-MM}/items/{...}
 ========================= */
 async function confirmarImportacion(){
-  if(state.status !== 'staged'){
-    toast('No hay importación en staging para confirmar.');
-    return;
-  }
+  if(state.status !== 'staged'){ toast('No hay staging para confirmar.'); return; }
 
   const totalPend = state.pending.clinicas.length + state.pending.cirugias.length + state.pending.amb.length;
-  if(totalPend > 0){
-    toast('Aún hay pendientes. Resuélvelos antes de confirmar.');
-    return;
-  }
+  if(totalPend > 0){ toast('Aún hay pendientes.'); return; }
 
   const importId = state.importId;
-  const refImport = doc(db, 'produccion_imports', importId);
-
   const itemsCol = collection(db, 'produccion_imports', importId, 'items');
   const itemsSnap = await getDocs(itemsCol);
-  if(itemsSnap.empty){
-    toast('No hay items en la importación.');
-    return;
-  }
+  if(itemsSnap.empty){ toast('No hay items en staging.'); return; }
 
-  const mid = monthId(state.year, state.monthNum);
-  const refMes = doc(db, 'produccion', mid);
-  const colMesItems = collection(db, 'produccion', mid, 'items');
+  const YYYY = String(state.year);
+  const MM = pad(state.monthNum,2);
 
-  // aseguramos doc mes (metadata)
-  await setDoc(refMes, {
-    id: mid,
+  // Asegura doc año y doc mes
+  await setDoc(doc(db, 'produccion', YYYY), {
     ano: state.year,
-    mes: state.monthName,
+    actualizadoEl: serverTimestamp(),
+    actualizadoPor: state.user?.email || ''
+  }, { merge:true });
+
+  await setDoc(doc(db, 'produccion', YYYY, 'meses', MM), {
+    ano: state.year,
     mesNum: state.monthNum,
+    mes: state.monthName,
+    monthId: monthId(state.year, state.monthNum),
     actualizadoEl: serverTimestamp(),
     actualizadoPor: state.user?.email || ''
   }, { merge:true });
 
   const docs = [];
-  itemsSnap.forEach(d => docs.push({ id: d.id, data: d.data() || {} }));
+  itemsSnap.forEach(d => docs.push(d.data() || {}));
 
-  const batchSize = 350;
+  const batchSize = 320;
   let i = 0;
 
   while(i < docs.length){
     const batch = writeBatch(db);
     const slice = docs.slice(i, i + batchSize);
 
-    slice.forEach(({id, data})=>{
+    for(const data of slice){
       const n = data.normalizado || {};
       const raw = data.raw || {};
 
       const resolved = resolveOneItem(n);
 
-      // ID del item en el mes: mezcla import + item para que sea único
-      const mesItemId = `${importId}_${id}`;
-      const refItem = doc(colMesItems, mesItemId);
+      const fechaISO = n.fechaISO || parseDateToISO(raw['Fecha'] || '');
+      const horaHM = n.horaHM || parseHora24(raw['Hora'] || '');
+      const rutKey = normalizeRutKey(n.rut || raw['RUT'] || '');
+
+      // Si no hay fecha/hora, igual no rompemos: generamos un id estable por item
+      const timeId = (fechaISO && horaHM) ? `${fechaISO}_${horaHM}` : `SIN_FECHA_${data.itemId || nowId()}`;
+
+      // Doc paciente: por RUT (como pediste). Si viniera sin RUT, lo mandamos a un bucket SINRUT
+      const pacienteId = rutKey || `SINRUT_${importId}_${data.itemId || nowId()}`;
+
+      const refPaciente = doc(db, 'produccion', YYYY, 'meses', MM, 'pacientes', pacienteId);
+      batch.set(refPaciente, {
+        rut: rutKey ? (n.rut || raw['RUT'] || null) : null,
+        nombrePaciente: n.nombrePaciente || raw['Nombre Paciente'] || null,
+        actualizadoEl: serverTimestamp(),
+        actualizadoPor: state.user?.email || ''
+      }, { merge:true });
+
+      const refItem = doc(db, 'produccion', YYYY, 'meses', MM, 'pacientes', pacienteId, 'items', timeId);
 
       batch.set(refItem, {
-        id: mesItemId,
+        // filtros / trazabilidad
         importId,
-        importItemId: id,
+        ano: state.year,
+        mesNum: state.monthNum,
+        monthId: monthId(state.year, state.monthNum),
 
         // claves
-        fecha: n.fecha ?? null,
-        hora: n.hora ?? null,
+        fechaISO: fechaISO || null,
+        horaHM: horaHM || null, // HHMM
         clinica: n.clinica ?? null,
         cirugia: n.cirugia ?? null,
         tipoPaciente: n.tipoPaciente ?? null,
@@ -1124,7 +1072,7 @@ async function confirmarImportacion(){
         cirugiaId: resolved.cirugiaId ?? null,
         ambulatorioId: resolved.ambulatorioId ?? null,
 
-        // valores numéricos
+        // valores
         valor: Number(n.valor || 0) || 0,
         derechosPabellon: Number(n.dp || 0) || 0,
         hmq: Number(n.hmq || 0) || 0,
@@ -1136,7 +1084,6 @@ async function confirmarImportacion(){
         pagado: n.pagado ?? null,
         fechaPago: n.fechaPago ?? null,
 
-        // profesionales
         profesionales: n.profesionales || {},
 
         // raw completo
@@ -1146,59 +1093,67 @@ async function confirmarImportacion(){
         creadoEl: serverTimestamp(),
         creadoPor: state.user?.email || ''
       }, { merge:true });
-    });
+    }
 
     await batch.commit();
     i += batchSize;
   }
 
-  await setDoc(refImport, {
+  await setDoc(doc(db, 'produccion_imports', importId), {
     estado: 'confirmada',
     confirmadoEl: serverTimestamp(),
     confirmadoPor: state.user?.email || '',
-    monthId: mid,
+    confirmadoEn: `produccion/${YYYY}/meses/${MM}/pacientes/{RUT}/items/{fecha_hora}`,
     actualizadoEl: serverTimestamp(),
     actualizadoPor: state.user?.email || ''
-  }, { merge: true });
+  }, { merge:true });
 
   state.status = 'confirmada';
-  setStatus(`✅ Importación confirmada: ${importId} → produccion/${mid}/items`);
+  setStatus(`✅ Confirmada: ${importId} → produccion/${YYYY}/meses/${MM}/pacientes/{RUT}/items`);
   setButtons();
   toast('Importación confirmada');
 }
 
 async function anularImportacion(){
-  if(!state.importId){
-    toast('No hay importación para anular.');
-    return;
-  }
+  if(!state.importId){ toast('No hay importación para anular.'); return; }
 
-  const ok = confirm(`¿Anular importación?\n\n${state.importId}\n\n(No se borra, solo se marca como anulada)`);
+  const ok = confirm(`¿Anular importación?\n\n${state.importId}\n\n(No se borra; se marca como anulada)`);
   if(!ok) return;
 
   const importId = state.importId;
-  const refImport = doc(db, 'produccion_imports', importId);
-
-  await setDoc(refImport, {
+  await setDoc(doc(db, 'produccion_imports', importId), {
     estado: 'anulada',
     anuladaEl: serverTimestamp(),
     anuladaPor: state.user?.email || '',
     actualizadoEl: serverTimestamp(),
     actualizadoPor: state.user?.email || ''
-  }, { merge: true });
+  }, { merge:true });
 
-  // ✅ Anular también en produccion/{YYYY-MM}/items donde importId == ...
-  // Asumimos que anulas el import actual (mismo mes seleccionado)
-  const mid = monthId(state.year, state.monthNum);
-  const colMesItems = collection(db, 'produccion', mid, 'items');
-
+  // ✅ Marcar items de producción asociados al importId (dispersos en subcolecciones items)
+  // Usamos collectionGroup('items') + filtros por importId + ano + mesNum (para acotar)
+  const cg = collectionGroup(db, 'items');
   let last = null;
   let total = 0;
 
   while(true){
     const qy = last
-      ? query(colMesItems, where('importId','==', importId), orderBy('__name__'), startAfter(last), limit(400))
-      : query(colMesItems, where('importId','==', importId), orderBy('__name__'), limit(400));
+      ? query(
+          cg,
+          where('importId','==', importId),
+          where('ano','==', state.year),
+          where('mesNum','==', state.monthNum),
+          orderBy('__name__'),
+          startAfter(last),
+          limit(300)
+        )
+      : query(
+          cg,
+          where('importId','==', importId),
+          where('ano','==', state.year),
+          where('mesNum','==', state.monthNum),
+          orderBy('__name__'),
+          limit(300)
+        );
 
     const snap = await getDocs(qy);
     if(snap.empty) break;
@@ -1212,67 +1167,53 @@ async function anularImportacion(){
       }, { merge:true });
       total++;
     });
-
     await batch.commit();
     last = snap.docs[snap.docs.length - 1];
   }
 
   state.status = 'anulada';
-  setStatus(`⛔ Importación anulada: ${importId} (${total} filas desactivadas en produccion/${mid}/items)`);
+  setStatus(`⛔ Importación anulada: ${importId} (${total} items marcados anulados en producción)`);
   setButtons();
   toast('Importación anulada');
 }
 
 /* =========================
-   Load CSV flow
+   Carga CSV (con filtro de filas basura)
 ========================= */
 async function handleLoadCSV(file){
-  if(!file){
-    toast('Selecciona un archivo CSV');
-    return;
-  }
+  if(!file){ toast('Selecciona un CSV'); return; }
 
   const mes = clean($('mes').value);
   const ano = Number($('ano').value || 0) || 0;
-
-  if(!ano || ano < 2020){
-    toast('Año inválido');
-    return;
-  }
+  if(!ano || ano < 2020){ toast('Año inválido'); return; }
 
   const text = await file.text();
   const rows = parseCSV(text);
-
-  if(rows.length < 2){
-    toast('CSV vacío o inválido');
-    return;
-  }
+  if(rows.length < 2){ toast('CSV vacío o inválido'); return; }
 
   const header = rows[0].map(h=> clean(h));
   const headerIdx = buildHeaderIndex(header);
 
   const missing = validateMinimum(headerIdx);
-  if(missing.length){
-    toast(`CSV no trae columnas mínimas: ${missing.join(', ')}`);
-    console.warn('Header detectado:', header);
-    return;
-  }
+  if(missing.length){ toast(`CSV sin columnas mínimas: ${missing.join(', ')}`); return; }
 
   const staged = [];
   for(let i=1;i<rows.length;i++){
     const row = rows[i];
+
     const raw = compactRaw(row, headerIdx);
     if(Object.keys(raw).length === 0) continue;
 
+    // ✅ FILTRO: si NO hay Nombre Paciente y NO hay RUT => línea basura (reuso del documento)
+    const nombre = clean(raw['Nombre Paciente'] || '');
+    const rut = clean(raw['RUT'] || '');
+    if(!nombre && !rut) continue;
+
     const normalizado = buildNormalizado(raw);
-
-    staged.push({ idx: i, raw, normalizado, resolved: null, _search: null });
+    staged.push({ idx:i, raw, normalizado, resolved:null, _search:null });
   }
 
-  if(!staged.length){
-    toast('No se encontraron filas válidas.');
-    return;
-  }
+  if(!staged.length){ toast('No se encontraron filas válidas (las vacías se descartaron).'); return; }
 
   const mm = pad(monthIndex(mes), 2);
   const importId = `PROD_${ano}_${mm}_${nowId()}`;
@@ -1285,14 +1226,13 @@ async function handleLoadCSV(file){
   state.filename = file.name;
   state.stagedItems = staged;
 
-  // reset buscador/página
   state.ui.page = 1;
   state.ui.query = '';
-  if($('q')) $('q').value = '';
+  $('q').value = '';
 
   $('importId').value = importId;
 
-  setStatus(`🟡 Staging listo: ${staged.length} filas (sin afectar liquidaciones)`);
+  setStatus(`🟡 Staging listo: ${staged.length} filas (líneas vacías descartadas)`);
   buildThead();
 
   await saveStagingToFirestore();
@@ -1302,24 +1242,20 @@ async function handleLoadCSV(file){
 }
 
 /* =========================
-   Refresh pipeline after changes
+   Refresh pipeline
 ========================= */
 async function refreshAfterMapping(){
   await loadMappings();
   await loadCatalogs();
-
   recomputePending();
-
   setStatus(
     state.status === 'staged'
       ? `🟡 Staging: ${state.stagedItems.length} filas · ImportID: ${state.importId}`
-      : (state.status === 'confirmada'
-          ? `✅ Confirmada: ${state.importId}`
-          : (state.status === 'anulada'
-              ? `⛔ Anulada: ${state.importId}`
-              : '—'
-            )
-        )
+      : state.status === 'confirmada'
+        ? `✅ Confirmada: ${state.importId}`
+        : state.status === 'anulada'
+          ? `⛔ Anulada: ${state.importId}`
+          : '—'
   );
 }
 
@@ -1336,11 +1272,8 @@ requireAuth({
     $('who').textContent = `Conectado: ${user.email}`;
     wireLogout();
 
-    // defaults
     $('mes').value = 'Octubre';
     buildThead();
-
-    setStatus('—');
 
     await loadMappings();
     await loadCatalogs();
@@ -1349,66 +1282,46 @@ requireAuth({
     setButtons();
     paintPreview();
 
-    // Eventos
     $('btnCargar').addEventListener('click', async ()=>{
-      const f = $('fileCSV').files?.[0];
       try{
-        await handleLoadCSV(f);
+        await handleLoadCSV($('fileCSV').files?.[0]);
       }catch(err){
         console.error(err);
         toast('Error cargando CSV (ver consola)');
       }
     });
 
-    $('btnResolver').addEventListener('click', ()=>{
-      openResolverModal();
-    });
+    $('btnResolver').addEventListener('click', openResolverModal);
 
     $('btnConfirmar').addEventListener('click', async ()=>{
-      try{
-        await confirmarImportacion();
-      }catch(err){
-        console.error(err);
-        toast('Error confirmando (ver consola)');
-      }
+      try{ await confirmarImportacion(); }
+      catch(err){ console.error(err); toast('Error confirmando (ver consola)'); }
     });
 
     $('btnAnular').addEventListener('click', async ()=>{
-      try{
-        await anularImportacion();
-      }catch(err){
-        console.error(err);
-        toast('Error anulando (ver consola)');
-      }
+      try{ await anularImportacion(); }
+      catch(err){ console.error(err); toast('Error anulando (ver consola)'); }
     });
 
-    // Buscador global
     $('q').addEventListener('input', ()=>{
       state.ui.query = $('q').value || '';
       state.ui.page = 1;
       paintPreview();
     });
 
-    // Pager prev/next
     $('btnPrev').addEventListener('click', ()=>{
-      if(state.ui.page > 1){
-        state.ui.page--;
-        paintPreview();
-      }
+      if(state.ui.page > 1){ state.ui.page--; paintPreview(); }
     });
 
     $('btnNext').addEventListener('click', ()=>{
       applyFilter();
       const pages = Math.max(1, Math.ceil(state.view.filtered.length / state.ui.pageSize));
-      if(state.ui.page < pages){
-        state.ui.page++;
-        paintPreview();
-      }
+      if(state.ui.page < pages){ state.ui.page++; paintPreview(); }
     });
 
-    // Modal resolver
     $('btnResolverClose').addEventListener('click', closeResolverModal);
     $('btnResolverCancelar').addEventListener('click', closeResolverModal);
+
     $('btnResolverRevisar').addEventListener('click', async ()=>{
       await refreshAfterMapping();
       toast('Pendientes recalculados');
