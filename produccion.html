@@ -6,11 +6,11 @@
   <title>Clínica Rennat — Producción</title>
   <link rel="icon" type="image/png" href="RennatLogo.png"/>
 
-  <!-- Tu CSS global (si ya existe) -->
+  <!-- Tu CSS global -->
   <link rel="stylesheet" href="estilos.css"/>
 
   <style>
-    /* Ajustes mínimos locales (no rompen tu estilo) */
+    /* Ajustes mínimos locales (coherente con tu estética) */
     .page { display:flex; min-height:100vh; background:var(--bg,#f4f6fb); }
     .content { flex:1; padding:22px; }
     .topbar { display:flex; align-items:flex-start; justify-content:space-between; gap:14px; margin-bottom:14px; }
@@ -35,15 +35,34 @@
     .btn:disabled { opacity:.55; cursor:not-allowed; }
 
     .tableWrap { margin-top:14px; overflow:auto; border-radius:12px; border:1px solid rgba(0,0,0,.08); }
-    table { width:100%; border-collapse:collapse; min-width:980px; background:#fff; }
+    table { width:100%; border-collapse:collapse; min-width:1120px; background:#fff; }
     th, td { padding:10px 10px; border-bottom:1px solid rgba(0,0,0,.06); vertical-align:top; font-size:12px; }
     th { text-align:left; font-size:11px; color:var(--muted,#6b7280); text-transform:uppercase; letter-spacing:.04em; background:#fafafa; position:sticky; top:0; z-index:1; }
     .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
     .muted { color:var(--muted,#6b7280); }
     .ok { color:#15803d; font-weight:900; }
     .warn { color:#b45309; font-weight:900; }
+    .bad { color:#b91c1c; font-weight:900; }
     .tiny { font-size:11px; }
     .divider { height:1px; background:rgba(0,0,0,.06); margin:12px 0; }
+
+    .pill { display:inline-flex; align-items:center; gap:6px; padding:4px 10px; border-radius:999px; border:1px solid rgba(0,0,0,.08); background:#fff; font-weight:800; font-size:12px; }
+    .pill.ok { background:#ecfdf5; border-color:#bbf7d0; color:#065f46; }
+    .pill.warn { background:#fffbeb; border-color:#fde68a; color:#92400e; }
+    .pill.bad { background:#fef2f2; border-color:#fecaca; color:#991b1b; }
+
+    /* Modal */
+    .modalBackdrop{ position:fixed; inset:0; display:none; place-items:center; background:rgba(15,23,42,.45); z-index:1000; padding:18px; }
+    .modalCard{ width:min(1040px,96vw); background:#fff; border-radius:16px; border:1px solid rgba(0,0,0,.08); box-shadow:0 18px 60px rgba(0,0,0,.25); overflow:hidden; }
+    .modalHead{ display:flex; justify-content:space-between; align-items:flex-start; gap:12px; padding:14px 14px; border-bottom:1px solid rgba(0,0,0,.08); }
+    .modalBody{ padding:14px; }
+    .modalFoot{ display:flex; align-items:center; gap:10px; padding:12px 14px; border-top:1px solid rgba(0,0,0,.08); background:#fafafa; }
+    .iconBtn{ width:38px; height:38px; border-radius:10px; border:1px solid rgba(0,0,0,.12); background:#fff; cursor:pointer; font-weight:900; }
+    .miniRow{ display:grid; grid-template-columns: 1.2fr 1fr auto; gap:10px; align-items:end; padding:10px; border:1px solid rgba(0,0,0,.08); border-radius:12px; }
+    .miniRow + .miniRow{ margin-top:10px; }
+    .sectionTitle{ font-weight:900; margin:0 0 8px 0; }
+    .help{ font-size:12px; color:var(--muted,#6b7280); margin-top:4px; }
+    .linkBtn{ border:0; background:none; padding:0; color:var(--bg-dark,#008477); font-weight:900; cursor:pointer; text-decoration:underline; }
   </style>
 </head>
 
@@ -61,6 +80,7 @@
         <div class="pillCount" id="countPill">0 filas</div>
       </div>
 
+      <!-- Importación -->
       <section class="card">
         <div class="grid3">
           <div class="field">
@@ -91,13 +111,26 @@
 
           <button class="btn primary" id="btnCargar">Cargar CSV</button>
 
+          <button class="btn soft" id="btnResolver" disabled>Resolver pendientes</button>
           <button class="btn soft" id="btnConfirmar" disabled>Confirmar importación</button>
           <button class="btn danger" id="btnAnular" disabled>Anular importación</button>
 
           <span class="muted tiny" id="statusInfo">—</span>
         </div>
+
+        <div class="divider"></div>
+
+        <!-- Estado de resolución -->
+        <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+          <span class="pill" id="pillPendientes">Pendientes: 0</span>
+          <span class="pill" id="pillClinicas">Clínicas: 0</span>
+          <span class="pill" id="pillCirugias">Cirugías: 0</span>
+          <span class="pill" id="pillAmb">Ambulatorios: 0</span>
+          <span class="muted tiny" id="hintResolver">Cargar CSV → resolver faltantes → confirmar.</span>
+        </div>
       </section>
 
+      <!-- Preview -->
       <section class="card" style="margin-top:14px;">
         <div class="muted tiny" style="margin-bottom:8px;">
           Vista previa (primeras filas). Esto es “staging”: no afecta liquidaciones hasta confirmar.
@@ -118,12 +151,70 @@
                 <th>HMQ</th>
                 <th>INS</th>
                 <th>Profesionales (resumen)</th>
+                <th>Estado</th>
               </tr>
             </thead>
             <tbody id="tbody"></tbody>
           </table>
         </div>
       </section>
+
+      <!-- MODAL Resolver -->
+      <div id="modalResolverBackdrop" class="modalBackdrop">
+        <div class="modalCard" role="dialog" aria-modal="true">
+          <div class="modalHead">
+            <div>
+              <div class="h1" style="margin:0;font-size:18px;">Resolver pendientes</div>
+              <div class="muted" style="font-size:12px;margin-top:2px;" id="resolverSub">
+                Asocia o crea lo faltante. Sin esto, Producción no se puede confirmar.
+              </div>
+            </div>
+            <button class="iconBtn" id="btnResolverClose" type="button" aria-label="Cerrar" title="Cerrar">✖️</button>
+          </div>
+
+          <div class="modalBody">
+            <div class="card" style="padding:12px;">
+              <div class="mini muted">Resumen</div>
+              <div id="resolverResumen" style="font-weight:900;margin-top:6px;"></div>
+              <div class="help" style="margin-top:8px;">
+                Cirugías faltantes: puedes asociar a una existente o ir a <b>Cirugías</b> para crearla (queda precargado el nombre).
+              </div>
+            </div>
+
+            <div style="height:12px;"></div>
+
+            <div class="grid2">
+              <section class="card" style="padding:12px;">
+                <div class="sectionTitle">Clínicas</div>
+                <div class="muted tiny" style="margin-bottom:8px;">Crea clínicas ahora (aunque el módulo aún no exista) o asocia a una existente.</div>
+                <div id="resolverClinicasList"></div>
+              </section>
+
+              <section class="card" style="padding:12px;">
+                <div class="sectionTitle">Ambulatorios</div>
+                <div class="muted tiny" style="margin-bottom:8px;">Misma lógica que clínicas. (Si tu CSV no trae columna, no bloquea.)</div>
+                <div id="resolverAmbList"></div>
+              </section>
+            </div>
+
+            <div style="height:12px;"></div>
+
+            <section class="card" style="padding:12px;">
+              <div class="sectionTitle">Cirugías</div>
+              <div class="muted tiny" style="margin-bottom:8px;">
+                Match por nombre exacto (normalizado). Si viene parecido, puedes asociar manualmente.
+              </div>
+              <div id="resolverCirugiasList"></div>
+            </section>
+          </div>
+
+          <div class="modalFoot">
+            <button class="btn" id="btnResolverCancelar" type="button">Cerrar</button>
+            <span style="flex:1"></span>
+            <button class="btn primary" id="btnResolverRevisar" type="button">Recalcular pendientes</button>
+          </div>
+        </div>
+      </div>
 
       <!-- layout -->
       <script type="module" src="layout.js"></script>
