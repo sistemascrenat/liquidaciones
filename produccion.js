@@ -1,11 +1,13 @@
-// produccion.js — COMPLETO (mejorado + cirugías con contexto Tipo Paciente + Clínica)
-// ✅ Importación CSV (staging + confirmar + anular)
-// ✅ Guarda TODAS las columnas del CSV en raw, pero NUNCA guarda strings vacíos
-// ✅ Incluye "Resolución" (Clínicas / Cirugías / Ambulatorios) con mappings persistentes
-// ✅ Confirmar queda bloqueado si hay pendientes
-// ✅ Confirmar escribe IDs resueltos: clinicaId / cirugiaId / ambulatorioId
-// ✅ Cirugías pendientes muestran CONTEXTO: Tipo Paciente + Clínica (sin romper mappings por nombre exacto)
-// ✅ Anular paginado (sin límite fijo)
+// produccion.js — COMPLETO (nuevo esquema final)
+// ✅ CSV import (staging + confirmar + anular)
+// ✅ Staging: produccion_imports/{importId} + items
+// ✅ Resolver pendientes (Clínicas / Cirugías) con mappings persistentes
+// ✅ Cirugías pendientes separadas por: Clínica + Tipo Paciente + Cirugía CSV (no mezcla clínicas)
+// ✅ Confirmar bloqueado si hay pendientes
+// ✅ Confirmar escribe en NUEVO esquema:
+//    produccion/{YYYY-MM}/items/{PACIENTE_ID}
+// ✅ Preview muestra MUCHAS columnas + modal detalle por fila
+// ✅ Modal con scroll interno OK
 
 import { db } from './firebase-init.js';
 import { requireAuth } from './auth.js';
@@ -14,16 +16,16 @@ import { loadSidebar } from './layout.js';
 
 import {
   collection, doc, setDoc, getDoc, getDocs, writeBatch,
-  serverTimestamp, query, where, limit, orderBy, startAfter
+  serverTimestamp, query, where, orderBy, limit, startAfter
 } from 'https://www.gstatic.com/firebasejs/11.7.3/firebase-firestore.js';
 
 /* =========================
-   DOM helpers
+   DOM
 ========================= */
 const $ = (id)=> document.getElementById(id);
 
 /* =========================
-   Columnas EXACTAS del CSV (como tú las listaste)
+   CSV columnas esperadas
 ========================= */
 const EXPECTED_COLS = [
   '#','Suspendida','Confirmado','Fecha','Hora','Clínica',
@@ -51,8 +53,6 @@ function normalizeKey(s){
     .trim();
 }
 
-// Firestore NO permite campos vacíos "" dentro de maps.
-// Regla: devolvemos undefined si está vacío.
 function nonEmptyOrUndef(v){
   const x = clean(v);
   return x === '' ? undefined : x;
@@ -62,7 +62,7 @@ function toBool(v){
   const x = normalizeKey(v);
   if(x === 'si' || x === 'sí' || x === 'true' || x === '1') return true;
   if(x === 'no' || x === 'false' || x === '0') return false;
-  return undefined;
+  return null;
 }
 
 function parseCLPNumber(v){
@@ -101,46 +101,49 @@ function monthIndex(name){
   return map[m] || 0;
 }
 
-/* =========================
-   Tipo Paciente (normalización)
-   - NO rompe nada: es solo un "helper" para contexto + futura tarifación.
-   - Se guarda como tipoPacienteKey en produccion al confirmar.
-========================= */
-function normalizePacienteKey(tipoPaciente, cirugiaName=''){
-  const t = normalizeKey(tipoPaciente);
-  const s = normalizeKey(cirugiaName);
-
-  // 1) por columna Tipo de Paciente
-  const byCol = (() => {
-    if(!t) return '';
-    if(t.includes('fonasa')) return 'fonasa';
-    if(t.includes('isapre')) return 'isapre';
-    if(t.includes('part')) return 'particular';
-    if(t.includes('priv')) return 'particular';
-    if(t.includes('particular')) return 'particular';
-    // si viene otra cosa, lo dejamos "t" (compacto)
-    return t;
-  })();
-
-  if(byCol) return byCol;
-
-  // 2) fallback por texto de cirugía (casos tipo "part bypass")
-  // (solo para CONTEXTO visual; NO alteramos el mapeo por nombre exacto)
-  if(s.startsWith('part ') || s.startsWith('particular ')) return 'particular';
-  if(s.startsWith('fona ') || s.startsWith('fonasa ')) return 'fonasa';
-  if(s.startsWith('isa ') || s.startsWith('isapre ')) return 'isapre';
-
-  return '';
+function monthKey(ano, mesNum){
+  return `${ano}-${pad(mesNum,2)}`; // YYYY-MM
 }
 
-function pacienteLabel(key){
-  const k = normalizeKey(key);
-  if(k === 'particular' || k === 'part') return 'Particular';
-  if(k === 'fonasa') return 'Fonasa';
-  if(k === 'isapre') return 'Isapre';
-  if(!k) return '—';
-  // capitaliza simple
-  return k.charAt(0).toUpperCase() + k.slice(1);
+function escapeHtml(s=''){
+  return (s ?? '').toString()
+    .replaceAll('&','&amp;')
+    .replaceAll('<','&lt;')
+    .replaceAll('>','&gt;')
+    .replaceAll('"','&quot;')
+    .replaceAll("'","&#039;");
+}
+
+/* Fecha CSV -> ISO (intenta dd-mm-aaaa o dd/mm/aaaa) */
+function parseFechaISO(fechaTxt){
+  const s = clean(fechaTxt);
+  const m = s.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+  if(!m) return null;
+  const dd = pad(m[1],2);
+  const mm = pad(m[2],2);
+  const yyyy = m[3];
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+/* Hora -> HH:MM (si viene "8:00 a.m." etc, intentamos) */
+function parseHoraHHMM(horaTxt){
+  const s0 = clean(horaTxt).toLowerCase();
+  if(!s0) return null;
+
+  // 08:00 / 8:00
+  const m1 = s0.match(/^(\d{1,2})\s*:\s*(\d{2})/);
+  if(!m1) return null;
+
+  let hh = Number(m1[1]);
+  const mm = Number(m1[2]);
+
+  const isPM = s0.includes('p.m') || s0.includes('pm');
+  const isAM = s0.includes('a.m') || s0.includes('am');
+
+  if(isPM && hh < 12) hh += 12;
+  if(isAM && hh === 12) hh = 0;
+
+  return `${pad(hh,2)}:${pad(mm,2)}`;
 }
 
 /* =========================
@@ -171,9 +174,7 @@ function parseCSV(text){
     }
 
     if(!inQuotes && ch === delim){
-      row.push(cur);
-      cur = '';
-      continue;
+      row.push(cur); cur = ''; continue;
     }
 
     if(!inQuotes && (ch === '\n' || ch === '\r')){
@@ -201,18 +202,16 @@ function parseCSV(text){
 /* =========================
    Firestore refs
 ========================= */
-const colImports = collection(db, 'produccion_imports');
-const colProduccion = collection(db, 'produccion');
-
-// Catálogos (mismos nombres que ya vienes usando)
 const colClinicas = collection(db, 'clinicas');
-const colProcedimientos = collection(db, 'procedimientos');
+const colProcedimientos = collection(db, 'procedimientos'); // cirugías: tipo="cirugia"
 const colAmbulatorios = collection(db, 'ambulatorios');
 
-// Mappings persistentes
 const docMapClinicas = doc(db, 'produccion_mappings', 'clinicas');
-const docMapCirugias  = doc(db, 'produccion_mappings', 'cirugias');
-const docMapAmb       = doc(db, 'produccion_mappings', 'ambulatorios');
+const docMapCirugias = doc(db, 'produccion_mappings', 'cirugias'); // map por key compuesta
+const docMapAmb      = doc(db, 'produccion_mappings', 'ambulatorios');
+
+/* staging */
+const colImports = collection(db, 'produccion_imports');
 
 /* =========================
    State
@@ -225,42 +224,40 @@ const state = {
   monthName: '',
   monthNum: 0,
   year: 0,
+  ym: '',          // YYYY-MM
   filename: '',
 
   stagedItems: [], // [{ idx, raw, normalizado, resolved }]
 
-  // catálogos cargados
   catalogs: {
-    clinicas: [],             // [{id, nombre}]
-    clinicasByNorm: new Map(),// norm(nombre)-> {id,nombre}
-    clinicasById: new Map(),  // id -> {id,nombre}
+    clinicas: [],
+    clinicasByNorm: new Map(),
+    clinicasById: new Map(),
 
-    cirugias: [],             // [{id, nombre, codigo}]
-    cirugiasByNorm: new Map(),// norm(nombre)-> {id,nombre,codigo}
+    cirugias: [],
+    cirugiasByNorm: new Map(),
     cirugiasById: new Map(),
 
-    amb: [],                  // [{id, nombre}]
+    amb: [],
     ambByNorm: new Map(),
     ambById: new Map()
   },
 
-  // mappings
   maps: {
-    clinicas: new Map(),   // normCsv -> {id}
-    cirugias: new Map(),   // normCsv -> {id}   (por NOMBRE EXACTO normalizado)
+    clinicas: new Map(), // normClinTxt -> {id}
+    cirugias: new Map(), // keyCompuesta -> {id}
     amb: new Map()
   },
 
-  // pendientes detectados (UI)
   pending: {
     clinicas: [], // [{csvName, norm}]
-    cirugias: [], // [{csvName, norm, suggestions, contexts:[{clinicaText, clinicaId, pacienteKey}] }]
-    amb: []       // [{csvName, norm}]
+    cirugias: [], // [{key, csvName, normCir, tipoPaciente, tipoPacienteNorm, clinTxt, clinNorm, clinicaId, suggestions}]
+    amb: []
   }
 };
 
 /* =========================
-   UI helpers
+   UI
 ========================= */
 function setStatus(text){ $('statusInfo').textContent = text || '—'; }
 
@@ -295,12 +292,39 @@ function setPills(){
 function setButtons(){
   const staged = state.status === 'staged';
   const confirmed = state.status === 'confirmada';
-
   const totalPend = state.pending.clinicas.length + state.pending.cirugias.length + state.pending.amb.length;
 
   $('btnResolver').disabled = !(staged && totalPend > 0);
   $('btnConfirmar').disabled = !(staged && totalPend === 0);
   $('btnAnular').disabled = !(staged || confirmed);
+}
+
+/* modal resolver */
+function openResolverModal(){
+  $('modalResolverBackdrop').classList.add('show');
+  paintResolverModal();
+}
+function closeResolverModal(){
+  $('modalResolverBackdrop').classList.remove('show');
+}
+
+/* modal detalle */
+function openDetalleModal(html, sub=''){
+  $('detalleSub').textContent = sub || '—';
+  $('detalleBody').innerHTML = html;
+  $('modalDetalleBackdrop').classList.add('show');
+}
+function closeDetalleModal(){
+  $('modalDetalleBackdrop').classList.remove('show');
+}
+
+/* =========================
+   Preview
+========================= */
+function boolMark(v){
+  if(v === true) return '<span class="ok">Sí</span>';
+  if(v === false) return '<span class="bad">No</span>';
+  return '<span class="muted">—</span>';
 }
 
 function paintPreview(){
@@ -310,74 +334,119 @@ function paintPreview(){
   const rows = state.stagedItems || [];
   $('countPill').textContent = `${rows.length} fila${rows.length===1?'':'s'}`;
 
-  const max = Math.min(rows.length, 60);
+  const max = Math.min(rows.length, 80);
 
   for(let i=0;i<max;i++){
     const it = rows[i];
     const n = it.normalizado || {};
     const r = it.resolved || {};
+    const raw = it.raw || {};
     const prof = n.profesionalesResumen || '';
 
     const flags = [];
     if(r.clinicaOk === false) flags.push('Clínica');
     if(r.cirugiaOk === false) flags.push('Cirugía');
-    if(r.ambOk === false) flags.push('Amb');
 
-    const st =
-      flags.length === 0
-        ? `<span class="ok">OK</span>`
-        : `<span class="warn">Pendiente: ${flags.join(', ')}</span>`;
-
-    const clinicaNice = (() => {
-      if(r.clinicaId){
-        const c = state.catalogs.clinicasById.get(r.clinicaId);
-        return c?.nombre ? `${escapeHtml(c.nombre)} <span class="muted tiny mono">(${escapeHtml(r.clinicaId)})</span>` : escapeHtml(r.clinicaId);
-      }
-      return escapeHtml(n.clinica || '—');
-    })();
-
-    const cirugiaNice = (() => {
-      if(r.cirugiaId){
-        const s = state.catalogs.cirugiasById.get(r.cirugiaId);
-        return s?.nombre ? `${escapeHtml(s.nombre)} <span class="muted tiny mono">(${escapeHtml(s.codigo || s.id)})</span>` : escapeHtml(r.cirugiaId);
-      }
-      return escapeHtml(n.cirugia || '—');
-    })();
-
-    const pacKey = n.tipoPacienteKey || '';
-    const pacNice = pacienteLabel(pacKey);
+    const st = (flags.length === 0)
+      ? `<span class="ok">OK</span>`
+      : `<span class="warn">Pendiente: ${flags.join(', ')}</span>`;
 
     const tr = document.createElement('tr');
+
+    const idxTxt = raw['#'] ?? pad(i+1,2);
+    const clinTxt = n.clinica || '—';
+    const cirTxt  = n.cirugia || '—';
+
     tr.innerHTML = `
-      <td class="mono">${pad(i+1,2)}</td>
+      <td class="mono">${escapeHtml(idxTxt)}</td>
+      <td>${boolMark(n.suspendida)}</td>
+      <td>${boolMark(n.confirmado)}</td>
       <td>${escapeHtml(n.fecha || '—')}</td>
       <td>${escapeHtml(n.hora || '—')}</td>
+
       <td>
-        <div><b>${clinicaNice}</b></div>
-        <div class="tiny muted">${r.clinicaId ? `ID: ${escapeHtml(r.clinicaId)}` : 'ID: —'}</div>
+        <div><b>${escapeHtml(clinTxt)}</b></div>
+        <div class="tiny muted">ID: ${escapeHtml(r.clinicaId || '—')}</div>
       </td>
+
       <td>
-        <div><b>${cirugiaNice}</b></div>
-        <div class="tiny muted">${r.cirugiaId ? `ID: ${escapeHtml(r.cirugiaId)}` : 'ID: —'}</div>
+        <div><b>${escapeHtml(cirTxt)}</b></div>
+        <div class="tiny muted">ID: ${escapeHtml(r.cirugiaId || '—')}</div>
+        <div class="tiny muted">Key: ${escapeHtml(r.cirugiaKey || '—')}</div>
       </td>
-      <td>
-        <div>${escapeHtml(n.tipoPaciente || '—')}</div>
-        <div class="tiny muted">Key: ${escapeHtml(pacKey || '—')} · ${escapeHtml(pacNice)}</div>
-      </td>
+
+      <td>${escapeHtml(n.tipoPaciente || '—')}</td>
+      <td>${escapeHtml(raw['Previsión'] || '—')}</td>
+      <td>${escapeHtml(raw['Nombre Paciente'] || '—')}</td>
+      <td class="mono">${escapeHtml(raw['RUT'] || '—')}</td>
+      <td>${escapeHtml(raw['Teléfono'] || '—')}</td>
+      <td>${escapeHtml(raw['Dirección'] || '—')}</td>
+      <td>${escapeHtml(raw['e-mail'] || '—')}</td>
+      <td>${escapeHtml(raw['Sexo'] || '—')}</td>
+      <td>${escapeHtml(raw['Fecha nac. (dd/mm/aaaa)'] || '—')}</td>
+      <td>${escapeHtml(raw['Edad'] || '—')}</td>
+
       <td><b>${clp(n.valor || 0)}</b></td>
       <td>${clp(n.dp || 0)}</td>
       <td>${clp(n.hmq || 0)}</td>
       <td>${clp(n.ins || 0)}</td>
+
+      <td>${boolMark(n.pagado)}</td>
+      <td>${escapeHtml(n.fechaPago || '—')}</td>
+
       <td class="tiny">${prof ? escapeHtml(prof) : '<span class="muted">—</span>'}</td>
       <td>${st}</td>
+      <td>
+        <button class="btn sm" data-ver="${i}">Ver</button>
+      </td>
     `;
+
     tb.appendChild(tr);
   }
+
+  // bind botones "Ver"
+  tb.querySelectorAll('[data-ver]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const i = Number(btn.getAttribute('data-ver'));
+      const it = state.stagedItems[i];
+      if(!it) return;
+
+      const raw = it.raw || {};
+      const n = it.normalizado || {};
+      const r = it.resolved || {};
+
+      const pairs = EXPECTED_COLS
+        .filter(k => raw[k] !== undefined)
+        .map(k => `
+          <div style="display:grid;grid-template-columns:220px 1fr;gap:10px;padding:8px;border-bottom:1px solid rgba(0,0,0,.06);">
+            <div class="muted tiny"><b>${escapeHtml(k)}</b></div>
+            <div>${escapeHtml(String(raw[k]))}</div>
+          </div>
+        `).join('');
+
+      const header = `
+        <div class="card" style="padding:12px;">
+          <div style="font-weight:900;">${escapeHtml(raw['Nombre Paciente'] || '(Sin nombre)')}</div>
+          <div class="muted tiny" style="margin-top:4px;">
+            ${escapeHtml(n.fecha || '—')} · ${escapeHtml(n.hora || '—')} · ${escapeHtml(n.clinica || '—')} · ${escapeHtml(n.tipoPaciente || '—')}
+          </div>
+          <div class="help" style="margin-top:8px;">
+            <b>IDs resueltos:</b> Clínica=${escapeHtml(r.clinicaId || '—')} · Cirugía=${escapeHtml(r.cirugiaId || '—')}
+          </div>
+        </div>
+        <div style="height:10px;"></div>
+      `;
+
+      openDetalleModal(header + `<div class="card" style="padding:0;">${pairs}</div>`,
+        `Fila ${raw['#'] || (i+1)} · ImportID ${state.importId || '—'}`
+      );
+    });
+  });
 
   if(rows.length > max){
     const tr = document.createElement('tr');
     tr.innerHTML = `
-      <td colspan="12" class="muted tiny">
+      <td colspan="26" class="muted tiny">
         Mostrando ${max} de ${rows.length}. (El resto igual quedó en staging)
       </td>
     `;
@@ -386,12 +455,11 @@ function paintPreview(){
 }
 
 /* =========================
-   Core: header mapping
+   Header index / raw / normalizado
 ========================= */
 function buildHeaderIndex(headerRow){
   const idx = new Map();
   const headerNorm = headerRow.map(h=> normalizeKey(h));
-
   for(const col of EXPECTED_COLS){
     const want = normalizeKey(col);
     const j = headerNorm.indexOf(want);
@@ -447,8 +515,6 @@ function buildNormalizado(raw){
   if(prof.ayudante2) parts.push(`Ay2: ${prof.ayudante2}`);
   if(prof.arsenalera) parts.push(`Ars: ${prof.arsenalera}`);
 
-  const tipoPacienteKey = normalizePacienteKey(tipoPaciente, cirugia);
-
   return {
     fecha: fecha || null,
     hora: hora || null,
@@ -456,17 +522,11 @@ function buildNormalizado(raw){
     cirugia: cirugia || null,
     tipoPaciente: tipoPaciente || null,
 
-    // nuevo (no rompe)
-    tipoPacienteKey: tipoPacienteKey || null,
+    valor, dp, hmq, ins,
 
-    valor,
-    dp,
-    hmq,
-    ins,
-
-    suspendida: suspendida ?? null,
-    confirmado: confirmado ?? null,
-    pagado: pagado ?? null,
+    suspendida,
+    confirmado,
+    pagado,
     fechaPago: fechaPago || null,
 
     profesionales: prof,
@@ -476,7 +536,8 @@ function buildNormalizado(raw){
 
 function validateMinimum(headerIdx){
   const needed = ['Fecha','Clínica','Cirugía','Tipo de Paciente','Valor'];
-  return needed.filter(k => headerIdx.get(k) === undefined);
+  const missing = needed.filter(k => headerIdx.get(k) === undefined);
+  return missing;
 }
 
 /* =========================
@@ -487,7 +548,7 @@ async function loadMappings(){
     const snap = await getDoc(docRef);
     if(!snap.exists()) return new Map();
     const data = snap.data() || {};
-    const m = data.map && typeof data.map === 'object' ? data.map : {};
+    const m = (data.map && typeof data.map === 'object') ? data.map : {};
     const out = new Map();
     for(const k of Object.keys(m)){
       const v = m[k] || {};
@@ -495,7 +556,6 @@ async function loadMappings(){
     }
     return out;
   }
-
   state.maps.clinicas = await loadOne(docMapClinicas);
   state.maps.cirugias  = await loadOne(docMapCirugias);
   state.maps.amb       = await loadOne(docMapAmb);
@@ -510,8 +570,7 @@ async function loadCatalogs(){
       const x = d.data() || {};
       const id = clean(x.id) || d.id;
       const nombre = clean(x.nombre) || id;
-      if(!id) return;
-      out.push({ id, nombre });
+      if(id) out.push({ id, nombre });
     });
     out.sort((a,b)=> normalizeKey(a.nombre).localeCompare(normalizeKey(b.nombre)));
     state.catalogs.clinicas = out;
@@ -519,7 +578,7 @@ async function loadCatalogs(){
     state.catalogs.clinicasById   = new Map(out.map(c=> [c.id, c]));
   }
 
-  // AMBULATORIOS (si no existe colección, quedará vacío)
+  // AMBULATORIOS (no bloquea hoy)
   {
     const snap = await getDocs(colAmbulatorios);
     const out = [];
@@ -527,8 +586,7 @@ async function loadCatalogs(){
       const x = d.data() || {};
       const id = clean(x.id) || d.id;
       const nombre = clean(x.nombre) || id;
-      if(!id) return;
-      out.push({ id, nombre });
+      if(id) out.push({ id, nombre });
     });
     out.sort((a,b)=> normalizeKey(a.nombre).localeCompare(normalizeKey(b.nombre)));
     state.catalogs.amb = out;
@@ -546,8 +604,7 @@ async function loadCatalogs(){
       const id = d.id;
       const nombre = clean(x.nombre) || '';
       const codigo = clean(x.codigo) || id;
-      if(!id || !nombre) return;
-      out.push({ id, nombre, codigo });
+      if(id && nombre) out.push({ id, nombre, codigo });
     });
     out.sort((a,b)=> normalizeKey(a.nombre).localeCompare(normalizeKey(b.nombre)));
     state.catalogs.cirugias = out;
@@ -557,8 +614,14 @@ async function loadCatalogs(){
 }
 
 /* =========================
-   Resolution engine
+   Resolution model (clínica + tipoPaciente + cirugía)
 ========================= */
+
+/* Key compuesta para cirugías: clinicaId|tipoPacienteNorm|cirugiaNorm */
+function cirugiaKey(clinicaId, tipoPacienteNorm, cirugiaNorm){
+  return `cl:${clinicaId || 'NA'}|tp:${tipoPacienteNorm || 'na'}|cx:${cirugiaNorm || 'na'}`;
+}
+
 function suggestCirugias(normName){
   const all = state.catalogs.cirugias || [];
   const out = [];
@@ -580,22 +643,22 @@ function resolveOneItem(normalizado){
 
     clinicaOk: true,
     cirugiaOk: true,
-    ambOk: true
+    ambOk: true,
+
+    cirugiaKey: null
   };
 
   // --- Clínica ---
   const clinTxt = clean(normalizado.clinica || '');
   if(clinTxt){
-    const norm = normalizeKey(clinTxt);
+    const clinNorm = normalizeKey(clinTxt);
 
-    // 1) mapping explícito
-    const mapped = state.maps.clinicas.get(norm);
+    const mapped = state.maps.clinicas.get(clinNorm);
     if(mapped?.id){
       resolved.clinicaId = mapped.id;
       resolved.clinicaOk = true;
     } else {
-      // 2) match por catálogo (nombre exacto normalizado)
-      const found = state.catalogs.clinicasByNorm.get(norm);
+      const found = state.catalogs.clinicasByNorm.get(clinNorm);
       if(found?.id){
         resolved.clinicaId = found.id;
         resolved.clinicaOk = true;
@@ -607,32 +670,46 @@ function resolveOneItem(normalizado){
     resolved.clinicaOk = false;
   }
 
-  // --- Cirugía (mapping por NOMBRE EXACTO normalizado, pero con CONTEXTO visual) ---
+  // --- Cirugía (depende del contexto) ---
   const cirTxt = clean(normalizado.cirugia || '');
-  if(cirTxt){
-    const norm = normalizeKey(cirTxt);
+  const tpTxt  = clean(normalizado.tipoPaciente || '');
+  const tpNorm = normalizeKey(tpTxt || '');
 
-    const mapped = state.maps.cirugias.get(norm);
-    if(mapped?.id){
-      resolved.cirugiaId = mapped.id;
-      resolved.cirugiaOk = true;
-    } else {
-      const found = state.catalogs.cirugiasByNorm.get(norm);
-      if(found?.id){
-        resolved.cirugiaId = found.id;
-        resolved.cirugiaOk = true;
-      } else {
-        resolved.cirugiaOk = false;
-      }
-    }
-  } else {
+  if(!cirTxt){
     resolved.cirugiaOk = false;
+    return resolved;
   }
 
-  // --- Ambulatorio (placeholder) ---
-  resolved.ambOk = true;
-  resolved.ambulatorioId = null;
+  const cirNorm = normalizeKey(cirTxt);
 
+  // si no hay clinicaId resuelta, no intentamos cirugia contextual
+  if(!resolved.clinicaId){
+    resolved.cirugiaOk = false;
+    resolved.cirugiaKey = cirugiaKey(null, tpNorm, cirNorm);
+    return resolved;
+  }
+
+  const key = cirugiaKey(resolved.clinicaId, tpNorm, cirNorm);
+  resolved.cirugiaKey = key;
+
+  // 1) mapping explícito por key compuesta
+  const mapped = state.maps.cirugias.get(key);
+  if(mapped?.id){
+    resolved.cirugiaId = mapped.id;
+    resolved.cirugiaOk = true;
+    return resolved;
+  }
+
+  // 2) fallback: match exacto por nombre (sin contexto)
+  const found = state.catalogs.cirugiasByNorm.get(cirNorm);
+  if(found?.id){
+    resolved.cirugiaId = found.id;
+    // ojo: esto puede ser OK, pero queda “sin mapping contextual”
+    resolved.cirugiaOk = true;
+    return resolved;
+  }
+
+  resolved.cirugiaOk = false;
   return resolved;
 }
 
@@ -646,16 +723,13 @@ function recomputePending(){
   }
 
   const seenClin = new Set();
-
-  // Cirugías: agrupamos por nombre exacto (norm), PERO agregamos contextos (tipo paciente + clínica)
-  const seenCir = new Map(); // norm -> {csvName,norm,suggestions,contextsMap}
-  // contextsMap key: `${clinicaId||clinicaText}||${pacienteKey||''}`
+  const seenCir  = new Set();
 
   for(const it of state.stagedItems){
     const n = it.normalizado || {};
     const r = it.resolved || {};
 
-    // Clínicas pendientes
+    // clínicas pendientes (por nombre)
     const clinTxt = clean(n.clinica || '');
     if(clinTxt && r.clinicaOk === false){
       const norm = normalizeKey(clinTxt);
@@ -665,58 +739,36 @@ function recomputePending(){
       }
     }
 
-    // Cirugías pendientes (con contexto)
+    // cirugías pendientes (por clave contextual)
     const cirTxt = clean(n.cirugia || '');
     if(cirTxt && r.cirugiaOk === false){
-      const norm = normalizeKey(cirTxt);
+      const clinTxt2 = clean(n.clinica || '');
+      const clinNorm = normalizeKey(clinTxt2 || '');
+      const tpTxt = clean(n.tipoPaciente || '');
+      const tpNorm = normalizeKey(tpTxt || '');
+      const cirNorm = normalizeKey(cirTxt || '');
 
-      let bucket = seenCir.get(norm);
-      if(!bucket){
-        bucket = {
+      const key = r.cirugiaKey || cirugiaKey(r.clinicaId || null, tpNorm, cirNorm);
+
+      if(!seenCir.has(key)){
+        seenCir.add(key);
+        state.pending.cirugias.push({
+          key,
           csvName: cirTxt,
-          norm,
-          suggestions: suggestCirugias(norm),
-          contextsMap: new Map()
-        };
-        seenCir.set(norm, bucket);
-      }
-
-      const clinicaId = r.clinicaId || '';
-      const clinicaText = clean(n.clinica || '') || '—';
-      const pacienteKey = clean(n.tipoPacienteKey || '') || clean(normalizePacienteKey(n.tipoPaciente, n.cirugia)) || '';
-
-      const ck = `${clinicaId || clinicaText}||${pacienteKey || ''}`;
-      if(!bucket.contextsMap.has(ck)){
-        bucket.contextsMap.set(ck, {
-          clinicaId: clinicaId || null,
-          clinicaText,
-          pacienteKey: pacienteKey || null
+          normCir: cirNorm,
+          tipoPaciente: tpTxt || '(Sin tipo)',
+          tipoPacienteNorm: tpNorm,
+          clinTxt: clinTxt2 || '(Sin clínica)',
+          clinNorm,
+          clinicaId: r.clinicaId || null,
+          suggestions: suggestCirugias(cirNorm)
         });
       }
     }
-
-    // ambulatorios: hoy no bloquea
   }
 
-  // Ordena
   state.pending.clinicas.sort((a,b)=> a.norm.localeCompare(b.norm));
-
-  // Construye array final de cirugías pendientes
-  const cirPend = [];
-  for(const bucket of seenCir.values()){
-    const contexts = Array.from(bucket.contextsMap.values())
-      .slice(0, 12); // límite visual razonable
-    cirPend.push({
-      csvName: bucket.csvName,
-      norm: bucket.norm,
-      suggestions: bucket.suggestions,
-      contexts
-    });
-  }
-  cirPend.sort((a,b)=> a.norm.localeCompare(b.norm));
-  state.pending.cirugias = cirPend;
-
-  state.pending.amb.sort((a,b)=> a.norm.localeCompare(b.norm));
+  state.pending.cirugias.sort((a,b)=> a.key.localeCompare(b.key));
 
   setPills();
   setButtons();
@@ -724,36 +776,30 @@ function recomputePending(){
 }
 
 /* =========================
-   Mappings: persist
+   Persist mappings
 ========================= */
-async function persistMapping(docRef, normKey, id){
-  if(!normKey || !id) return;
+async function persistMapping(docRef, key, id){
+  if(!key || !id) return;
 
   await setDoc(docRef, {
-    map: {
-      [normKey]: { id, actualizadoEl: serverTimestamp(), actualizadoPor: state.user?.email || '' }
-    },
+    map: { [key]: { id, actualizadoEl: serverTimestamp(), actualizadoPor: state.user?.email || '' } },
     actualizadoEl: serverTimestamp(),
     actualizadoPor: state.user?.email || ''
-  }, { merge: true });
+  }, { merge:true });
 
-  if(docRef === docMapClinicas) state.maps.clinicas.set(normKey, { id });
-  if(docRef === docMapCirugias)  state.maps.cirugias.set(normKey, { id });
-  if(docRef === docMapAmb)       state.maps.amb.set(normKey, { id });
+  if(docRef === docMapClinicas) state.maps.clinicas.set(key, { id });
+  if(docRef === docMapCirugias) state.maps.cirugias.set(key, { id });
+  if(docRef === docMapAmb) state.maps.amb.set(key, { id });
+}
+
+function suggestClinicaId(){
+  const tail = (Date.now() % 1000).toString().padStart(3,'0');
+  return `C${tail}`;
 }
 
 /* =========================
-   Modal Resolver
+   Resolver modal paint
 ========================= */
-function openResolverModal(){
-  $('modalResolverBackdrop').style.display = 'grid';
-  paintResolverModal();
-}
-
-function closeResolverModal(){
-  $('modalResolverBackdrop').style.display = 'none';
-}
-
 function paintResolverModal(){
   const pc = state.pending.clinicas.length;
   const ps = state.pending.cirugias.length;
@@ -765,7 +811,7 @@ function paintResolverModal(){
     Clínicas: <b>${pc}</b> · Cirugías: <b>${ps}</b> · Ambulatorios: <b>${pa}</b>
   `;
 
-  /* -------- CLINICAS -------- */
+  // CLINICAS
   const wrapC = $('resolverClinicasList');
   wrapC.innerHTML = '';
   if(pc === 0){
@@ -785,7 +831,7 @@ function paintResolverModal(){
           <div class="muted tiny mono">key: ${escapeHtml(item.norm)}</div>
         </div>
 
-        <div class="field" style="margin:0;">
+        <div>
           <label>Asociar a</label>
           <select data-assoc-clin="${escapeHtml(item.norm)}">
             <option value="">(Seleccionar clínica)</option>
@@ -793,9 +839,9 @@ function paintResolverModal(){
           </select>
         </div>
 
-        <div style="display:flex; gap:8px; justify-content:flex-end;">
-          <button class="btn soft" data-create-clin="${escapeHtml(item.norm)}" type="button">+ Crear</button>
-          <button class="btn primary" data-save-clin="${escapeHtml(item.norm)}" type="button">Guardar</button>
+        <div class="rowBtns">
+          <button class="btn soft sm" data-create-clin="${escapeHtml(item.norm)}" type="button">+ Crear</button>
+          <button class="btn primary sm" data-save-clin="${escapeHtml(item.norm)}" type="button">Guardar</button>
         </div>
       `;
 
@@ -812,7 +858,7 @@ function paintResolverModal(){
       row.querySelector(`[data-create-clin="${CSS.escape(item.norm)}"]`).addEventListener('click', async ()=>{
         const nombre = item.csvName;
         const suggested = suggestClinicaId();
-        const id = prompt('ID de clínica (ej: CLINICA_4 o C004). Puedes editar:', suggested) || '';
+        const id = prompt('ID de clínica (ej: C001). Puedes editar:', suggested) || '';
         const finalId = clean(id);
         if(!finalId){ toast('Cancelado'); return; }
 
@@ -836,11 +882,11 @@ function paintResolverModal(){
     }
   }
 
-  /* -------- AMBULATORIOS (placeholder) -------- */
-  const wrapA = $('resolverAmbList');
-  wrapA.innerHTML = `<div class="muted tiny">— (Tu CSV actual no trae ambulatorios. Cuando lo agregues, aquí aparecerán.)</div>`;
+  // AMBULATORIOS placeholder
+  $('resolverAmbList').innerHTML =
+    `<div class="muted tiny">— (Tu CSV actual no trae ambulatorios. Cuando lo agregues, aquí aparecerán.)</div>`;
 
-  /* -------- CIRUGIAS -------- */
+  // CIRUGIAS (por key contextual)
   const wrapS = $('resolverCirugiasList');
   wrapS.innerHTML = '';
   if(ps === 0){
@@ -855,79 +901,73 @@ function paintResolverModal(){
         .join('');
 
       const sug = (item.suggestions || [])
-        .map(x=> `<span class="pill warn" style="cursor:pointer;" data-sug-cir="${escapeHtml(item.norm)}" data-sug-id="${escapeHtml(x.id)}">${escapeHtml(x.nombre)}</span>`)
+        .map(x=> `<button class="pill" style="cursor:pointer;" data-sug-key="${escapeHtml(item.key)}" data-sug-id="${escapeHtml(x.id)}" type="button">${escapeHtml(x.nombre)}</button>`)
         .join(' ');
-
-      // Contextos: clínica + tipo paciente (esto era tu requerimiento)
-      const contexts = (item.contexts || []).map(ctx=>{
-        const clin = ctx.clinicaId
-          ? (state.catalogs.clinicasById.get(ctx.clinicaId)?.nombre || ctx.clinicaId)
-          : (ctx.clinicaText || '—');
-        const clinShow = ctx.clinicaId ? `${clin} (${ctx.clinicaId})` : clin;
-        const pacShow = pacienteLabel(ctx.pacienteKey || '');
-        return `<span class="pill" title="Contexto"><b>${escapeHtml(pacShow)}</b> · ${escapeHtml(clinShow)}</span>`;
-      }).join(' ');
 
       row.innerHTML = `
         <div>
           <div style="font-weight:900;">${escapeHtml(item.csvName)}</div>
-          <div class="muted tiny mono">key: ${escapeHtml(item.norm)}</div>
+          <div class="muted tiny mono">key: ${escapeHtml(item.key)}</div>
+
+          <div class="ctxPills">
+            <span class="ctxPill tp">Tipo: ${escapeHtml(item.tipoPaciente)}</span>
+            <span class="ctxPill cl">Clínica: ${escapeHtml(item.clinTxt)}${item.clinicaId ? ` (${escapeHtml(item.clinicaId)})` : ''}</span>
+            <span class="ctxPill cx">Cirugía CSV: ${escapeHtml(item.csvName)}</span>
+          </div>
 
           <div class="help" style="margin-top:8px;">
-            Contexto detectado (Tipo Paciente + Clínica):
+            Sugerencias rápidas:
+            <div style="margin-top:6px; display:flex; gap:8px; flex-wrap:wrap;">
+              ${sug || '<span class="muted tiny">Sin sugerencias.</span>'}
+            </div>
           </div>
-          <div style="margin-top:8px; display:flex; flex-wrap:wrap; gap:8px;">
-            ${contexts || `<span class="muted tiny">—</span>`}
-          </div>
-
-          ${sug ? `
-            <div class="help" style="margin-top:10px;">Sugerencias rápidas:</div>
-            <div style="margin-top:8px; display:flex; flex-wrap:wrap; gap:8px;">${sug}</div>
-          ` : `<div class="muted tiny" style="margin-top:10px;">Sin sugerencias.</div>`}
         </div>
 
-        <div class="field" style="margin:0;">
+        <div>
           <label>Asociar a</label>
-          <select data-assoc-cir="${escapeHtml(item.norm)}">
+          <select data-assoc-cir="${escapeHtml(item.key)}">
             <option value="">(Seleccionar cirugía)</option>
             ${options}
           </select>
           <div class="help">
-            o <button class="linkBtn" data-go-cir="${escapeHtml(item.norm)}" type="button">crear en Cirugías</button>
+            o <button class="linkBtn" data-go-cir="${escapeHtml(item.key)}" type="button">crear en Cirugías</button>
           </div>
         </div>
 
-        <div style="display:flex; gap:8px; justify-content:flex-end;">
-          <button class="btn primary" data-save-cir="${escapeHtml(item.norm)}" type="button">Guardar</button>
+        <div class="rowBtns">
+          <button class="btn primary sm" data-save-cir="${escapeHtml(item.key)}" type="button">Guardar</button>
         </div>
       `;
 
-      // click sugerencias => setea select
-      row.querySelectorAll('[data-sug-cir]').forEach(pill=>{
-        pill.addEventListener('click', ()=>{
-          const id = pill.getAttribute('data-sug-id') || '';
-          const sel = row.querySelector(`select[data-assoc-cir="${CSS.escape(item.norm)}"]`);
+      // sugerencias -> set select
+      row.querySelectorAll(`[data-sug-key="${CSS.escape(item.key)}"]`).forEach(btn=>{
+        btn.addEventListener('click', ()=>{
+          const id = btn.getAttribute('data-sug-id') || '';
+          const sel = row.querySelector(`select[data-assoc-cir="${CSS.escape(item.key)}"]`);
           sel.value = id;
         });
       });
 
-      // guardar asociación (por nombre exacto normalizado)
-      row.querySelector(`[data-save-cir="${CSS.escape(item.norm)}"]`).addEventListener('click', async ()=>{
-        const sel = row.querySelector(`select[data-assoc-cir="${CSS.escape(item.norm)}"]`);
+      // guardar mapping contextual
+      row.querySelector(`[data-save-cir="${CSS.escape(item.key)}"]`).addEventListener('click', async ()=>{
+        const sel = row.querySelector(`select[data-assoc-cir="${CSS.escape(item.key)}"]`);
         const id = sel.value || '';
         if(!id){ toast('Selecciona una cirugía'); return; }
-        await persistMapping(docMapCirugias, item.norm, id);
-        toast('Cirugía asociada');
+        await persistMapping(docMapCirugias, item.key, id);
+        toast('Cirugía asociada (contextual)');
         await refreshAfterMapping();
         paintResolverModal();
       });
 
       // ir a cirugías para crear (prefill)
-      row.querySelector(`[data-go-cir="${CSS.escape(item.norm)}"]`).addEventListener('click', ()=>{
+      row.querySelector(`[data-go-cir="${CSS.escape(item.key)}"]`).addEventListener('click', ()=>{
         try{
           localStorage.setItem('CR_PREFILL_CIRUGIA_NOMBRE', item.csvName);
           localStorage.setItem('CR_RETURN_TO', 'produccion.html');
           localStorage.setItem('CR_RETURN_IMPORTID', state.importId || '');
+          // guardamos también contexto por si quieres usarlo en cirugias.html luego
+          localStorage.setItem('CR_PREFILL_CTX_CLINICA', item.clinicaId || item.clinTxt || '');
+          localStorage.setItem('CR_PREFILL_CTX_TIPO', item.tipoPaciente || '');
         }catch(e){ /* ignore */ }
         window.location.href = 'cirugias.html';
       });
@@ -937,25 +977,8 @@ function paintResolverModal(){
   }
 }
 
-function suggestClinicaId(){
-  const tail = (Date.now() % 1000).toString().padStart(3,'0');
-  return `CLINICA_${tail}`;
-}
-
 /* =========================
-   Escape HTML
-========================= */
-function escapeHtml(s=''){
-  return (s ?? '').toString()
-    .replaceAll('&','&amp;')
-    .replaceAll('<','&lt;')
-    .replaceAll('>','&gt;')
-    .replaceAll('"','&quot;')
-    .replaceAll("'","&#039;");
-}
-
-/* =========================
-   Firestore: staging save
+   Staging save
 ========================= */
 async function saveStagingToFirestore(){
   const importId = state.importId;
@@ -963,6 +986,7 @@ async function saveStagingToFirestore(){
 
   const meta = {
     id: importId,
+    ym: state.ym,
     mes: state.monthName,
     mesNum: state.monthNum,
     ano: state.year,
@@ -975,7 +999,7 @@ async function saveStagingToFirestore(){
     actualizadoPor: state.user?.email || ''
   };
 
-  await setDoc(refImport, meta, { merge: true });
+  await setDoc(refImport, meta, { merge:true });
 
   const itemsCol = collection(db, 'produccion_imports', importId, 'items');
   const chunkSize = 400;
@@ -998,7 +1022,7 @@ async function saveStagingToFirestore(){
         normalizado: it.normalizado,
         creadoEl: serverTimestamp(),
         creadoPor: state.user?.email || ''
-      }, { merge: true });
+      }, { merge:true });
     });
 
     await batch.commit();
@@ -1024,22 +1048,24 @@ async function confirmarImportacion(){
   const importId = state.importId;
   const refImport = doc(db, 'produccion_imports', importId);
 
+  // leer items staging
   const itemsCol = collection(db, 'produccion_imports', importId, 'items');
   const itemsSnap = await getDocs(itemsCol);
-
   if(itemsSnap.empty){
     toast('No hay items en la importación.');
     return;
   }
 
-  const y = state.year;
-  const m = pad(state.monthNum, 2);
+  // nuevo esquema: produccion/{YYYY-MM}/items/{PACIENTE_ID}
+  const ym = state.ym;
+  const colMesItems = collection(db, 'produccion', ym, 'items');
 
-  const batchSize = 350;
   const docs = [];
   itemsSnap.forEach(d => docs.push({ id: d.id, data: d.data() || {} }));
 
+  const batchSize = 350;
   let i = 0;
+
   while(i < docs.length){
     const batch = writeBatch(db);
     const slice = docs.slice(i, i + batchSize);
@@ -1050,69 +1076,92 @@ async function confirmarImportacion(){
 
       const resolved = resolveOneItem(n);
 
-      const prodId = `PROD_${y}_${m}_${importId}_${id}`;
-      const refProd = doc(db, 'produccion', prodId);
+      // ID paciente (determinístico)
+      const pacienteId = `PAC_${ym}_${importId}_${id}`; // único
 
-      batch.set(refProd, {
-        id: prodId,
+      const fechaISO = parseFechaISO(n.fecha);
+      const horaHHMM = parseHoraHHMM(n.hora);
+      const fechaHoraISO = (fechaISO && horaHHMM) ? `${fechaISO}T${horaHHMM}:00` : null;
+
+      const refPaciente = doc(colMesItems, pacienteId);
+
+      batch.set(refPaciente, {
+        id: pacienteId,
+
+        ym,
         importId,
         importItemId: id,
-        mes: state.monthName,
-        mesNum: state.monthNum,
-        ano: state.year,
 
-        // human
+        // fecha/hora
         fecha: n.fecha ?? null,
         hora: n.hora ?? null,
+        fechaISO,
+        horaHHMM,
+        fechaHoraISO,
+
+        // textos
         clinica: n.clinica ?? null,
         cirugia: n.cirugia ?? null,
         tipoPaciente: n.tipoPaciente ?? null,
+        prevision: raw['Previsión'] ?? null,
 
-        // NUEVO (no rompe): key normalizada del tipo paciente
-        tipoPacienteKey: n.tipoPacienteKey ?? null,
+        nombrePaciente: raw['Nombre Paciente'] ?? null,
+        rut: raw['RUT'] ?? null,
+        telefono: raw['Teléfono'] ?? null,
+        direccion: raw['Dirección'] ?? null,
+        email: raw['e-mail'] ?? null,
+        sexo: raw['Sexo'] ?? null,
+        fechaNac: raw['Fecha nac. (dd/mm/aaaa)'] ?? null,
+        edad: raw['Edad'] ?? null,
 
         // IDs resueltos
         clinicaId: resolved.clinicaId ?? null,
         cirugiaId: resolved.cirugiaId ?? null,
-        ambulatorioId: resolved.ambulatorioId ?? null,
+        cirugiaKey: resolved.cirugiaKey ?? null,
+        ambulatorioId: null,
 
-        // números
+        // valores
         valor: Number(n.valor || 0) || 0,
         derechosPabellon: Number(n.dp || 0) || 0,
         hmq: Number(n.hmq || 0) || 0,
         insumos: Number(n.ins || 0) || 0,
 
         // flags
-        suspendida: n.suspendida ?? null,
-        confirmado: n.confirmado ?? null,
-        pagado: n.pagado ?? null,
+        suspendida: n.suspendida,
+        confirmado: n.confirmado,
+        pagado: n.pagado,
         fechaPago: n.fechaPago ?? null,
 
+        // profesionales
         profesionales: n.profesionales || {},
 
+        // raw completo compacto
         raw,
+
         estado: 'activa',
         creadoEl: serverTimestamp(),
         creadoPor: state.user?.email || ''
-      }, { merge: true });
+      }, { merge:true });
     });
 
     await batch.commit();
     i += batchSize;
   }
 
+  // marcar import como confirmada
   await setDoc(refImport, {
     estado: 'confirmada',
+    ym,
     confirmadoEl: serverTimestamp(),
     confirmadoPor: state.user?.email || '',
     actualizadoEl: serverTimestamp(),
     actualizadoPor: state.user?.email || ''
-  }, { merge: true });
+  }, { merge:true });
 
   state.status = 'confirmada';
-  setStatus(`✅ Importación confirmada: ${importId}`);
+  setStatus(`✅ Importación confirmada: ${importId} → produccion/${ym}/items`);
   setButtons();
-  toast('Importación confirmada');
+  toast('Importación confirmada (nuevo esquema)');
 }
 
 async function anularImportacion(){
@@ -1125,23 +1174,26 @@ async function anularImportacion(){
   if(!ok) return;
 
   const importId = state.importId;
-  const refImport = doc(db, 'produccion_imports', importId);
+  const ym = state.ym;
 
-  await setDoc(refImport, {
+  // cabecera import
+  await setDoc(doc(db,'produccion_imports', importId), {
     estado: 'anulada',
     anuladaEl: serverTimestamp(),
     anuladaPor: state.user?.email || '',
     actualizadoEl: serverTimestamp(),
     actualizadoPor: state.user?.email || ''
-  }, { merge: true });
+  }, { merge:true });
 
+  // desactivar pacientes en produccion/{ym}/items por importId (paginado)
+  const colMesItems = collection(db, 'produccion', ym, 'items');
   let last = null;
   let total = 0;
 
   while(true){
     const qy = last
-      ? query(colProduccion, where('importId','==', importId), orderBy('__name__'), startAfter(last), limit(400))
-      : query(colProduccion, where('importId','==', importId), orderBy('__name__'), limit(400));
+      ? query(colMesItems, where('importId','==', importId), orderBy('__name__'), startAfter(last), limit(350))
+      : query(colMesItems, where('importId','==', importId), orderBy('__name__'), limit(350));
 
     const snap = await getDocs(qy);
     if(snap.empty) break;
@@ -1161,35 +1213,45 @@ async function anularImportacion(){
   }
 
   state.status = 'anulada';
-  setStatus(`⛔ Importación anulada: ${importId} (${total} filas desactivadas)`);
+  setStatus(`⛔ Importación anulada: ${importId} (${total} pacientes desactivados en ${ym})`);
   setButtons();
   toast('Importación anulada');
+}
+
+/* =========================
+   Refresh pipeline
+========================= */
+async function refreshAfterMapping(){
+  await loadMappings();
+  await loadCatalogs();
+  recomputePending();
+
+  setStatus(state.status === 'staged'
+    ? `🟡 Staging: ${state.stagedItems.length} filas · ImportID: ${state.importId} · YM: ${state.ym}`
+    : (state.status === 'confirmada'
+      ? `✅ Confirmada: ${state.importId} → produccion/${state.ym}/items`
+      : (state.status === 'anulada'
+        ? `⛔ Anulada: ${state.importId}`
+        : '—'
+      )
+    )
+  );
 }
 
 /* =========================
    Load CSV flow
 ========================= */
 async function handleLoadCSV(file){
-  if(!file){
-    toast('Selecciona un archivo CSV');
-    return;
-  }
+  if(!file){ toast('Selecciona un archivo CSV'); return; }
 
   const mes = clean($('mes').value);
   const ano = Number($('ano').value || 0) || 0;
-
-  if(!ano || ano < 2020){
-    toast('Año inválido');
-    return;
-  }
+  if(!ano || ano < 2020){ toast('Año inválido'); return; }
 
   const text = await file.text();
   const rows = parseCSV(text);
 
-  if(rows.length < 2){
-    toast('CSV vacío o inválido');
-    return;
-  }
+  if(rows.length < 2){ toast('CSV vacío o inválido'); return; }
 
   const header = rows[0].map(h=> clean(h));
   const headerIdx = buildHeaderIndex(header);
@@ -1203,58 +1265,35 @@ async function handleLoadCSV(file){
 
   const staged = [];
   for(let i=1;i<rows.length;i++){
-    const row = rows[i];
-    const raw = compactRaw(row, headerIdx);
+    const raw = compactRaw(rows[i], headerIdx);
     if(Object.keys(raw).length === 0) continue;
 
     const normalizado = buildNormalizado(raw);
     staged.push({ idx: i, raw, normalizado, resolved: null });
   }
 
-  if(!staged.length){
-    toast('No se encontraron filas válidas.');
-    return;
-  }
+  if(!staged.length){ toast('No se encontraron filas válidas.'); return; }
 
-  const mm = pad(monthIndex(mes), 2);
-  const importId = `PROD_${ano}_${mm}_${nowId()}`;
+  const mesNum = monthIndex(mes);
+  const ym = monthKey(ano, mesNum);
+  const importId = `PROD_${ym}_${nowId()}`;
 
   state.importId = importId;
   state.status = 'staged';
   state.monthName = mes;
-  state.monthNum = monthIndex(mes);
+  state.monthNum = mesNum;
   state.year = ano;
+  state.ym = ym;
   state.filename = file.name;
   state.stagedItems = staged;
 
   $('importId').value = importId;
 
-  setStatus(`🟡 Staging listo: ${staged.length} filas (sin afectar liquidaciones)`);
-
+  setStatus(`🟡 Staging listo: ${staged.length} pacientes (YM ${ym})`);
   await saveStagingToFirestore();
   toast('Staging guardado en Firestore');
 
   await refreshAfterMapping();
-}
-
-/* =========================
-   Refresh pipeline
-========================= */
-async function refreshAfterMapping(){
-  await loadMappings();
-  await loadCatalogs();
-  recomputePending();
-
-  setStatus(state.status === 'staged'
-    ? `🟡 Staging: ${state.stagedItems.length} filas · ImportID: ${state.importId}`
-    : (state.status === 'confirmada'
-        ? `✅ Confirmada: ${state.importId}`
-        : (state.status === 'anulada'
-            ? `⛔ Anulada: ${state.importId}`
-            : '—'
-          )
-      )
-  );
 }
 
 /* =========================
@@ -1264,54 +1303,39 @@ requireAuth({
   onUser: async (user)=>{
     state.user = user;
 
-    await loadSidebar({ active: 'produccion' });
+    await loadSidebar({ active:'produccion' });
     setActiveNav('produccion');
 
     $('who').textContent = `Conectado: ${user.email}`;
     wireLogout();
 
     $('mes').value = 'Octubre';
-
     setStatus('—');
 
-    // carga inicial catálogos + mappings (por si entras sin cargar CSV)
+    // carga inicial
     await loadMappings();
     await loadCatalogs();
-
     recomputePending();
     setButtons();
     paintPreview();
 
+    // eventos
     $('btnCargar').addEventListener('click', async ()=>{
       const f = $('fileCSV').files?.[0];
-      try{
-        await handleLoadCSV(f);
-      }catch(err){
-        console.error(err);
-        toast('Error cargando CSV (ver consola)');
-      }
+      try{ await handleLoadCSV(f); }
+      catch(err){ console.error(err); toast('Error cargando CSV (ver consola)'); }
     });
 
-    $('btnResolver').addEventListener('click', ()=>{
-      openResolverModal();
-    });
+    $('btnResolver').addEventListener('click', openResolverModal);
 
     $('btnConfirmar').addEventListener('click', async ()=>{
-      try{
-        await confirmarImportacion();
-      }catch(err){
-        console.error(err);
-        toast('Error confirmando (ver consola)');
-      }
+      try{ await confirmarImportacion(); }
+      catch(err){ console.error(err); toast('Error confirmando (ver consola)'); }
     });
 
     $('btnAnular').addEventListener('click', async ()=>{
-      try{
-        await anularImportacion();
-      }catch(err){
-        console.error(err);
-        toast('Error anulando (ver consola)');
-      }
+      try{ await anularImportacion(); }
+      catch(err){ console.error(err); toast('Error anulando (ver consola)'); }
     });
 
     // modal resolver
@@ -1322,9 +1346,15 @@ requireAuth({
       toast('Pendientes recalculados');
       paintResolverModal();
     });
-
     $('modalResolverBackdrop').addEventListener('click', (e)=>{
       if(e.target === $('modalResolverBackdrop')) closeResolverModal();
+    });
+
+    // modal detalle
+    $('btnDetalleClose').addEventListener('click', closeDetalleModal);
+    $('btnDetalleCerrar').addEventListener('click', closeDetalleModal);
+    $('modalDetalleBackdrop').addEventListener('click', (e)=>{
+      if(e.target === $('modalDetalleBackdrop')) closeDetalleModal();
     });
   }
 });
