@@ -541,8 +541,8 @@ async function removeProc(id){
 ========================= */
 function tipoPacienteLabel(v){
   const x = (v || '').toLowerCase();
-  if(x === 'particular') return 'PARTICULAR';
-  if(x === 'isapre') return 'ISAPRE';
+  if(x === 'particular') return 'PARTICULAR / ISAPRE';
+  if(x === 'mle') return 'MLE';
   if(x === 'fonasa') return 'FONASA';
   return (v || '').toUpperCase();
 }
