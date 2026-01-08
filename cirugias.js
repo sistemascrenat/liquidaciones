@@ -35,7 +35,7 @@ const state = {
   activeTar: {
     procId: null,
     clinicaId: null,
-    tipoPaciente: 'particular',
+    tipoPaciente: 'particular_isapre',
     // data
     precio: 0,      // 👈 NUEVO: valor impuesto / venta
     hmqPorRol: {},  // {roleId: montoNumber}
@@ -540,12 +540,29 @@ async function removeProc(id){
    Tarifario modal (MAP embebido)
 ========================= */
 function tipoPacienteLabel(v){
-  const x = (v || '').toLowerCase();
-  if(x === 'particular') return 'PARTICULAR';
-  if(x === 'isapre') return 'ISAPRE';
+  const x = normalizeTipoPaciente(v);
+  if(x === 'particular_isapre') return 'PARTICULAR / ISAPRE';
+  if(x === 'mle') return 'MLE';
   if(x === 'fonasa') return 'FONASA';
-  return (v || '').toUpperCase();
+
+  // fallback por si llega legacy
+  if(x === 'particular') return 'PARTICULAR / ISAPRE';
+  if(x === 'isapre') return 'PARTICULAR / ISAPRE';
+
+  return (v || '').toString().toUpperCase();
 }
+
+
+const TIPOS_PACIENTE = [
+  { id: 'particular_isapre', label: 'PARTICULAR / ISAPRE' },
+  { id: 'mle',               label: 'MLE' },
+  { id: 'fonasa',            label: 'FONASA' },
+];
+
+function normalizeTipoPaciente(v=''){
+  return (v || '').toString().trim().toLowerCase();
+}
+
 
 function paintClinicasSelect(){
   const sel = $('tarClinica');
@@ -673,7 +690,13 @@ async function loadTarifarioIntoState(procId, clinicaId, tipoPaciente){
 
   if (snap.exists()){
     const p = snap.data() || {};
-    const nodo = p?.tarifas?.[clinicaId]?.pacientes?.[tipoPaciente] || null;
+    const pacientesNode = p?.tarifas?.[clinicaId]?.pacientes || {};
+    let nodo = pacientesNode?.[tipoPaciente] || null;
+    
+    if(!nodo && tipoPaciente === 'particular_isapre'){
+      nodo = pacientesNode?.['particular'] || pacientesNode?.['isapre'] || null;
+    }
+
 
     if (nodo){
       const honorarios = (nodo.honorarios && typeof nodo.honorarios === 'object') ? nodo.honorarios : {};
@@ -712,11 +735,11 @@ function openTarModal(proc){
   // defaults: primera clínica
   const firstClin = state.clinicasCatalog?.[0]?.id || '';
   $('tarClinica').value = firstClin;
-  $('tarPaciente').value = 'particular';
+  $('tarPaciente').value = 'particular_isapre';
 
   state.activeTar.procId = proc.id;
   state.activeTar.clinicaId = firstClin;
-  state.activeTar.tipoPaciente = 'particular';
+  state.activeTar.tipoPaciente = 'particular_isapre';
   state.activeTar.precio = 0; // 👈
   state.activeTar.hmqPorRol = {};
   state.activeTar.dp = 0;
@@ -753,7 +776,7 @@ function openTarModal(proc){
     await loadTarifarioIntoState(proc.id, state.activeTar.clinicaId, state.activeTar.tipoPaciente);
   };
   $('tarPaciente').onchange = async ()=>{
-    state.activeTar.tipoPaciente = $('tarPaciente').value || 'particular';
+    state.activeTar.tipoPaciente = $('tarPaciente').value || 'particular_isapre';
     await loadTarifarioIntoState(proc.id, state.activeTar.clinicaId, state.activeTar.tipoPaciente);
   };
 
