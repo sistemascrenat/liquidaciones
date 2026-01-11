@@ -332,7 +332,7 @@ function tarifaChips(p){
   }
 
   // mostramos hasta 3 chips y luego +N
-  const maxShow = 3;
+  const maxShow = 12;
   const shown = tarifas.slice(0, maxShow);
   const rest = tarifas.length - shown.length;
 
