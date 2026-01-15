@@ -37,10 +37,13 @@ const state = {
     clinicaId: null,
     tipoPaciente: 'particular_isapre',
     // data
-    precio: 0,      // 👈 NUEVO: valor impuesto / venta
-    hmqPorRol: {},  // {roleId: montoNumber}
+    precio: 0,
+    hmqPorRol: {},
     dp: 0,
-    ins: 0
+    ins: 0,
+  
+    // 👇 NUEVO: “estos son los roles que existen en ESTA cirugía”
+    rolesPermitidos: []
   }
 
 };
@@ -169,13 +172,18 @@ function normalizeProcDoc(id, x){
   };
 }
 
-function sumHmq(hmqPorRol){
+function sumHmq(hmqPorRol, rolesPermitidos=[]){
+  const allowed = new Set((rolesPermitidos || []).filter(Boolean));
+
   let s = 0;
   for(const k of Object.keys(hmqPorRol || {})){
+    // ✅ solo suma roles que existen en la UI (roles de la cirugía)
+    if(allowed.size && !allowed.has(k)) continue;
     s += Number(hmqPorRol[k] || 0) || 0;
   }
   return s;
 }
+
 
 async function loadAll(){
   // Solo cirugías: tipo == 'cirugia'
@@ -611,7 +619,7 @@ function paintTarRolesList(proc){
 }
 
 function computeTarTotals(){
-  const hmq = sumHmq(state.activeTar.hmqPorRol);
+  const hmq = sumHmq(state.activeTar.hmqPorRol, state.activeTar.rolesPermitidos);
   const dp = Number(state.activeTar.dp || 0) || 0;
   const ins = Number(state.activeTar.ins || 0) || 0;
   const costo = hmq + dp + ins;
@@ -699,7 +707,17 @@ async function loadTarifarioIntoState(procId, clinicaId, tipoPaciente){
 
 
     if (nodo){
-      const honorarios = (nodo.honorarios && typeof nodo.honorarios === 'object') ? nodo.honorarios : {};
+      const honorariosRaw = (nodo.honorarios && typeof nodo.honorarios === 'object') ? nodo.honorarios : {};
+      const allowed = new Set((state.activeTar.rolesPermitidos || []).filter(Boolean));
+      
+      // ✅ nos quedamos SOLO con honorarios de roles visibles en la UI
+      const honorarios = {};
+      for(const k of Object.keys(honorariosRaw)){
+        if(allowed.size && !allowed.has(k)) continue;
+        const n = Number(honorariosRaw[k] || 0) || 0;
+        if(n > 0) honorarios[k] = n;
+      }
+      
       state.activeTar.hmqPorRol = { ...honorarios };
       state.activeTar.precio = Number(nodo.precio ?? 0) || 0; // 👈 NUEVO
       state.activeTar.dp = Number(nodo.derechosPabellon ?? 0) || 0;
@@ -740,11 +758,14 @@ function openTarModal(proc){
   state.activeTar.procId = proc.id;
   state.activeTar.clinicaId = firstClin;
   state.activeTar.tipoPaciente = 'particular_isapre';
-  state.activeTar.precio = 0; // 👈
+  state.activeTar.precio = 0;
   state.activeTar.hmqPorRol = {};
   state.activeTar.dp = 0;
   state.activeTar.ins = 0;
-
+  
+  // 👇 NUEVO: roles “válidos” para esta cirugía
+  state.activeTar.rolesPermitidos = (proc.rolesIds || []).filter(Boolean);
+    
 
   // wire money inputs roles
   $('tarRolesList').querySelectorAll('input[data-role-money]').forEach(inp=>{
