@@ -18,7 +18,8 @@ import {
   collection, getDocs, setDoc, deleteDoc,
   doc, getDoc, serverTimestamp,
   query, where,
-  updateDoc, arrayUnion
+  updateDoc, arrayUnion,
+  deleteField
 } from 'https://www.gstatic.com/firebasejs/11.7.3/firebase-firestore.js';
 
 /* =========================
@@ -214,30 +215,44 @@ async function loadAll(){
         const clinNode = tarifasMap[clinicaId] || {};
         const pacientes = (clinNode.pacientes && typeof clinNode.pacientes === 'object') ? clinNode.pacientes : {};
 
-        for (const tipoPaciente of Object.keys(pacientes)) {
+        // ✅ Regla de lectura canónica:
+        // - Si existe "particular_isapre", ignoramos "particular" e "isapre"
+        // - Si no existe, usamos lo que haya (legacy) para no “perder” info en pantalla
+        const keys = Object.keys(pacientes || {});
+        const hasPI = keys.includes('particular_isapre');
+        
+        // construimos lista final de tipos a renderizar
+        const tiposFinales = keys.filter(k=>{
+          const kk = (k || '').toLowerCase();
+          if(hasPI && (kk === 'particular' || kk === 'isapre')) return false; // ignora legacy
+          return true;
+        });
+        
+        for (const tipoPaciente of tiposFinales) {
           const nodo = pacientes[tipoPaciente] || {};
           const honorarios = (nodo.honorarios && typeof nodo.honorarios === 'object') ? nodo.honorarios : {};
-          const precio = Number(nodo.precio ?? 0) || 0; // 👈 NUEVO
+          const precio = Number(nodo.precio ?? 0) || 0;
           const dp = Number(nodo.derechosPabellon ?? 0) || 0;
           const ins = Number(nodo.insumos ?? 0) || 0;
-          
+        
           const hmq = sumHmq(honorarios);
-          const costo = hmq + dp + ins;            // 👈 costo real
-          const utilidad = (precio || 0) - costo;  // 👈 utilidad
+          const costo = hmq + dp + ins;
+          const utilidad = (precio || 0) - costo;
           const hasAny = (precio > 0) || (hmq > 0) || (dp > 0) || (ins > 0);
-          
+        
           arr.push({
             id: `${clinicaId}_${(tipoPaciente||'').toLowerCase()}`,
             clinicaId,
             clinicaNombre: state.clinicasMap.get(clinicaId) || clinicaId || '(Sin clínica)',
             tipoPaciente: (tipoPaciente || '').toLowerCase(),
             honorarios,
-            precio, // 👈
+            precio,
             hmq, dp, ins,
-            costo, utilidad, // 👈
+            costo, utilidad,
             hasAny
           });
         }
+
       }
     }
 
@@ -836,20 +851,33 @@ async function saveTarifario(){
 
   const procRef = doc(db, 'procedimientos', procId);
 
-  // escribir SOLO la rama, sin pisar el resto del doc
-  await updateDoc(procRef, {
+  // ✅ Canonicalización: si el usuario está en "particular_isapre", borramos legacy (particular/isapre)
+  const isPI = (tipoPaciente === 'particular_isapre');
+  
+  const payload = {
+    // ✅ 1) Guardamos SIEMPRE en la rama canónica seleccionada en el modal
     [`tarifas.${clinicaId}.pacientes.${tipoPaciente}`]: {
-      precio, // 👈 NUEVO
+      precio,
       honorarios,
       derechosPabellon: dp,
       insumos: ins,
       actualizadoEl: serverTimestamp(),
       actualizadoPor: state.user?.email || ''
     },
+  
+    // ✅ 2) “Neutralizar” legacy: si existe particular/isapre antiguos, los borramos
+    ...(isPI ? {
+      [`tarifas.${clinicaId}.pacientes.particular`]: deleteField(),
+      [`tarifas.${clinicaId}.pacientes.isapre`]: deleteField(),
+    } : {}),
+  
     clinicasIds: arrayUnion(clinicaId),
     actualizadoEl: serverTimestamp(),
     actualizadoPor: state.user?.email || ''
-  });
+  };
+  
+  await updateDoc(procRef, payload);
+
 
   toast('Tarifario guardado');
   closeTarModal();
