@@ -230,45 +230,46 @@ async function loadAll(){
         
         for (const tipoPaciente of tiposFinales) {
           const nodo = pacientes[tipoPaciente] || {};
-          const honorarios = (nodo.honorarios && typeof nodo.honorarios === 'object') ? nodo.honorarios : {};
-          // honorarios crudos desde Firestore
-          const honorariosRaw = (nodo.honorarios && typeof nodo.honorarios === 'object') ? nodo.honorarios : {};
-          
-          // ✅ “roles válidos” = roles definidos en la cirugía (lo que se ve en el modal)
+        
+          // ✅ honorarios crudos desde Firestore (pueden traer keys basura)
+          const honorariosRaw =
+            (nodo.honorarios && typeof nodo.honorarios === 'object') ? nodo.honorarios : {};
+        
+          // ✅ roles válidos = roles definidos en la cirugía (lo mismo que usa el modal)
           const rolesPermitidos = (p.rolesIds || []).filter(Boolean);
-          
-          // ✅ opcional (recomendado): normalizamos honorarios en memoria para que “honorarios” NO contenga basura
+        
+          // ✅ honorarios LIMPIOS (solo roles permitidos y >0)
           const honorarios = {};
           for (const k of Object.keys(honorariosRaw || {})) {
             if (rolesPermitidos.length && !rolesPermitidos.includes(k)) continue;
             const n = Number(honorariosRaw[k] || 0) || 0;
             if (n > 0) honorarios[k] = n;
           }
-          
+        
           const precio = Number(nodo.precio ?? 0) || 0;
           const dp = Number(nodo.derechosPabellon ?? 0) || 0;
           const ins = Number(nodo.insumos ?? 0) || 0;
-          
+        
           // ✅ CLAVE: HMQ suma SOLO roles permitidos (igual que el modal)
           const hmq = sumHmq(honorarios, rolesPermitidos);
-          
+        
           const costo = hmq + dp + ins;
           const utilidad = (precio || 0) - costo;
           const hasAny = (precio > 0) || (hmq > 0) || (dp > 0) || (ins > 0);
-          
+        
           arr.push({
             id: `${clinicaId}_${(tipoPaciente||'').toLowerCase()}`,
             clinicaId,
             clinicaNombre: state.clinicasMap.get(clinicaId) || clinicaId || '(Sin clínica)',
             tipoPaciente: (tipoPaciente || '').toLowerCase(),
-            honorarios, // 👈 ahora ya viene limpio (sin keys extra)
+            honorarios,
             precio,
             hmq, dp, ins,
             costo, utilidad,
             hasAny
           });
-
         }
+
 
       }
     }
