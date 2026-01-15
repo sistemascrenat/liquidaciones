@@ -396,6 +396,19 @@ function isTarifaQuery(rawQuery=''){
   return false;
 }
 
+// =========================
+// Extrae SOLO los bloques (coma=AND) que sean "de tarifas"
+// Ej: "manga,particular" => "particular"
+// Ej: "huinganal,particular-fonasa" => "huinganal,particular-fonasa"
+// =========================
+function extractTarifaQuery(rawQuery=''){
+  const blocks = splitAnd(rawQuery); // ya normalizados
+  if(!blocks.length) return '';
+
+  // reutilizamos isTarifaQuery pero por bloque
+  const tarifaBlocks = blocks.filter(b=> isTarifaQuery(b));
+  return tarifaBlocks.join(','); // mantiene AND entre blocks de tarifa
+}
 
 
 /* =========================
@@ -426,13 +439,14 @@ function tarifaChips(p, rawQuery=''){
   }
 
   const q = (rawQuery || '').toString().trim();
-
-  // ✅ SOLO filtramos chips si el query parece "de tarifas"
-  const filtrarChips = q && isTarifaQuery(q);
-
-  const tarifas = filtrarChips ? base.filter(t=> tarifaMatches(t, q)) : base;
-
-  // Si el query es de tarifas y no calza nada, ocultamos (—)
+  
+  // ✅ Sub-query SOLO de tarifas (si no hay, no filtramos chips)
+  const qTar = extractTarifaQuery(q);
+  const filtrarChips = !!qTar;
+  
+  // ✅ Filtramos chips SOLO con la parte de tarifas
+  const tarifas = filtrarChips ? base.filter(t=> tarifaMatches(t, qTar)) : base;
+  
   if(filtrarChips && !tarifas.length){
     return `<span class="muted">—</span>`;
   }
