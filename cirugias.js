@@ -345,6 +345,33 @@ function rowMatches(p, rawQuery){
   });
 }
 
+// =========================
+// Match a nivel TARIFA (chip)
+// Respeta coma=AND y guión=OR igual que rowMatches()
+// =========================
+function tarifaMatches(t, rawQuery){
+  const andTerms = splitAnd(rawQuery);
+  if(!andTerms.length) return true;
+
+  const clin = t?.clinicaNombre || t?.clinicaId || '';
+  const pac = (t?.tipoPaciente || '');
+  const hay = normalize([
+    clin,
+    t?.clinicaId || '',
+    pac,
+    tipoPacienteLabel(pac), // ayuda: "particular_isapre" calza con "particular"
+    String(t?.precio || ''),
+    String(t?.utilidad || '')
+  ].join(' '));
+
+  return andTerms.every(block=>{
+    const ors = splitOr(block);
+    if(!ors.length) return true;
+    return ors.some(x=> hay.includes(x));
+  });
+}
+
+
 /* =========================
    UI helpers
 ========================= */
@@ -365,26 +392,37 @@ function rolesBlock(p){
   `;
 }
 
-function tarifaChips(p){
-  const tarifas = (p.tarifas || []).filter(t=>t.hasAny);
+function tarifaChips(p, rawQuery=''){
+  // 1) tarifas con data
+  const base = (p.tarifas || []).filter(t=>t.hasAny);
 
-  if(!tarifas.length){
+  if(!base.length){
     return `<span class="pill">TARIFA: PENDIENTE</span>`;
   }
 
-  // mostramos hasta 3 chips y luego +N
+  // 2) si hay búsqueda, filtramos chips también
+  const q = (rawQuery || '').toString();
+  const tarifas = q.trim() ? base.filter(t=> tarifaMatches(t, q)) : base;
+
+  // Si la cirugía pasó rowMatches pero ninguna tarifa calza, ocultamos toda la columna
+  // (opcional) mostramos un pill tenue para que se entienda
+  if(q.trim() && !tarifas.length){
+    return `<span class="muted">—</span>`;
+  }
+
+  // 3) render igual que antes
   const maxShow = 12;
   const shown = tarifas.slice(0, maxShow);
   const rest = tarifas.length - shown.length;
 
   const chips = shown.map(t=>{
     const clin = t.clinicaNombre || t.clinicaId || 'CLÍNICA';
-    const pac = (t.tipoPaciente || '').toUpperCase();
-  
+    // usamos label para que se vea "PARTICULAR / ISAPRE"
+    const pac = tipoPacienteLabel(t.tipoPaciente).toUpperCase();
+
     const precio = Number(t.precio || 0) || 0;
     const utilidad = Number(t.utilidad || 0) || 0;
-  
-    // Si no hay precio, lo tratamos como pendiente (aunque existan costos)
+
     if(precio <= 0){
       return `
         <span class="pill" title="${escapeHtml(clin)} · ${escapeHtml(pac)}">
@@ -392,9 +430,9 @@ function tarifaChips(p){
         </span>
       `;
     }
-  
+
     const utilTxt = `Utilidad: ${clp(utilidad)}`;
-  
+
     return `
       <span class="pill" title="${escapeHtml(clin)} · ${escapeHtml(pac)} · ${escapeHtml(utilTxt)}">
         ${escapeHtml(clin)} · ${escapeHtml(pac)} · <b>${clp(precio)}</b>
@@ -403,9 +441,7 @@ function tarifaChips(p){
     `;
   }).join(' ');
 
-
   const more = rest > 0 ? ` <span class="pill">+${rest}</span>` : '';
-
   return `<div style="display:flex; flex-wrap:wrap; gap:8px;">${chips}${more}</div>`;
 }
 
@@ -438,7 +474,7 @@ function paint(){
 
       <td>${rolesBlock(p)}</td>
 
-      <td>${tarifaChips(p)}</td>
+      <td>${tarifaChips(p, state.q)}</td>
 
       <td>${estadoBadge(p)}</td>
 
