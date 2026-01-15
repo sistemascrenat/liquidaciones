@@ -371,6 +371,32 @@ function tarifaMatches(t, rawQuery){
   });
 }
 
+// =========================
+// Detecta si el query apunta a TARIFAS (chips)
+// - tipos de paciente ("particular", "isapre", "fonasa", "mle")
+// - nombres/ids de clínicas
+// - palabras típicas de tarifa ("precio", "utilidad", "costo", "$")
+// =========================
+function isTarifaQuery(rawQuery=''){
+  const q = normalize(rawQuery);
+  if(!q) return false;
+
+  // Palabras clave típicas de tarifas
+  const hints = ['particular', 'isapre', 'fonasa', 'mle', 'precio', 'utilidad', 'costo', '$'];
+  if(hints.some(h=> q.includes(h))) return true;
+
+  // ¿Menciona alguna clínica por nombre o id?
+  for(const c of (state.clinicasCatalog || [])){
+    const cn = normalize(c.nombre);
+    const cid = normalize(c.id);
+    if(cn && q.includes(cn)) return true;
+    if(cid && q.includes(cid)) return true;
+  }
+
+  return false;
+}
+
+
 
 /* =========================
    UI helpers
@@ -393,31 +419,30 @@ function rolesBlock(p){
 }
 
 function tarifaChips(p, rawQuery=''){
-  // 1) tarifas con data
   const base = (p.tarifas || []).filter(t=>t.hasAny);
 
   if(!base.length){
     return `<span class="pill">TARIFA: PENDIENTE</span>`;
   }
 
-  // 2) si hay búsqueda, filtramos chips también
-  const q = (rawQuery || '').toString();
-  const tarifas = q.trim() ? base.filter(t=> tarifaMatches(t, q)) : base;
+  const q = (rawQuery || '').toString().trim();
 
-  // Si la cirugía pasó rowMatches pero ninguna tarifa calza, ocultamos toda la columna
-  // (opcional) mostramos un pill tenue para que se entienda
-  if(q.trim() && !tarifas.length){
+  // ✅ SOLO filtramos chips si el query parece "de tarifas"
+  const filtrarChips = q && isTarifaQuery(q);
+
+  const tarifas = filtrarChips ? base.filter(t=> tarifaMatches(t, q)) : base;
+
+  // Si el query es de tarifas y no calza nada, ocultamos (—)
+  if(filtrarChips && !tarifas.length){
     return `<span class="muted">—</span>`;
   }
 
-  // 3) render igual que antes
   const maxShow = 12;
   const shown = tarifas.slice(0, maxShow);
   const rest = tarifas.length - shown.length;
 
   const chips = shown.map(t=>{
     const clin = t.clinicaNombre || t.clinicaId || 'CLÍNICA';
-    // usamos label para que se vea "PARTICULAR / ISAPRE"
     const pac = tipoPacienteLabel(t.tipoPaciente).toUpperCase();
 
     const precio = Number(t.precio || 0) || 0;
