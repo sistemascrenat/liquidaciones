@@ -173,6 +173,13 @@ function normalizeRutKey(rut){
   return base;
 }
 
+const TIPOS_PACIENTE = [
+  'Particular / Isapre',
+  'Fonasa',
+  'MLE'
+];
+
+
 /* =========================
    CSV parsing
 ========================= */
@@ -683,11 +690,13 @@ async function loadCatalogs(){
       const estado = clean(x.estado) || 'activo';
 
       const nombre =
+        clean(x.nombreProfesional) ||      // ✅ tu campo real en Firestore
         clean(x.nombre) ||
         clean(x.nombreCompleto) ||
         clean(x.displayName) ||
         clean(x.apellidos ? `${x.nombres||''} ${x.apellidos||''}` : '') ||
         id;
+
 
       if(!id) return;
       out.push({ id, nombre, estado, raw: x });
@@ -1067,14 +1076,31 @@ function paintResolverModal(){
         .map(x=> `<span class="pill warn" style="cursor:pointer;" data-sug-key="${escapeHtml(item.key)}" data-sug-id="${escapeHtml(x.id)}">${escapeHtml(x.nombre)}</span>`)
         .join(' ');
 
+      const tipoOptions = TIPOS_PACIENTE
+        .map(t => {
+          const sel = normalizeKey(t) === normalizeKey(item.tipoCsv) ? 'selected' : '';
+          return `<option value="${escapeHtml(t)}" ${sel}>${escapeHtml(t)}</option>`;
+        })
+        .join('');
+      
       row.innerHTML = `
         <div>
           <div style="font-weight:900;">${escapeHtml(item.csvName)}</div>
-          <div class="muted tiny"><b>Clínica:</b> ${escapeHtml(item.clinicaCsv)} · <b>Tipo:</b> ${escapeHtml(item.tipoCsv)}</div>
+          <div class="muted tiny"><b>Clínica:</b> ${escapeHtml(item.clinicaCsv)}</div>
+      
+          <!-- ✅ Tipo editable -->
+          <div class="field" style="margin:8px 0 0 0;">
+            <label>Tipo de Paciente (editable)</label>
+            <select data-tipo-cir="${escapeHtml(item.key)}">
+              ${tipoOptions}
+            </select>
+            <div class="help">Esto corrige el “contexto” usado para resolver la cirugía.</div>
+          </div>
+      
           <div class="muted tiny mono">key: ${escapeHtml(item.key)}</div>
           ${sug ? `<div style="margin-top:8px; display:flex; flex-wrap:wrap; gap:8px;">${sug}</div>` : `<div class="muted tiny" style="margin-top:8px;">Sin sugerencias.</div>`}
         </div>
-
+      
         <div class="field" style="margin:0;">
           <label>Asociar a</label>
           <select data-assoc-cir="${escapeHtml(item.key)}">
@@ -1085,11 +1111,12 @@ function paintResolverModal(){
             o <button class="linkBtn" data-go-cir="${escapeHtml(item.key)}" type="button">crear en Cirugías</button>
           </div>
         </div>
-
+      
         <div style="display:flex; gap:8px; justify-content:flex-end;">
           <button class="btn primary" data-save-cir="${escapeHtml(item.key)}" type="button">Guardar</button>
         </div>
       `;
+
 
       row.querySelectorAll('[data-sug-key]').forEach(pill=>{
         pill.addEventListener('click', ()=>{
@@ -1100,14 +1127,42 @@ function paintResolverModal(){
       });
 
       row.querySelector(`[data-save-cir="${CSS.escape(item.key)}"]`).addEventListener('click', async ()=>{
-        const sel = row.querySelector(`select[data-assoc-cir="${CSS.escape(item.key)}"]`);
-        const id = sel.value || '';
+        const selCir = row.querySelector(`select[data-assoc-cir="${CSS.escape(item.key)}"]`);
+        const id = selCir.value || '';
         if(!id){ toast('Selecciona una cirugía'); return; }
-        await persistMapping(docMapCirugias, item.key, id);
-        toast('Cirugía asociada');
+      
+        const selTipo = row.querySelector(`select[data-tipo-cir="${CSS.escape(item.key)}"]`);
+        const tipoElegido = clean(selTipo?.value || item.tipoCsv || '');
+      
+        // ✅ 1) Actualiza staging en memoria: tipoPaciente + raw['Tipo de Paciente']
+        for(const it of state.stagedItems){
+          const r = it.resolved || {};
+          if(r._cirKey === item.key){
+            if(it.normalizado){
+              it.normalizado.tipoPaciente = tipoElegido || null;
+            }
+            if(it.raw){
+              it.raw['Tipo de Paciente'] = tipoElegido || it.raw['Tipo de Paciente'];
+            }
+            // invalida búsqueda cacheada
+            it._search = null;
+          }
+        }
+      
+        // ✅ 2) Persiste mapping con KEY recalculada usando el tipo elegido
+        // item.key era la key antigua; recalculamos con el tipo corregido
+        const normClin = normalizeKey(item.clinicaCsv || '');
+        const normTipo = normalizeKey(tipoElegido || '');
+        const normCir  = normalizeKey(item.csvName || '');
+      
+        const newKey = cirKey(normClin, normTipo, normCir);
+        await persistMapping(docMapCirugias, newKey, id);
+      
+        toast('Cirugía asociada (y tipo corregido en staging)');
         await refreshAfterMapping();
         paintResolverModal();
       });
+
 
       row.querySelector(`[data-go-cir="${CSS.escape(item.key)}"]`).addEventListener('click', ()=>{
         try{
@@ -1139,8 +1194,12 @@ function paintResolverModal(){
 
         // options: todos los profesionales activos
         const options = state.catalogs.profesionales
-          .map(p=> `<option value="${escapeHtml(p.id)}">${escapeHtml(`${p.nombre} (${p.id})`)}</option>`)
+          .map(p=> {
+            const label = `${p.nombre || '(sin nombre)'} (${p.id})`; // ✅ nombreProfesional + RUT
+            return `<option value="${escapeHtml(p.id)}">${escapeHtml(label)}</option>`;
+          })
           .join('');
+
 
         const sug = (item.suggestions || [])
           .map(x=> `<span class="pill warn" style="cursor:pointer;" data-sugp-key="${escapeHtml(item.key)}" data-sugp-id="${escapeHtml(x.id)}">${escapeHtml(`${x.nombre}`)}</span>`)
