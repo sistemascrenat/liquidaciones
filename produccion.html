@@ -168,11 +168,15 @@
             <input id="fileCSV" type="file" accept=".csv"/>
           </div>
 
-          <button class="btn primary" id="btnCargar">Cargar CSV</button>
+          <button class="btn primary" id="btnCargar" type="button">Cargar CSV</button>
 
-          <button class="btn soft" id="btnResolver" disabled>Resolver pendientes</button>
-          <button class="btn soft" id="btnConfirmar" disabled>Confirmar importación</button>
-          <button class="btn danger" id="btnAnular" disabled>Anular importación</button>
+          <button class="btn soft" id="btnResolver" type="button" disabled>Resolver pendientes</button>
+          <button class="btn soft" id="btnConfirmar" type="button" disabled>Confirmar importación</button>
+          <button class="btn danger" id="btnAnular" type="button" disabled>Anular importación</button>
+
+          <!-- ✅ Cola de cambios -->
+          <span class="pill ok" id="dirtyPill">Cambios en cola: 0</span>
+          <button class="btn soft" id="btnGuardarCola" type="button">Guardar cola</button>
 
           <span class="muted tiny" id="statusInfo">—</span>
         </div>
@@ -226,7 +230,7 @@
             <div>
               <div class="h1" style="margin:0;font-size:18px;">Resolver pendientes</div>
               <div class="muted" style="font-size:12px;margin-top:2px;" id="resolverSub">
-                Asociar/crear faltantes. La cirugía se resuelve por Clínica + Tipo Paciente + Nombre (CSV).
+                Asociar/crear faltantes. La cirugía se resuelve por Clínica + Tipo Paciente + Cirugía (CSV).
               </div>
             </div>
             <button class="iconBtn" id="btnResolverClose" type="button" aria-label="Cerrar" title="Cerrar">✖️</button>
@@ -243,6 +247,7 @@
 
             <div style="height:12px;"></div>
 
+            <!-- ✅ SOLO UNA VEZ: Profesionales -->
             <section class="card" style="padding:12px;">
               <div class="sectionTitle">Profesionales (por Rol + Nombre CSV)</div>
               <div class="muted tiny" style="margin-bottom:8px;">
@@ -276,23 +281,36 @@
               </div>
               <div id="resolverCirugiasList"></div>
             </section>
-
-            <div style="height:12px;"></div>
-
-            <section class="card" style="padding:12px;">
-              <div class="sectionTitle">Profesionales (por Rol)</div>
-              <div class="muted tiny" style="margin-bottom:8px;">
-                Pendiente por profesional (Cirujano / Anestesista / Ayudantes / Arsenalera). Selecciona el RUT correcto.
-              </div>
-              <div id="resolverProfesionalesList"></div>
-            </section>
-            
           </div>
 
           <div class="modalFoot">
             <button class="btn" id="btnResolverCancelar" type="button">Cerrar</button>
             <span style="flex:1"></span>
             <button class="btn primary" id="btnResolverRevisar" type="button">Recalcular pendientes</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- MODAL Detalle Item -->
+      <div id="modalItemBackdrop" class="modalBackdrop">
+        <div class="modalCard" role="dialog" aria-modal="true">
+          <div class="modalHead">
+            <div>
+              <div class="h1" style="margin:0;font-size:18px;">Detalle de item</div>
+              <div class="muted" style="font-size:12px;margin-top:2px;" id="itemSub">—</div>
+            </div>
+            <button class="iconBtn" id="btnItemClose" type="button" aria-label="Cerrar" title="Cerrar">✖️</button>
+          </div>
+
+          <div class="modalBody">
+            <div id="itemForm"></div>
+          </div>
+
+          <div class="modalFoot">
+            <button class="btn" id="btnItemCancelar" type="button">Cerrar</button>
+            <span style="flex:1"></span>
+            <button class="btn soft" id="btnGuardarTodo" type="button">Agregar a cola</button>
+            <button class="btn primary" id="btnGuardarItem" type="button">Guardar item</button>
           </div>
         </div>
       </div>
