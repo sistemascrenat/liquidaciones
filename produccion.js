@@ -12,7 +12,7 @@ import { setActiveNav, toast, wireLogout } from './ui.js';
 import { loadSidebar } from './layout.js';
 
 import {
-  collection, doc, setDoc, getDoc, getDocs, writeBatch,
+  collection, doc, setDoc, getDoc, getDocs, writeBatch, updateDoc,
   serverTimestamp, query, where, limit, orderBy, startAfter,
   collectionGroup
 } from 'https://www.gstatic.com/firebasejs/11.7.3/firebase-firestore.js';
@@ -248,7 +248,7 @@ const state = {
   user: null,
 
   importId: '',
-  status: 'idle', // idle | staged | confirmada | anulada
+  status: 'idle',
   monthName: '',
   monthNum: 0,
   year: 0,
@@ -263,24 +263,30 @@ const state = {
     clinicas: [], clinicasByNorm: new Map(), clinicasById: new Map(),
     cirugias: [], cirugiasByNorm: new Map(), cirugiasById: new Map(),
     amb: [], ambByNorm: new Map(), ambById: new Map(),
-  
-    // ✅ Profesionales
-    profesionales: [],               // [{ id: '108678755', nombre: '...', estado:'activo', ... }]
-    profByNorm: new Map(),           // normNombre -> [{id,nombre},...]
-    profById: new Map()              // id -> doc
+
+    profesionales: [],
+    profByNorm: new Map(),
+    profById: new Map()
   },
-  
+
   maps: {
     clinicas: new Map(),
     cirugias: new Map(),
     amb: new Map(),
-  
-    // ✅ Profesionales
-    prof: new Map()                  // key = rol||normNombre -> {id:RUT}
+    prof: new Map()
   },
-  
-  pending: { clinicas: [], cirugias: [], amb: [], prof: [] } // ✅ agrega prof
 
+  pending: { clinicas: [], cirugias: [], amb: [], prof: [] },
+
+  // ✅ NUEVO: pendientes permitidos (por key)
+  allowPend: {
+    clinicas: new Set(),  // key = normClin
+    cirugias: new Set(),  // key = cirKey(...)
+    prof: new Set()       // key = role||normName
+  },
+
+  // ✅ NUEVO: para “Guardar todo” en post-confirmación (ediciones en producción)
+  dirtyEdits: new Map()   // key = `${pacienteId}||${timeId}` -> {patch...}
 };
 
 /* =========================
@@ -319,8 +325,10 @@ function setPills(){
   }
 
   $('hintResolver').textContent = (state.status === 'staged')
-    ? (total === 0 ? '✅ Todo resuelto. Puedes confirmar.' : '⚠️ Resuelve pendientes para confirmar.')
-    : 'Cargar CSV → resolver faltantes → confirmar.';
+    ? (total === 0
+        ? '✅ Todo resuelto. Puedes confirmar.'
+        : '⚠️ Hay pendientes. Puedes confirmar igual (quedarán marcados como PENDIENTE) o resolver ahora.')
+    : 'Cargar CSV → resolver faltantes (opcional) → confirmar.';
 }
 
 function setButtons(){
@@ -335,7 +343,11 @@ function setButtons(){
 
 
   $('btnResolver').disabled = !(staged && totalPend > 0);
-  $('btnConfirmar').disabled = !(staged && totalPend === 0);
+  
+  // ✅ Confirmar SIEMPRE habilitado mientras haya staging.
+  // (Se confirmará con pendientes marcadas en producción)
+  $('btnConfirmar').disabled = !staged;
+  
   $('btnAnular').disabled = !(staged || confirmed);
 }
 
@@ -355,7 +367,8 @@ function buildThead(){
   const ths = [
     `<th>#</th>`,
     ...EXPECTED_COLS.map(c => `<th>${escapeHtml(c)}</th>`),
-    `<th>Estado</th>`
+    `<th>Estado</th>`,
+    `<th>Acciones</th>`
   ].join('');
   $('thead').innerHTML = `<tr>${ths}</tr>`;
 }
@@ -451,15 +464,14 @@ function paintPager(){
 function estadoCell(it){
   const r = it.resolved || {};
   const flags = [];
-  if(r.clinicaOk === false) flags.push('Clínica');
-  if(r.cirugiaOk === false) flags.push('Cirugía');
-
-  // ✅ profesionales
-  if(r.cirujanoOk === false) flags.push('Cirujano');
-  if(r.anestesistaOk === false) flags.push('Anestesista');
-  if(r.ayudante1Ok === false) flags.push('Ay1');
-  if(r.ayudante2Ok === false) flags.push('Ay2');
-  if(r.arsenaleraOk === false) flags.push('Arsenalera');
+  if(r.clinicaOk === false || r._pendClin) flags.push('Clínica');
+  if(r.cirugiaOk === false || r._pendCir) flags.push('Cirugía');
+  
+  if(r.cirujanoOk === false || r._pend_cirujano) flags.push('Cirujano');
+  if(r.anestesistaOk === false || r._pend_anestesista) flags.push('Anestesista');
+  if(r.ayudante1Ok === false || r._pend_ayudante1) flags.push('Ay1');
+  if(r.ayudante2Ok === false || r._pend_ayudante2) flags.push('Ay2');
+  if(r.arsenaleraOk === false || r._pend_arsenalera) flags.push('Arsenalera');
 
   if(flags.length === 0) return `<span class="ok">OK</span>`;
   return `<span class="warn">Pendiente: ${escapeHtml(flags.join(', '))}</span>`;
@@ -511,8 +523,18 @@ function paintPreview(){
 
     tds.push(`<td>${estadoCell(it)}</td>`);
 
+    // ✅ Detalle (funciona sobre staging también, pero guarda solo si está confirmada)
+    tds.push(`<td>
+      <button class="btn small" type="button" data-open-item="${escapeHtml(String(it.idx || ''))}">Detalle</button>
+    </td>`);
+
     tr.innerHTML = tds.join('');
     tb.appendChild(tr);
+
+    const btn = tr.querySelector('[data-open-item]');
+    if(btn){
+      btn.addEventListener('click', ()=> openItemModal(it));
+    }
   }
 
   if(total === 0){
@@ -776,7 +798,17 @@ function resolveOneItem(n){
     } else {
       const found = state.catalogs.clinicasByNorm.get(normClin);
       if(found?.id) resolved.clinicaId = found.id;
-      else resolved.clinicaOk = false;
+      else {
+        // ✅ si el usuario decidió “dejar pendiente” esta clínica, no bloquea
+        if(state.allowPend.clinicas.has(normClin)){
+          resolved.clinicaOk = true; // no bloquea
+          resolved.clinicaId = null; // sigue sin id
+          resolved._pendClin = true; // marca interna
+        } else {
+          resolved.clinicaOk = false;
+        }
+      }
+
     }
   } else {
     resolved.clinicaOk = false;
@@ -799,7 +831,15 @@ function resolveOneItem(n){
     } else {
       const found = state.catalogs.cirugiasByNorm.get(normCir);
       if(found?.id) resolved.cirugiaId = found.id; // solo match exacto por nombre
-      else resolved.cirugiaOk = false;
+      else {
+        if(state.allowPend.cirugias.has(key)){
+          resolved.cirugiaOk = true;
+          resolved.cirugiaId = null;
+          resolved._pendCir = true;
+        } else {
+          resolved.cirugiaOk = false;
+        }
+      }
     }
   } else {
     resolved.cirugiaOk = false;
@@ -845,7 +885,14 @@ function resolveOneItem(n){
       resolved[r.out] = candidates[0].id;
       resolved[r.ok] = true;
     } else {
-      resolved[r.ok] = false; // pendiente
+      const pendKey = profKey(r.role, nameCsv);
+      if(state.allowPend.prof.has(pendKey)){
+        resolved[r.ok] = true;
+        resolved[r.out] = null;
+        resolved[`_pend_${r.field}`] = true;
+      } else {
+        resolved[r.ok] = false;
+      }
     }
   }
 
@@ -1014,6 +1061,7 @@ function paintResolverModal(){
         </div>
 
         <div style="display:flex; gap:8px; justify-content:flex-end;">
+          <button class="btn" data-pend-clin="${escapeHtml(item.norm)}" type="button">Dejar pendiente</button>
           <button class="btn soft" data-create-clin="${escapeHtml(item.norm)}" type="button">+ Crear</button>
           <button class="btn primary" data-save-clin="${escapeHtml(item.norm)}" type="button">Guardar</button>
         </div>
@@ -1026,6 +1074,13 @@ function paintResolverModal(){
         await persistMapping(docMapClinicas, item.norm, id);
         toast('Clínica asociada');
         await refreshAfterMapping();
+        paintResolverModal();
+      });
+
+      row.querySelector(`[data-pend-clin="${CSS.escape(item.norm)}"]`).addEventListener('click', async ()=>{
+        state.allowPend.clinicas.add(item.norm);
+        toast('Clínica marcada como pendiente (se podrá confirmar).');
+        recomputePending();
         paintResolverModal();
       });
 
@@ -1113,8 +1168,10 @@ function paintResolverModal(){
         </div>
       
         <div style="display:flex; gap:8px; justify-content:flex-end;">
+          <button class="btn" data-pend-cir="${escapeHtml(item.key)}" type="button">Dejar pendiente</button>
           <button class="btn primary" data-save-cir="${escapeHtml(item.key)}" type="button">Guardar</button>
         </div>
+
       `;
 
 
@@ -1125,6 +1182,28 @@ function paintResolverModal(){
           sel.value = id;
         });
       });
+
+      row.querySelector(`[data-pend-cir="${CSS.escape(item.key)}"]`).addEventListener('click', ()=>{
+      // registra “permitido”
+      state.allowPend.cirugias.add(item.key);
+    
+      // ✅ importante: si el usuario cambió Tipo Paciente, lo aplicamos al staging
+      const selTipo = row.querySelector(`select[data-tipo-cir="${CSS.escape(item.key)}"]`);
+      const tipoElegido = clean(selTipo?.value || item.tipoCsv || '');
+    
+      for(const it of state.stagedItems){
+        const r = it.resolved || {};
+        if(r._cirKey === item.key){
+          if(it.normalizado) it.normalizado.tipoPaciente = tipoElegido || null;
+          if(it.raw) it.raw['Tipo de Paciente'] = tipoElegido || it.raw['Tipo de Paciente'];
+          it._search = null;
+        }
+      }
+    
+      toast('Cirugía marcada como pendiente (se podrá confirmar).');
+      recomputePending();
+      paintResolverModal();
+    });
 
       row.querySelector(`[data-save-cir="${CSS.escape(item.key)}"]`).addEventListener('click', async ()=>{
         const selCir = row.querySelector(`select[data-assoc-cir="${CSS.escape(item.key)}"]`);
@@ -1222,6 +1301,7 @@ function paintResolverModal(){
           </div>
 
           <div style="display:flex; gap:8px; justify-content:flex-end;">
+            <button class="btn" data-pend-prof="${escapeHtml(item.key)}" type="button">Dejar pendiente</button>
             <button class="btn primary" data-save-prof="${escapeHtml(item.key)}" type="button">Guardar</button>
           </div>
         `;
@@ -1232,6 +1312,13 @@ function paintResolverModal(){
             const sel = row.querySelector(`select[data-assoc-prof="${CSS.escape(item.key)}"]`);
             sel.value = id;
           });
+        });
+
+        row.querySelector(`[data-pend-prof="${CSS.escape(item.key)}"]`).addEventListener('click', ()=>{
+          state.allowPend.prof.add(item.key);
+          toast('Profesional marcado como pendiente (se podrá confirmar).');
+          recomputePending();
+          paintResolverModal();
         });
 
         row.querySelector(`[data-save-prof="${CSS.escape(item.key)}"]`).addEventListener('click', async ()=>{
@@ -1300,6 +1387,70 @@ async function saveStagingToFirestore(){
   }
 }
 
+async function reemplazarMesAntesDeConfirmar(YYYY, MM, newImportId){
+  // 1) Marcar items activos del mes como “reemplazado”
+  const cg = collectionGroup(db, 'items');
+  let last = null;
+  let total = 0;
+
+  while(true){
+    const qy = last
+      ? query(
+          cg,
+          where('ano','==', state.year),
+          where('mesNum','==', state.monthNum),
+          where('estado','==','activa'),
+          orderBy('__name__'),
+          startAfter(last),
+          limit(300)
+        )
+      : query(
+          cg,
+          where('ano','==', state.year),
+          where('mesNum','==', state.monthNum),
+          where('estado','==','activa'),
+          orderBy('__name__'),
+          limit(300)
+        );
+
+    const snap = await getDocs(qy);
+    if(snap.empty) break;
+
+    const batch = writeBatch(db);
+    snap.forEach(d=>{
+      batch.set(d.ref, {
+        estado: 'reemplazado',
+        reemplazadoEl: serverTimestamp(),
+        reemplazadoPor: state.user?.email || '',
+        reemplazadoPorImportId: newImportId
+      }, { merge:true });
+      total++;
+    });
+    await batch.commit();
+    last = snap.docs[snap.docs.length - 1];
+  }
+
+  // 2) Marcar imports confirmadas previas del mismo mes como “reemplazada”
+  const qImp = query(
+    colImports,
+    where('ano','==', state.year),
+    where('mesNum','==', state.monthNum),
+    where('estado','==','confirmada')
+  );
+  const impSnap = await getDocs(qImp);
+  for(const d of impSnap.docs){
+    await setDoc(d.ref, {
+      estado: 'reemplazada',
+      reemplazadaEl: serverTimestamp(),
+      reemplazadaPor: state.user?.email || '',
+      reemplazadaPorImportId: newImportId
+    }, { merge:true });
+  }
+
+  return total;
+}
+
+
 /* =========================
    Confirmar / Anular
 ========================= */
@@ -1307,11 +1458,15 @@ async function confirmarImportacion(){
   if(state.status !== 'staged'){ toast('No hay staging para confirmar.'); return; }
 
   const totalPend =
-  state.pending.clinicas.length +
-  state.pending.cirugias.length +
-  state.pending.amb.length +
-  state.pending.prof.length;
-  if(totalPend > 0){ toast('Aún hay pendientes.'); return; }
+    state.pending.clinicas.length +
+    state.pending.cirugias.length +
+    state.pending.amb.length +
+    state.pending.prof.length;
+  
+  if(totalPend > 0){
+    // ✅ ahora se permite confirmar
+    toast(`Confirmando con ${totalPend} pendientes (quedarán marcados).`);
+  }
 
   const importId = state.importId;
   const itemsCol = collection(db, 'produccion_imports', importId, 'items');
@@ -1320,6 +1475,13 @@ async function confirmarImportacion(){
 
   const YYYY = String(state.year);
   const MM = pad(state.monthNum,2);
+
+  // ✅ Reemplazo del mes (soft-delete): marca lo anterior como reemplazado
+  const replacedCount = await reemplazarMesAntesDeConfirmar(YYYY, MM, importId);
+  if(replacedCount > 0){
+    toast(`Mes ${YYYY}-${MM}: ${replacedCount} items previos marcados como reemplazados.`);
+  }
+
 
   // Asegura doc año y doc mes
   await setDoc(doc(db, 'produccion', YYYY), {
@@ -1589,6 +1751,187 @@ async function refreshAfterMapping(){
   );
 }
 
+function openItemModal(it){
+  $('modalItemBackdrop').style.display = 'block';
+
+  const n = it.normalizado || {};
+  const raw = it.raw || {};
+  const fechaISO = n.fechaISO || parseDateToISO(raw['Fecha'] || '');
+  const horaHM = n.horaHM || parseHora24(raw['Hora'] || '');
+  const rutKey = normalizeRutKey(n.rut || raw['RUT'] || '');
+  const YYYY = String(state.year);
+  const MM = pad(state.monthNum,2);
+
+  const timeId = (fechaISO && horaHM) ? `${fechaISO}_${horaHM}` : null;
+  const pacienteId = rutKey || null;
+
+  $('itemSub').textContent = pacienteId && timeId
+    ? `Paciente: ${pacienteId} · Item: ${timeId}`
+    : `Item staging (sin ID estable)`;
+
+  // Form simple: editar campos críticos
+  const form = `
+    <div class="grid2">
+      <div class="field">
+        <label>Clínica (texto)</label>
+        <input id="edClinica" value="${escapeHtml(n.clinica || raw['Clínica'] || '')}"/>
+      </div>
+      <div class="field">
+        <label>Tipo Paciente</label>
+        <input id="edTipo" value="${escapeHtml(n.tipoPaciente || raw['Tipo de Paciente'] || '')}"/>
+      </div>
+    </div>
+
+    <div class="field" style="margin-top:10px;">
+      <label>Cirugía (texto)</label>
+      <input id="edCirugia" value="${escapeHtml(n.cirugia || raw['Cirugía'] || '')}"/>
+    </div>
+
+    <div class="grid2" style="margin-top:10px;">
+      <div class="field"><label>Cirujano</label><input id="edCirujano" value="${escapeHtml((n.profesionales||{}).cirujano || raw['Cirujano'] || '')}"/></div>
+      <div class="field"><label>Anestesista</label><input id="edAnestesista" value="${escapeHtml((n.profesionales||{}).anestesista || raw['Anestesista'] || '')}"/></div>
+    </div>
+
+    <div class="grid3" style="margin-top:10px;">
+      <div class="field"><label>Ayudante 1</label><input id="edAy1" value="${escapeHtml((n.profesionales||{}).ayudante1 || raw['Ayudante 1'] || '')}"/></div>
+      <div class="field"><label>Ayudante 2</label><input id="edAy2" value="${escapeHtml((n.profesionales||{}).ayudante2 || raw['Ayudante 2'] || '')}"/></div>
+      <div class="field"><label>Arsenalera</label><input id="edArs" value="${escapeHtml((n.profesionales||{}).arsenalera || raw['Arsenalera'] || '')}"/></div>
+    </div>
+
+    <div class="help" style="margin-top:10px;">
+      Tip: aquí ajustas el texto; luego el sistema recalcula resolución (IDs / pendientes).
+    </div>
+  `;
+  $('itemForm').innerHTML = form;
+
+  // guardar en memoria (para “Guardar todo”)
+  const key = (pacienteId && timeId) ? `${pacienteId}||${timeId}` : `STAGING||${it.idx}`;
+
+  $('btnGuardarItem').onclick = async ()=>{
+    const patch = collectItemPatchFromModal();
+    await saveOneItemPatch(it, patch);
+    toast('Item guardado');
+    closeItemModal();
+  };
+
+  $('btnGuardarTodo').onclick = async ()=>{
+    // mete el patch de este item a la cola
+    const patch = collectItemPatchFromModal();
+    state.dirtyEdits.set(key, { it, patch });
+    await saveAllDirtyEdits();
+    toast('Cambios guardados');
+    closeItemModal();
+  };
+}
+
+function closeItemModal(){
+  $('modalItemBackdrop').style.display = 'none';
+  $('itemForm').innerHTML = '';
+}
+
+function collectItemPatchFromModal(){
+  return {
+    clinica: clean($('edClinica').value),
+    tipoPaciente: clean($('edTipo').value),
+    cirugia: clean($('edCirugia').value),
+
+    profesionales: {
+      cirujano: clean($('edCirujano').value),
+      anestesista: clean($('edAnestesista').value),
+      ayudante1: clean($('edAy1').value),
+      ayudante2: clean($('edAy2').value),
+      arsenalera: clean($('edArs').value)
+    }
+  };
+}
+
+async function saveOneItemPatch(it, patch){
+  // 1) aplica al staging en memoria
+  it.normalizado = it.normalizado || {};
+  it.normalizado.clinica = patch.clinica || null;
+  it.normalizado.tipoPaciente = patch.tipoPaciente || null;
+  it.normalizado.cirugia = patch.cirugia || null;
+  it.normalizado.profesionales = patch.profesionales || {};
+
+  it.raw = it.raw || {};
+  it.raw['Clínica'] = patch.clinica;
+  it.raw['Tipo de Paciente'] = patch.tipoPaciente;
+  it.raw['Cirugía'] = patch.cirugia;
+  it.raw['Cirujano'] = patch.profesionales.cirujano;
+  it.raw['Anestesista'] = patch.profesionales.anestesista;
+  it.raw['Ayudante 1'] = patch.profesionales.ayudante1;
+  it.raw['Ayudante 2'] = patch.profesionales.ayudante2;
+  it.raw['Arsenalera'] = patch.profesionales.arsenalera;
+
+  it._search = null;
+
+  // 2) recalcula resolución local
+  it.resolved = resolveOneItem(it.normalizado);
+
+  // 3) si ya está confirmada, persiste en producción
+  if(state.status === 'confirmada'){
+    const n = it.normalizado || {};
+    const fechaISO = n.fechaISO || parseDateToISO(it.raw['Fecha'] || '');
+    const horaHM = n.horaHM || parseHora24(it.raw['Hora'] || '');
+    const rutKey = normalizeRutKey(n.rut || it.raw['RUT'] || '');
+    if(!fechaISO || !horaHM || !rutKey) return;
+
+    const YYYY = String(state.year);
+    const MM = pad(state.monthNum,2);
+    const pacienteId = rutKey;
+    const timeId = `${fechaISO}_${horaHM}`;
+
+    const refItem = doc(db, 'produccion', YYYY, 'meses', MM, 'pacientes', pacienteId, 'items', timeId);
+
+    // guarda “texto” + ids recalculados + pendientes
+    await updateDoc(refItem, {
+      clinica: n.clinica ?? null,
+      cirugia: n.cirugia ?? null,
+      tipoPaciente: n.tipoPaciente ?? null,
+      profesionales: n.profesionales || {},
+
+      clinicaId: it.resolved?.clinicaId ?? null,
+      cirugiaId: it.resolved?.cirugiaId ?? null,
+
+      profesionalesId: {
+        cirujanoId: it.resolved?.cirujanoId ?? null,
+        anestesistaId: it.resolved?.anestesistaId ?? null,
+        ayudante1Id: it.resolved?.ayudante1Id ?? null,
+        ayudante2Id: it.resolved?.ayudante2Id ?? null,
+        arsenaleraId: it.resolved?.arsenaleraId ?? null
+      },
+
+      pendientes: {
+        clinica: !!it.resolved?._pendClin || (it.resolved?.clinicaOk === false),
+        cirugia: !!it.resolved?._pendCir || (it.resolved?.cirugiaOk === false),
+        profesionales: {
+          cirujano: !!it.resolved?._pend_cirujano || (it.resolved?.cirujanoOk === false),
+          anestesista: !!it.resolved?._pend_anestesista || (it.resolved?.anestesistaOk === false),
+          ayudante1: !!it.resolved?._pend_ayudante1 || (it.resolved?.ayudante1Ok === false),
+          ayudante2: !!it.resolved?._pend_ayudante2 || (it.resolved?.ayudante2Ok === false),
+          arsenalera: !!it.resolved?._pend_arsenalera || (it.resolved?.arsenaleraOk === false)
+        },
+        tipoPaciente: !clean(n.tipoPaciente || '')
+      },
+
+      actualizadoEl: serverTimestamp(),
+      actualizadoPor: state.user?.email || ''
+    });
+  }
+
+  recomputePending();
+  paintPreview();
+}
+
+async function saveAllDirtyEdits(){
+  // simple: guardar secuencial (si quieres, lo hacemos por batch después)
+  for(const [k, v] of state.dirtyEdits.entries()){
+    await saveOneItemPatch(v.it, v.patch);
+    state.dirtyEdits.delete(k);
+  }
+}
+
+
 /* =========================
    Boot
 ========================= */
@@ -1661,5 +2004,13 @@ requireAuth({
     $('modalResolverBackdrop').addEventListener('click', (e)=>{
       if(e.target === $('modalResolverBackdrop')) closeResolverModal();
     });
+
+    $('btnItemClose')?.addEventListener('click', closeItemModal);
+    $('btnItemCancelar')?.addEventListener('click', closeItemModal);
+    
+    $('modalItemBackdrop')?.addEventListener('click', (e)=>{
+      if(e.target === $('modalItemBackdrop')) closeItemModal();
+    });
+
   }
 });
