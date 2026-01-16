@@ -51,6 +51,31 @@ function normalizeKey(s){
     .trim();
 }
 
+function normalizeProName(s){
+  // Normaliza nombres tipo "Dr. Cortés", "Dra Paula Contreras", etc.
+  let x = normalizeKey(s);
+
+  // quitar prefijos comunes
+  x = x
+    .replace(/\bdr\b\.?/g,'')
+    .replace(/\bdra\b\.?/g,'')
+    .replace(/\bdoctor\b/g,'')
+    .replace(/\bdoctora\b/g,'')
+    .replace(/\bprof\b\.?/g,'')
+    .replace(/\bprofesor\b/g,'')
+    .replace(/\bprofa\b\.?/g,'')
+    .replace(/\bprofa\b/g,'')
+    .replace(/\s+/g,' ')
+    .trim();
+
+  return x;
+}
+
+function profKey(roleId, profNameCsv){
+  return `${clean(roleId)}||${normalizeProName(profNameCsv)}`;
+}
+
+
 function nonEmptyOrUndef(v){
   const x = clean(v);
   return x === '' ? undefined : x;
@@ -207,6 +232,7 @@ const colAmbulatorios = collection(db, 'ambulatorios');
 const docMapClinicas = doc(db, 'produccion_mappings', 'clinicas');
 const docMapCirugias  = doc(db, 'produccion_mappings', 'cirugias');
 const docMapAmb       = doc(db, 'produccion_mappings', 'ambulatorios');
+const docMapProf      = doc(db, 'produccion_mappings', 'profesionales');
 
 /* =========================
    State
@@ -229,16 +255,25 @@ const state = {
   catalogs: {
     clinicas: [], clinicasByNorm: new Map(), clinicasById: new Map(),
     cirugias: [], cirugiasByNorm: new Map(), cirugiasById: new Map(),
-    amb: [], ambByNorm: new Map(), ambById: new Map()
+    amb: [], ambByNorm: new Map(), ambById: new Map(),
+  
+    // ✅ Profesionales
+    profesionales: [],               // [{ id: '108678755', nombre: '...', estado:'activo', ... }]
+    profByNorm: new Map(),           // normNombre -> [{id,nombre},...]
+    profById: new Map()              // id -> doc
   },
-
+  
   maps: {
     clinicas: new Map(),
     cirugias: new Map(),
-    amb: new Map()
+    amb: new Map(),
+  
+    // ✅ Profesionales
+    prof: new Map()                  // key = rol||normNombre -> {id:RUT}
   },
+  
+  pending: { clinicas: [], cirugias: [], amb: [], prof: [] } // ✅ agrega prof
 
-  pending: { clinicas: [], cirugias: [], amb: [] }
 };
 
 /* =========================
@@ -250,7 +285,9 @@ function setPills(){
   const pc = state.pending.clinicas.length;
   const ps = state.pending.cirugias.length;
   const pa = state.pending.amb.length;
-  const total = pc + ps + pa;
+  const pp = state.pending.prof.length;
+
+  const total = pc + ps + pa + pp;
 
   const pillPend = $('pillPendientes');
   pillPend.textContent = `Pendientes: ${total}`;
@@ -268,6 +305,12 @@ function setPills(){
   pillA.textContent = `Ambulatorios: ${pa}`;
   pillA.className = 'pill ' + (pa === 0 ? 'ok' : 'warn');
 
+  const pillP = $('pillProf'); // si existe en HTML
+  if(pillP){
+    pillP.textContent = `Profesionales: ${pp}`;
+    pillP.className = 'pill ' + (pp === 0 ? 'ok' : 'warn');
+  }
+
   $('hintResolver').textContent = (state.status === 'staged')
     ? (total === 0 ? '✅ Todo resuelto. Puedes confirmar.' : '⚠️ Resuelve pendientes para confirmar.')
     : 'Cargar CSV → resolver faltantes → confirmar.';
@@ -277,7 +320,12 @@ function setButtons(){
   const staged = state.status === 'staged';
   const confirmed = state.status === 'confirmada';
 
-  const totalPend = state.pending.clinicas.length + state.pending.cirugias.length + state.pending.amb.length;
+  const totalPend =
+    state.pending.clinicas.length +
+    state.pending.cirugias.length +
+    state.pending.amb.length +
+    state.pending.prof.length; // ✅
+
 
   $('btnResolver').disabled = !(staged && totalPend > 0);
   $('btnConfirmar').disabled = !(staged && totalPend === 0);
@@ -398,7 +446,14 @@ function estadoCell(it){
   const flags = [];
   if(r.clinicaOk === false) flags.push('Clínica');
   if(r.cirugiaOk === false) flags.push('Cirugía');
-  if(r.ambOk === false) flags.push('Amb');
+
+  // ✅ profesionales
+  if(r.cirujanoOk === false) flags.push('Cirujano');
+  if(r.anestesistaOk === false) flags.push('Anestesista');
+  if(r.ayudante1Ok === false) flags.push('Ay1');
+  if(r.ayudante2Ok === false) flags.push('Ay2');
+  if(r.arsenaleraOk === false) flags.push('Arsenalera');
+
   if(flags.length === 0) return `<span class="ok">OK</span>`;
   return `<span class="warn">Pendiente: ${escapeHtml(flags.join(', '))}</span>`;
 }
@@ -561,6 +616,7 @@ async function loadMappings(){
   state.maps.clinicas = await loadOne(docMapClinicas);
   state.maps.cirugias  = await loadOne(docMapCirugias);
   state.maps.amb       = await loadOne(docMapAmb);
+  state.maps.prof      = await loadOne(docMapProf);
 }
 
 async function loadCatalogs(){
@@ -616,7 +672,43 @@ async function loadCatalogs(){
     state.catalogs.cirugiasByNorm = new Map(out.map(s=> [normalizeKey(s.nombre), s]));
     state.catalogs.cirugiasById = new Map(out.map(s=> [s.id, s]));
   }
+
+  // ✅ Profesionales
+  {
+    const snap = await getDocs(collection(db, 'profesionales'));
+    const out = [];
+    snap.forEach(d=>{
+      const x = d.data() || {};
+      const id = clean(d.id); // RUT sin puntos/guion
+      const estado = clean(x.estado) || 'activo';
+
+      const nombre =
+        clean(x.nombre) ||
+        clean(x.nombreCompleto) ||
+        clean(x.displayName) ||
+        clean(x.apellidos ? `${x.nombres||''} ${x.apellidos||''}` : '') ||
+        id;
+
+      if(!id) return;
+      out.push({ id, nombre, estado, raw: x });
+    });
+
+    const activos = out.filter(p => normalizeKey(p.estado) !== 'inactivo');
+
+    state.catalogs.profesionales = activos;
+    state.catalogs.profById = new Map(activos.map(p=> [p.id, p]));
+
+    const idx = new Map();
+    for(const p of activos){
+      const k = normalizeProName(p.nombre);
+      if(!k) continue;
+      if(!idx.has(k)) idx.set(k, []);
+      idx.get(k).push({ id: p.id, nombre: p.nombre });
+    }
+    state.catalogs.profByNorm = idx;
+  }
 }
+
 
 /* =========================
    Resolución cirugías por contexto
@@ -644,9 +736,23 @@ function resolveOneItem(n){
     cirugiaId: null,
     ambulatorioId: null,
 
+    // ✅ Profesionales IDs (RUT)
+    cirujanoId: null,
+    anestesistaId: null,
+    ayudante1Id: null,
+    ayudante2Id: null,
+    arsenaleraId: null,
+
     clinicaOk: true,
     cirugiaOk: true,
     ambOk: true,
+
+    // ✅ flags profesionales
+    cirujanoOk: true,
+    anestesistaOk: true,
+    ayudante1Ok: true,
+    ayudante2Ok: true,
+    arsenaleraOk: true,
 
     _cirKey: ''
   };
@@ -694,6 +800,47 @@ function resolveOneItem(n){
   resolved.ambOk = true;
   resolved.ambulatorioId = null;
 
+    // ✅ Profesionales: resolver por rol + nombre CSV
+  const prof = (n.profesionales || {});
+  const roles = [
+    { role:'r_cirujano',     field:'cirujano',    ok:'cirujanoOk',    out:'cirujanoId' },
+    { role:'r_anestesista',  field:'anestesista', ok:'anestesistaOk', out:'anestesistaId' },
+    { role:'r_ayudante_1',   field:'ayudante1',   ok:'ayudante1Ok',   out:'ayudante1Id' },
+    { role:'r_ayudante_2',   field:'ayudante2',   ok:'ayudante2Ok',   out:'ayudante2Id' },
+    { role:'r_arsenalera',   field:'arsenalera',  ok:'arsenaleraOk',  out:'arsenaleraId' }
+  ];
+
+  for(const r of roles){
+    const nameCsv = clean(prof[r.field] || '');
+    if(!nameCsv){
+      // si viene vacío, no lo consideramos pendiente (no bloquea)
+      resolved[r.ok] = true;
+      resolved[r.out] = null;
+      continue;
+    }
+
+    const key = profKey(r.role, nameCsv);
+
+    // 1) mapping manual guardado
+    const mapped = state.maps.prof.get(key);
+    if(mapped?.id){
+      resolved[r.out] = mapped.id;
+      resolved[r.ok] = true;
+      continue;
+    }
+
+    // 2) match exacto por nombre normalizado (si hay único)
+    const norm = normalizeProName(nameCsv);
+    const candidates = state.catalogs.profByNorm.get(norm) || [];
+    if(candidates.length === 1){
+      resolved[r.out] = candidates[0].id;
+      resolved[r.ok] = true;
+    } else {
+      resolved[r.ok] = false; // pendiente
+    }
+  }
+
+
   return resolved;
 }
 
@@ -701,18 +848,23 @@ function recomputePending(){
   state.pending.clinicas = [];
   state.pending.cirugias = [];
   state.pending.amb = [];
+  state.pending.prof = [];
 
+  // 1) recalcular resolved por cada item
   for(const it of state.stagedItems){
     it.resolved = resolveOneItem(it.normalizado || {});
   }
 
   const seenClin = new Set();
   const seenCir = new Set();
+  const seenProf = new Set(); // ✅ NUEVO: key rol||nombre
 
+  // 2) armar listas de pendientes únicas
   for(const it of state.stagedItems){
     const n = it.normalizado || {};
     const r = it.resolved || {};
 
+    // ---------- Clínicas ----------
     const clinTxt = clean(n.clinica || '');
     if(clinTxt && r.clinicaOk === false){
       const norm = normalizeKey(clinTxt);
@@ -722,6 +874,7 @@ function recomputePending(){
       }
     }
 
+    // ---------- Cirugías ----------
     const cirTxt = clean(n.cirugia || '');
     const tipoTxt = clean(n.tipoPaciente || '');
     if(cirTxt && r.cirugiaOk === false){
@@ -737,11 +890,46 @@ function recomputePending(){
         });
       }
     }
+
+    // ---------- ✅ Profesionales (ESTO ES EL 7.2 QUE TE FALTABA) ----------
+    const prof = (n.profesionales || {});
+    const defs = [
+      { label:'Cirujano',    role:'r_cirujano',    field:'cirujano',    ok: r.cirujanoOk },
+      { label:'Anestesista', role:'r_anestesista', field:'anestesista', ok: r.anestesistaOk },
+      { label:'Ayudante 1',  role:'r_ayudante_1',  field:'ayudante1',   ok: r.ayudante1Ok },
+      { label:'Ayudante 2',  role:'r_ayudante_2',  field:'ayudante2',   ok: r.ayudante2Ok },
+      { label:'Arsenalera',  role:'r_arsenalera',  field:'arsenalera',  ok: r.arsenaleraOk }
+    ];
+
+    for(const d of defs){
+      const nameCsv = clean(prof[d.field] || '');
+      if(!nameCsv) continue;       // vacío no bloquea
+      if(d.ok !== false) continue; // solo pendientes
+
+      const key = profKey(d.role, nameCsv);
+      if(seenProf.has(key)) continue;
+      seenProf.add(key);
+
+      // sugerencias por nombre normalizado
+      const norm = normalizeProName(nameCsv);
+      const candidates = state.catalogs.profByNorm.get(norm) || [];
+
+      state.pending.prof.push({
+        key,
+        roleId: d.role,
+        roleLabel: d.label,
+        csvName: nameCsv,
+        suggestions: candidates.slice(0, 8) // [{id,nombre}]
+      });
+    }
   }
 
+  // 3) ordenar
   state.pending.clinicas.sort((a,b)=> a.norm.localeCompare(b.norm));
   state.pending.cirugias.sort((a,b)=> a.key.localeCompare(b.key));
+  state.pending.prof.sort((a,b)=> a.key.localeCompare(b.key)); // ✅ NUEVO
 
+  // 4) refrescar UI
   setPills();
   setButtons();
   paintPreview();
@@ -757,6 +945,7 @@ async function persistMapping(docRef, key, id){
   if(docRef === docMapClinicas) state.maps.clinicas.set(key, { id });
   if(docRef === docMapCirugias) state.maps.cirugias.set(key, { id });
   if(docRef === docMapAmb) state.maps.amb.set(key, { id });
+  if(docRef === docMapProf) state.maps.prof.set(key, { id });
 }
 
 /* =========================
@@ -779,11 +968,12 @@ function paintResolverModal(){
   const pc = state.pending.clinicas.length;
   const ps = state.pending.cirugias.length;
   const pa = state.pending.amb.length;
-  const total = pc + ps + pa;
+  const pp = state.pending.prof.length; // ✅
+  const total = pc + ps + pa + pp;
 
   $('resolverResumen').innerHTML = `
     Pendientes totales: <b>${total}</b><br/>
-    Clínicas: <b>${pc}</b> · Cirugías: <b>${ps}</b> · Ambulatorios: <b>${pa}</b>
+    Clínicas: <b>${pc}</b> · Cirugías: <b>${ps}</b> · Ambulatorios: <b>${pa}</b> · Profesionales: <b>${pp}</b>
   `;
 
   // Clínicas
@@ -933,6 +1123,73 @@ function paintResolverModal(){
       wrapS.appendChild(row);
     }
   }
+
+  // ✅ Profesionales
+  const wrapP = $('resolverProfesionalesList');
+  if(wrapP){
+    wrapP.innerHTML = '';
+    const pp = state.pending.prof.length;
+
+    if(pp === 0){
+      wrapP.innerHTML = `<div class="muted tiny">✅ Sin pendientes de profesionales.</div>`;
+    } else {
+      for(const item of state.pending.prof){
+        const row = document.createElement('div');
+        row.className = 'miniRow';
+
+        // options: todos los profesionales activos
+        const options = state.catalogs.profesionales
+          .map(p=> `<option value="${escapeHtml(p.id)}">${escapeHtml(`${p.nombre} (${p.id})`)}</option>`)
+          .join('');
+
+        const sug = (item.suggestions || [])
+          .map(x=> `<span class="pill warn" style="cursor:pointer;" data-sugp-key="${escapeHtml(item.key)}" data-sugp-id="${escapeHtml(x.id)}">${escapeHtml(`${x.nombre}`)}</span>`)
+          .join(' ');
+
+        row.innerHTML = `
+          <div>
+            <div style="font-weight:900;">${escapeHtml(item.csvName)}</div>
+            <div class="muted tiny"><b>Rol:</b> ${escapeHtml(item.roleLabel)}</div>
+            <div class="muted tiny mono">key: ${escapeHtml(item.key)}</div>
+            ${sug ? `<div style="margin-top:8px; display:flex; flex-wrap:wrap; gap:8px;">${sug}</div>` : `<div class="muted tiny" style="margin-top:8px;">Sin sugerencias.</div>`}
+          </div>
+
+          <div class="field" style="margin:0;">
+            <label>Asociar a</label>
+            <select data-assoc-prof="${escapeHtml(item.key)}">
+              <option value="">(Seleccionar profesional)</option>
+              ${options}
+            </select>
+          </div>
+
+          <div style="display:flex; gap:8px; justify-content:flex-end;">
+            <button class="btn primary" data-save-prof="${escapeHtml(item.key)}" type="button">Guardar</button>
+          </div>
+        `;
+
+        row.querySelectorAll('[data-sugp-key]').forEach(pill=>{
+          pill.addEventListener('click', ()=>{
+            const id = pill.getAttribute('data-sugp-id') || '';
+            const sel = row.querySelector(`select[data-assoc-prof="${CSS.escape(item.key)}"]`);
+            sel.value = id;
+          });
+        });
+
+        row.querySelector(`[data-save-prof="${CSS.escape(item.key)}"]`).addEventListener('click', async ()=>{
+          const sel = row.querySelector(`select[data-assoc-prof="${CSS.escape(item.key)}"]`);
+          const id = sel.value || '';
+          if(!id){ toast('Selecciona un profesional'); return; }
+          await persistMapping(docMapProf, item.key, id);
+          toast('Profesional asociado');
+          await refreshAfterMapping();
+          paintResolverModal();
+        });
+
+        wrapP.appendChild(row);
+      }
+    }
+  }
+
 }
 
 /* =========================
@@ -990,7 +1247,11 @@ async function saveStagingToFirestore(){
 async function confirmarImportacion(){
   if(state.status !== 'staged'){ toast('No hay staging para confirmar.'); return; }
 
-  const totalPend = state.pending.clinicas.length + state.pending.cirugias.length + state.pending.amb.length;
+  const totalPend =
+  state.pending.clinicas.length +
+  state.pending.cirugias.length +
+  state.pending.amb.length +
+  state.pending.prof.length;
   if(totalPend > 0){ toast('Aún hay pendientes.'); return; }
 
   const importId = state.importId;
@@ -1085,6 +1346,16 @@ async function confirmarImportacion(){
         fechaPago: n.fechaPago ?? null,
 
         profesionales: n.profesionales || {},
+
+        // ✅ IDs por rol (RUT sin puntos/guion)
+        profesionalesId: {
+          cirujanoId: resolved.cirujanoId ?? null,
+          anestesistaId: resolved.anestesistaId ?? null,
+          ayudante1Id: resolved.ayudante1Id ?? null,
+          ayudante2Id: resolved.ayudante2Id ?? null,
+          arsenaleraId: resolved.arsenaleraId ?? null
+        },
+
 
         // raw completo
         raw,
