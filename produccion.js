@@ -285,8 +285,10 @@ const state = {
     prof: new Set()       // key = role||normName
   },
 
-  // ✅ NUEVO: para “Guardar todo” en post-confirmación (ediciones en producción)
-  dirtyEdits: new Map()   // key = `${pacienteId}||${timeId}` -> {patch...}
+  // ✅ Cola de cambios (modo “Guardar todo”):
+  // key = `${pacienteId}||${timeId}` o `STAGING||${idx}`
+  // value = { it, patch, queuedAt }
+  dirtyEdits: new Map()
 };
 
 /* =========================
@@ -350,6 +352,45 @@ function setButtons(){
   
   $('btnAnular').disabled = !(staged || confirmed);
 }
+
+function dirtyCount(){
+  return state.dirtyEdits?.size || 0;
+}
+
+function refreshDirtyUI(){
+  // 1) Muestra en status
+  const n = dirtyCount();
+  const base = $('statusInfo')?.textContent || '—';
+  // Evita duplicar (lo mantenemos simple: reescribimos desde setStatus en otro patch si quieres)
+  if($('dirtyPill')){
+    $('dirtyPill').textContent = `Cambios en cola: ${n}`;
+    $('dirtyPill').className = 'pill ' + (n === 0 ? 'ok' : 'warn');
+  }
+}
+
+function enqueueDirtyEdit(key, it, patch){
+  state.dirtyEdits.set(key, { it, patch, queuedAt: Date.now() });
+  refreshDirtyUI();
+}
+
+async function flushDirtyEdits(){
+  if(dirtyCount() === 0){
+    toast('No hay cambios en cola.');
+    return;
+  }
+  const ok = confirm(`¿Guardar ${dirtyCount()} cambio(s) en cola?`);
+  if(!ok) return;
+
+  // Guardado secuencial (seguro). Si luego quieres batch, lo optimizamos.
+  for(const [k, v] of state.dirtyEdits.entries()){
+    await saveOneItemPatch(v.it, v.patch);
+    state.dirtyEdits.delete(k);
+  }
+
+  refreshDirtyUI();
+  toast('✅ Cola guardada');
+}
+
 
 /* =========================
    Preview table
@@ -1804,24 +1845,26 @@ function openItemModal(it){
   `;
   $('itemForm').innerHTML = form;
 
-  // guardar en memoria (para “Guardar todo”)
+  // key estable para acumular cambios
   const key = (pacienteId && timeId) ? `${pacienteId}||${timeId}` : `STAGING||${it.idx}`;
 
+  // 1) Guardar 1 ítem (inmediato)
   $('btnGuardarItem').onclick = async ()=>{
     const patch = collectItemPatchFromModal();
     await saveOneItemPatch(it, patch);
-    toast('Item guardado');
+    toast('✅ Item guardado');
+    closeItemModal();
+    refreshDirtyUI();
+  };
+
+  // 2) Guardar todo = ENCOLAR (no guardar aún)
+  $('btnGuardarTodo').onclick = ()=>{
+    const patch = collectItemPatchFromModal();
+    enqueueDirtyEdit(key, it, patch);
+    toast(`🟡 Agregado a cola (total: ${dirtyCount()})`);
     closeItemModal();
   };
 
-  $('btnGuardarTodo').onclick = async ()=>{
-    // mete el patch de este item a la cola
-    const patch = collectItemPatchFromModal();
-    state.dirtyEdits.set(key, { it, patch });
-    await saveAllDirtyEdits();
-    toast('Cambios guardados');
-    closeItemModal();
-  };
 }
 
 function closeItemModal(){
@@ -1923,12 +1966,9 @@ async function saveOneItemPatch(it, patch){
   paintPreview();
 }
 
+// ✅ Guarda la cola completa (cuando tú decidas)
 async function saveAllDirtyEdits(){
-  // simple: guardar secuencial (si quieres, lo hacemos por batch después)
-  for(const [k, v] of state.dirtyEdits.entries()){
-    await saveOneItemPatch(v.it, v.patch);
-    state.dirtyEdits.delete(k);
-  }
+  await flushDirtyEdits();
 }
 
 
@@ -2011,6 +2051,13 @@ requireAuth({
     $('modalItemBackdrop')?.addEventListener('click', (e)=>{
       if(e.target === $('modalItemBackdrop')) closeItemModal();
     });
+
+    // ✅ Si existe un botón global para guardar cola, lo conectamos
+    $('btnGuardarCola')?.addEventListener('click', async ()=>{
+      try{ await flushDirtyEdits(); }
+      catch(err){ console.error(err); toast('Error guardando cola (ver consola)'); }
+    });
+
 
   }
 });
