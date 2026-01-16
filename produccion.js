@@ -1312,10 +1312,17 @@ function paintResolverModal(){
         const row = document.createElement('div');
         row.className = 'miniRow';
 
-        // options: todos los profesionales activos
-        const options = state.catalogs.profesionales
-          .map(p=> {
-            const label = `${p.nombre || '(sin nombre)'} (${p.id})`; // ✅ nombreProfesional + RUT
+        // ✅ Profesionales en mayúsculas + ordenados A→Z por nombre
+        const profSorted = [...(state.catalogs.profesionales || [])]
+          .map(p => ({
+            ...p,
+            _nombreUp: (p.nombre || '(sin nombre)').toUpperCase().trim()
+          }))
+          .sort((a, b) => a._nombreUp.localeCompare(b._nombreUp, 'es'));
+        
+        const options = profSorted
+          .map(p => {
+            const label = `${p._nombreUp} (${p.id})`;
             return `<option value="${escapeHtml(p.id)}">${escapeHtml(label)}</option>`;
           })
           .join('');
