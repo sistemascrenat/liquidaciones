@@ -23,6 +23,13 @@ import {
   collection, collectionGroup, getDocs, query, where
 } from 'https://www.gstatic.com/firebasejs/11.7.3/firebase-firestore.js';
 
+import {
+  PDFDocument,
+  StandardFonts,
+  rgb
+} from 'https://cdn.skypack.dev/pdf-lib@1.17.1';
+
+
 /* =========================
    AJUSTE ÚNICO (SI CAMBIAS NOMBRES)
 ========================= */
@@ -87,6 +94,236 @@ function download(filename, text, mime='text/plain'){
   a.click();
   setTimeout(()=> URL.revokeObjectURL(url), 1500);
 }
+
+/* =========================
+   PDF Liquidación (1 por profesional)
+   - Documento para el profesional (no técnico)
+   - Siempre: nombre + rut personal
+   - Si jurídica: razón social + rut empresa en gris
+========================= */
+
+// Ajusta esto si quieres un logo (opcional). Si no existe, simplemente no lo dibuja.
+const PDF_ASSET_LOGO_URL = 'logo-rennat.png'; // pon tu ruta real o déjalo así si lo subirás
+
+async function fetchAsArrayBuffer(url){
+  try{
+    const res = await fetch(url);
+    if(!res.ok) throw new Error('HTTP '+res.status);
+    return await res.arrayBuffer();
+  }catch(e){
+    return null;
+  }
+}
+
+function safeFileName(s){
+  return normalize(s || 'profesional')
+    .replace(/[^a-z0-9]+/g,'-')
+    .replace(/^-+|-+$/g,'')
+    .slice(0,60) || 'profesional';
+}
+
+function buildLineaEstado(l){
+  if(l.isAlerta) return 'ALERTA';
+  if(l.isPendiente) return 'PENDIENTE';
+  return 'OK';
+}
+
+async function generarPDFLiquidacionProfesional(agg){
+  // Documento nuevo (sin template) para que sea simple y claro
+  const pdfDoc = await PDFDocument.create();
+
+  const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+  const fontBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+
+  // Página A4
+  const page = pdfDoc.addPage([595.28, 841.89]);
+  const { width, height } = page.getSize();
+
+  // Colores suaves
+  const teal = rgb(0.0, 0.65, 0.60);
+  const gray = rgb(0.42, 0.45, 0.50);
+  const ink  = rgb(0.07, 0.09, 0.13);
+  const soft = rgb(0.95, 0.98, 0.99);
+
+  // Margenes
+  const M = 42;
+  let y = height - M;
+
+  // Header bar
+  page.drawRectangle({ x:M, y:y-48, width:width-2*M, height:48, color:soft, borderColor:rgb(0.86,0.90,0.93), borderWidth:1 });
+  page.drawRectangle({ x:M, y:y-48, width:6, height:48, color:teal });
+
+  // Logo (opcional)
+  const logoBytes = await fetchAsArrayBuffer(PDF_ASSET_LOGO_URL);
+  if(logoBytes){
+    try{
+      // intenta PNG
+      const logo = await pdfDoc.embedPng(logoBytes);
+      const w = 70;
+      const h = (logo.height/logo.width)*w;
+      page.drawImage(logo, { x: width - M - w, y: y - 40, width:w, height:h });
+    }catch(_e){
+      // si no es png, no lo dibuja
+    }
+  }
+
+  // Título
+  page.drawText('LIQUIDACIÓN DE HONORARIOS', { x:M+14, y:y-30, size:14, font:fontBold, color:ink });
+  page.drawText(`Mes: ${monthNameEs(state.mesNum)}  ${state.ano}`, { x:M+14, y:y-45, size:10, font, color:gray });
+
+  y -= 68;
+
+  // Bloque Datos Profesional
+  const titularNombre = (agg?.nombre || '').toString();
+  const titularRut = (agg?.rut || '').toString();
+  const esJuridica = (agg?.tipoPersona || '').toLowerCase() === 'juridica';
+
+  const empresaNombre = (agg?.empresaNombre || '').toString();
+  const empresaRut = (agg?.empresaRut || '').toString();
+
+  page.drawText('DATOS DEL PROFESIONAL', { x:M, y:y, size:11, font:fontBold, color:ink });
+  y -= 10;
+
+  page.drawRectangle({ x:M, y:y-62, width:width-2*M, height:62, color:rgb(1,1,1), borderColor:rgb(0.86,0.90,0.93), borderWidth:1 });
+
+  page.drawText(`Nombre: ${titularNombre || '—'}`, { x:M+12, y:y-20, size:10.5, font:fontBold, color:ink });
+  page.drawText(`RUT: ${titularRut || '—'}`, { x:M+12, y:y-38, size:10.5, font, color:ink });
+
+  if(esJuridica && (empresaNombre || empresaRut)){
+    // Subtítulo gris (empresa)
+    page.drawText(`Empresa: ${empresaNombre || '—'}`, { x:M+12, y:y-54, size:9.5, font, color:gray });
+    if(empresaRut){
+      page.drawText(`RUT Empresa: ${empresaRut}`, { x:M+290, y:y-54, size:9.5, font, color:gray });
+    }
+  }
+
+  y -= 82;
+
+  // IMPORTANTE (para evitar confusión): datos de Clínica Rennat deben ir CLARAMENTE como emisor
+  page.drawText('DATOS DEL EMISOR (CLÍNICA RENNAT)', { x:M, y:y, size:10.5, font:fontBold, color:ink });
+  y -= 10;
+
+  page.drawRectangle({ x:M, y:y-46, width:width-2*M, height:46, color:rgb(1,1,1), borderColor:rgb(0.86,0.90,0.93), borderWidth:1 });
+  page.drawText('Estos datos corresponden al emisor del servicio (Clínica Rennat).', { x:M+12, y:y-18, size:9.2, font, color:gray });
+  page.drawText('No corresponden a los datos del profesional.', { x:M+12, y:y-32, size:9.2, font, color:gray });
+
+  y -= 66;
+
+  // Resumen
+  const total = Number(agg?.total || 0) || 0;
+
+  page.drawRectangle({ x:M, y:y-40, width:width-2*M, height:40, color:soft, borderColor:rgb(0.86,0.90,0.93), borderWidth:1 });
+  page.drawText('TOTAL A PAGAR', { x:M+12, y:y-26, size:11, font:fontBold, color:ink });
+  page.drawText(clp(total), { x:width-M-12-fontBold.widthOfTextAtSize(clp(total), 14), y:y-28, size:14, font:fontBold, color:ink });
+
+  y -= 62;
+
+  // Alertas/Pendientes (si existen)
+  const alertasCount = Number(agg?.alertasCount || 0) || 0;
+  const pendientesCount = Number(agg?.pendientesCount || 0) || 0;
+
+  if(alertasCount > 0 || pendientesCount > 0){
+    const msg = [
+      alertasCount>0 ? `ALERTAS: ${alertasCount}` : null,
+      pendientesCount>0 ? `PENDIENTES: ${pendientesCount}` : null
+    ].filter(Boolean).join(' · ');
+
+    page.drawRectangle({ x:M, y:y-28, width:width-2*M, height:28, color:rgb(1, 0.93, 0.94), borderColor:rgb(0.98,0.80,0.82), borderWidth:1 });
+    page.drawText(`ATENCIÓN: ${msg}`, { x:M+12, y:y-18, size:10, font:fontBold, color:rgb(0.62,0.07,0.22) });
+    y -= 44;
+  }
+
+  // Tabla Detalle (simple y legible)
+  page.drawText('DETALLE DE PROCEDIMIENTOS', { x:M, y:y, size:11, font:fontBold, color:ink });
+  y -= 10;
+
+  const colX = {
+    fecha: M,
+    clinica: M+90,
+    tipo: M+230,
+    proc: M+300,
+    rol: M+470,
+    monto: M+535
+  };
+
+  // Header tabla
+  page.drawRectangle({ x:M, y:y-18, width:width-2*M, height:18, color:soft, borderColor:rgb(0.86,0.90,0.93), borderWidth:1 });
+  page.drawText('Fecha', { x:colX.fecha+6, y:y-13, size:9.2, font:fontBold, color:gray });
+  page.drawText('Clínica', { x:colX.clinica+6, y:y-13, size:9.2, font:fontBold, color:gray });
+  page.drawText('Tipo', { x:colX.tipo+6, y:y-13, size:9.2, font:fontBold, color:gray });
+  page.drawText('Procedimiento / Paciente', { x:colX.proc+6, y:y-13, size:9.2, font:fontBold, color:gray });
+  page.drawText('Rol', { x:colX.rol+6, y:y-13, size:9.2, font:fontBold, color:gray });
+  page.drawText('$', { x:colX.monto-10, y:y-13, size:9.2, font:fontBold, color:gray });
+
+  y -= 22;
+
+  // Filas
+  const lines = [...(agg.lines || [])].sort((a,b)=>{
+    const fa = normalize(a.fecha);
+    const fb = normalize(b.fecha);
+    if(fa !== fb) return fa.localeCompare(fb);
+    return normalize(a.roleNombre).localeCompare(normalize(b.roleNombre));
+  });
+
+  const rowH = 18;
+  for(const l of lines){
+    // salto de página si se acaba
+    if(y < M + 80){
+      // nueva página
+      y = height - M;
+      const p2 = pdfDoc.addPage([595.28, 841.89]);
+      // reusamos "page" cambiando referencia
+      // (trampa simple: reasignamos variables)
+      page = p2; // eslint-disable-line no-func-assign
+      // (si tu linter molesta, lo ajustamos cuando lo integremos fino)
+    }
+
+    const estado = buildLineaEstado(l);
+    const fechaTxt = `${l.fecha || ''} ${l.hora || ''}`.trim();
+    const clinTxt = (l.clinicaNombre || '').toString();
+    const tipoTxt = ((l.tipoPaciente || '') || '').toString().toUpperCase();
+    const procTxt = (l.procedimientoNombre || '').toString();
+    const pacTxt = (l.pacienteNombre || '').toString();
+    const rolTxt = (l.roleNombre || '').toString();
+    const montoTxt = clp(l.monto || 0);
+
+    // fila
+    page.drawRectangle({ x:M, y:y-rowH, width:width-2*M, height:rowH, color:rgb(1,1,1), borderColor:rgb(0.93,0.95,0.97), borderWidth:1 });
+
+    page.drawText(fechaTxt.slice(0,18), { x:colX.fecha+6, y:y-13, size:8.8, font, color:ink });
+    page.drawText(clinTxt.slice(0,18), { x:colX.clinica+6, y:y-13, size:8.8, font, color:ink });
+    page.drawText(tipoTxt.slice(0,8), { x:colX.tipo+6, y:y-13, size:8.8, font, color:ink });
+
+    const procPac = `${procTxt} — ${pacTxt}`.trim();
+    page.drawText(procPac.slice(0,28), { x:colX.proc+6, y:y-13, size:8.6, font, color:ink });
+
+    page.drawText(rolTxt.slice(0,14), { x:colX.rol+6, y:y-13, size:8.8, font, color:ink });
+    page.drawText(montoTxt, { x:colX.monto - fontBold.widthOfTextAtSize(montoTxt, 8.8), y:y-13, size:8.8, font:fontBold, color:ink });
+
+    // marca de alerta/pendiente (mini)
+    if(estado !== 'OK'){
+      const badge = estado === 'ALERTA' ? 'ALERTA' : 'PEND';
+      const bcol = estado === 'ALERTA' ? rgb(0.62,0.07,0.22) : rgb(0.60,0.32,0.05);
+      page.drawText(badge, { x:M+width-2*M-44, y:y-13, size:7.8, font:fontBold, color:bcol });
+    }
+
+    y -= rowH;
+  }
+
+  const bytes = await pdfDoc.save();
+  return bytes;
+}
+
+function downloadBytes(filename, bytes, mime='application/pdf'){
+  const blob = new Blob([bytes], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  setTimeout(()=> URL.revokeObjectURL(url), 1500);
+}
+
 
 /* =========================
    Mapping roles (tu item trae map profesionales / profesionalesId)
@@ -630,14 +867,28 @@ function paint(){
       <td>${statusPill}</td>
       <td>
         <div class="actionsMini">
+          <button class="iconBtn" type="button" title="Descargar PDF liquidación" aria-label="PDF">📄</button>
           <button class="iconBtn" type="button" title="Ver detalle" aria-label="Detalle">🔎</button>
           <button class="iconBtn" type="button" title="Exportar (profesional)" aria-label="ExportProf">⬇️</button>
         </div>
       </td>
     `;
 
+    tr.querySelector('[aria-label="PDF"]').addEventListener('click', async ()=>{
+      try{
+        const bytes = await generarPDFLiquidacionProfesional(agg);
+        const fn = `LIQUIDACION_${safeFileName(agg.nombre)}_${state.ano}_${String(state.mesNum).padStart(2,'0')}.pdf`;
+        downloadBytes(fn, bytes, 'application/pdf');
+        toast('PDF generado');
+      }catch(err){
+        console.error(err);
+        toast('No se pudo generar el PDF (ver consola)');
+      }
+    });
+
     tr.querySelector('[aria-label="Detalle"]').addEventListener('click', ()=> openDetalle(agg));
     tr.querySelector('[aria-label="ExportProf"]').addEventListener('click', ()=> exportDetalleProfesional(agg));
+
 
     tb.appendChild(tr);
   }
