@@ -1061,34 +1061,49 @@ function formatImportDate(ts){
 }
 
 async function fillImportSuggestions(){
+  const sel = $('importSelect');
+  if(!sel) return;
+
+  // reset select SIEMPRE
+  sel.innerHTML = `<option value="">(Selecciona una importación del mes)</option>`;
+  if($('importId')) $('importId').value = '';
+
+  const ano = Number($('ano')?.value || 0) || 0;
+  const mesName = clean($('mes')?.value || '');
+  const mesNum = monthIndex(mesName);
+
+  if(!ano || !mesNum) return;
+
   try{
-    const ano = Number($('ano')?.value || 0) || 0;
-    const mesName = clean($('mes')?.value || '');
-    const mesNum = monthIndex(mesName);
-
-    const sel = $('importSelect');
-    if(!sel) return;
-
-    // reset select
-    sel.innerHTML = `<option value="">(Selecciona una importación del mes)</option>`;
-    $('importId').value = '';
-
-    if(!ano || !mesNum) return;
-
+    // ✅ SIN orderBy => no requiere índice compuesto
+    // Traemos hasta 50 y ordenamos localmente por creadoEl desc.
     const qy = query(
       colImports,
       where('ano','==', ano),
       where('mesNum','==', mesNum),
-      orderBy('creadoEl','desc'),
-      limit(25)
+      limit(50)
     );
 
     const snap = await getDocs(qy);
 
+    const docs = [];
     snap.forEach(d=>{
       const x = d.data() || {};
       const id = clean(x.id || d.id);
       if(!id) return;
+
+      const ts = x.creadoEl;
+      const ms = ts?.toMillis ? ts.toMillis() : (ts instanceof Date ? ts.getTime() : 0);
+
+      docs.push({ id, x, ms });
+    });
+
+    // ordenar desc por fecha (más reciente primero)
+    docs.sort((a,b)=> (b.ms || 0) - (a.ms || 0));
+
+    for(const it of docs){
+      const x = it.x || {};
+      const id = it.id;
 
       const estado = clean(x.estado || '');
       const filas = Number(x.filas || 0) || 0;
@@ -1096,25 +1111,21 @@ async function fillImportSuggestions(){
 
       const opt = document.createElement('option');
       opt.value = id;
-
-      // ✅ Lo que se ve: fecha/hora + estado + filas (simple)
       opt.textContent = `${when} — ${estado || '—'} — ${filas} filas`;
-
       sel.appendChild(opt);
-    });
+    }
 
-    // ✅ si hay al menos 1 import, selecciona el primero automáticamente
+    // auto-selecciona el primero real si existe
     if(sel.options.length > 1){
       sel.selectedIndex = 1;
-      $('importId').value = sel.value;
+      if($('importId')) $('importId').value = sel.value;
     }
 
   }catch(err){
     console.warn('fillImportSuggestions()', err);
+    toast('No se pudieron cargar importaciones (ver consola).');
   }
 }
-
-
 
 async function persistMapping(docRef, key, id){
   await setDoc(docRef, {
