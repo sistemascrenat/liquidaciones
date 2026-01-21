@@ -1,6 +1,8 @@
-// liquidaciones.js — COMPLETO
-// ✅ Fuente única: Producción confirmada (mes/año)
-// ✅ Cálculo: cruza con Tarifario de procedimientos (cirugías / ambulatorios)
+// liquidaciones.js — COMPLETO (adaptado a tu Firestore REAL)
+// ✅ Fuente única: Producción confirmada en:
+//    produccion/{ANO}/meses/{MES}/pacientes/{RUTDOC}/items/{FECHAISO_HHMM}
+//    (se lee vía collectionGroup('items') con filtros)
+// ✅ Cálculo: cruza con Tarifario de procedimientos (procedimientos.tarifas)
 // ✅ Agrupa por profesional y genera detalle por línea (rol)
 // ✅ Pendientes: clínica/procedimiento no mapeado, profesional no existe, tarifa incompleta
 // ✅ Export CSV (resumen + detalle)
@@ -14,14 +16,8 @@ import { loadSidebar } from './layout.js';
 await loadSidebar({ active: 'liquidaciones' });
 
 import {
-  collection, getDocs, query, where
+  collection, collectionGroup, getDocs, query, where
 } from 'https://www.gstatic.com/firebasejs/11.7.3/firebase-firestore.js';
-
-/* =========================
-   AJUSTE ÚNICO SI TU PATH ES DISTINTO
-   (lo demás NO lo toques)
-========================= */
-const COL_PROD_ITEMS = 'produccion_items'; // 👈 si tu colección real se llama "produccion", cambia esto
 
 /* =========================
    Const / helpers
@@ -43,7 +39,6 @@ function escapeHtml(s=''){
     .replaceAll('"','&quot;')
     .replaceAll("'","&#039;");
 }
-
 function asNumberLoose(v){
   const s = (v ?? '').toString().replace(/[^\d]/g,'');
   return Number(s || 0) || 0;
@@ -57,9 +52,7 @@ function clp(n){
 function fmtDateISOorDMY(v){
   const s = cleanReminder(v);
   if(!s) return '';
-  // viene dd/mm/aaaa => lo devolvemos igual
   if(/^\d{2}\/\d{2}\/\d{4}$/.test(s)) return s;
-  // viene yyyy-mm-dd
   if(/^\d{4}-\d{2}-\d{2}$/.test(s)) return s.split('-').reverse().join('/');
   return s;
 }
@@ -68,15 +61,12 @@ function tipoPacienteNorm(v){
   if(x.includes('fona')) return 'fonasa';
   if(x.includes('isap')) return 'isapre';
   if(x.includes('part')) return 'particular';
-  // fallback: si viene algo raro, dejamos normalizado
   return x || '';
 }
-
 function pillHtml(kind, text){
   const cls = kind === 'ok' ? 'ok' : (kind === 'warn' ? 'warn' : (kind === 'bad' ? 'bad' : ''));
   return `<span class="pill ${cls}">${escapeHtml(text)}</span>`;
 }
-
 function download(filename, text, mime='text/plain'){
   const blob = new Blob([text], { type: mime });
   const url = URL.createObjectURL(blob);
@@ -88,14 +78,17 @@ function download(filename, text, mime='text/plain'){
 }
 
 /* =========================
-   Role mapping desde Producción CSV
+   Mapping de roles
+   - roleId = clave en tarifario (procedimientos.tarifas.*.pacientes.*.honorarios[roleId])
+   - mapKey = clave en item.profesionales (tu schema real)
+   - rawField = fallback si viene desde raw (headers del CSV)
 ========================= */
-const CSV_ROLE_FIELDS = [
-  { field: 'Cirujano',      roleId: 'r_cirujano',      label: 'CIRUJANO' },
-  { field: 'Anestesista',   roleId: 'r_anestesista',   label: 'ANESTESISTA' },
-  { field: 'Ayudante 1',    roleId: 'r_ayudante_1',    label: 'AYUDANTE 1' },
-  { field: 'Ayudante 2',    roleId: 'r_ayudante_2',    label: 'AYUDANTE 2' },
-  { field: 'Arsenalera',    roleId: 'r_arsenalera',    label: 'ARSENALERA' },
+const ROLE_SOURCES = [
+  { mapKey: 'cirujano',     profIdKey: 'cirujanoId',     rawField: 'Cirujano',     roleId: 'r_cirujano',     label: 'CIRUJANO' },
+  { mapKey: 'anestesista',  profIdKey: 'anestesistaId',  rawField: 'Anestesista',  roleId: 'r_anestesista',  label: 'ANESTESISTA' },
+  { mapKey: 'ayudante1',    profIdKey: 'ayudante1Id',    rawField: 'Ayudante 1',   roleId: 'r_ayudante_1',   label: 'AYUDANTE 1' },
+  { mapKey: 'ayudante2',    profIdKey: 'ayudante2Id',    rawField: 'Ayudante 2',   roleId: 'r_ayudante_2',   label: 'AYUDANTE 2' },
+  { mapKey: 'arsenalera',   profIdKey: 'arsenaleraId',   rawField: 'Arsenalera',   roleId: 'r_arsenalera',   label: 'ARSENALERA' },
 ];
 
 /* =========================
@@ -110,27 +103,27 @@ const state = {
   q: '',
 
   // catálogos
-  rolesMap: new Map(),        // roleId -> nombre
-  clinicasById: new Map(),    // C001 -> NOMBRE
-  clinicasByName: new Map(),  // normalize(nombre) -> C001
-  profesionalesByName: new Map(), // normalize(nombre) -> profDoc
-  procedimientosByName: new Map(), // normalize(nombre) -> procDoc (PCxxxx o PAxxxx)
+  rolesMap: new Map(),             // roleId -> nombre
+  clinicasById: new Map(),         // C001 -> NOMBRE
+  clinicasByName: new Map(),       // normalize(nombre) -> C001
+  profesionalesByName: new Map(),  // normalize(nombre) -> profDoc
+  profesionalesById: new Map(),    // id -> profDoc   (🔥 para usar profesionalesId.*)
+  procedimientosByName: new Map(), // normalize(nombre) -> procDoc
   procedimientosById: new Map(),   // id -> procDoc
 
   // data
-  prodRows: [],        // filas producción confirmadas del mes
-  liquidResumen: [],   // [{key, nombre, rut, tipo, casos, total, pendientesCount, status, lines:[]}]
+  prodRows: [],        // items confirmados del mes (collectionGroup)
+  liquidResumen: [],   // agrupación por profesional
   lastDetailExportLines: []
 };
 
 /* =========================
-   Firestore refs
+   Firestore refs (catálogos)
 ========================= */
 const colRoles = collection(db, 'roles');
 const colClinicas = collection(db, 'clinicas');
 const colProfesionales = collection(db, 'profesionales');
 const colProcedimientos = collection(db, 'procedimientos');
-const colProduccion = collection(db, COL_PROD_ITEMS);
 
 /* =========================
    Load catalogs
@@ -166,23 +159,27 @@ async function loadClinicas(){
 
 async function loadProfesionales(){
   const snap = await getDocs(colProfesionales);
+
   const byName = new Map();
+  const byId = new Map();
 
   snap.forEach(d=>{
     const x = d.data() || {};
     const nombre = cleanReminder(x.nombre) || cleanReminder(x.empresa) || cleanReminder(x.razonSocial) || '';
-    if(!nombre) return;
-
-    byName.set(normalize(nombre), {
+    const doc = {
       id: d.id,
-      nombre: toUpperSafe(nombre),
+      nombre: toUpperSafe(nombre || d.id),
       rut: cleanReminder(x.rut) || '',
-      tipo: cleanReminder(x.tipo) || cleanReminder(x.personaTipo) || '', // natural / juridica (según tu modelo)
+      tipo: cleanReminder(x.tipo) || cleanReminder(x.personaTipo) || '',
       estado: (cleanReminder(x.estado) || 'activo').toLowerCase()
-    });
+    };
+
+    byId.set(d.id, doc);
+    if(nombre) byName.set(normalize(nombre), doc);
   });
 
   state.profesionalesByName = byName;
+  state.profesionalesById = byId;
 }
 
 async function loadProcedimientos(){
@@ -195,7 +192,7 @@ async function loadProcedimientos(){
     const x = d.data() || {};
     const id = d.id;
     const nombre = cleanReminder(x.nombre) || '';
-    const tipo = (cleanReminder(x.tipo) || '').toLowerCase(); // cirugia / ambulatorio
+    const tipo = (cleanReminder(x.tipo) || '').toLowerCase();
     const tarifas = (x.tarifas && typeof x.tarifas === 'object') ? x.tarifas : null;
 
     const doc = {
@@ -203,7 +200,7 @@ async function loadProcedimientos(){
       codigo: cleanReminder(x.codigo) || id,
       nombre: toUpperSafe(nombre),
       tipo,
-      tarifas // OJO: tu estructura real usa x.tarifas[clinicaId].pacientes[tipo]
+      tarifas
     };
 
     byId.set(id, doc);
@@ -216,6 +213,8 @@ async function loadProcedimientos(){
 
 /* =========================
    Load Producción confirmada (mes/año)
+   🔥 TU FIRESTORE: .../pacientes/{rutDoc}/items/{...}
+   -> usamos collectionGroup('items') filtrando por ano/mesNum/confirmado
 ========================= */
 function monthNameEs(m){
   return ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'][m-1] || '';
@@ -224,19 +223,14 @@ function monthNameEs(m){
 async function loadProduccionMes(){
   if(!state.mesNum || !state.ano) return;
 
-  // Campos esperados en producción:
-  // - ano: 2025
-  // - mesNum: 10
-  // - estadoImportacion: 'confirmada'
-  // - anulado: true/false (si existe)
-  // - raw: map con columnas CSV (o campos normalizados)
-  //
-  // Si tu schema difiere, me dices y lo ajusto.
+  // OJO:
+  // Esto requiere un índice compuesto si tu proyecto lo pide.
+  // Si Firestore te muestra link de "create index", créalo (es normal).
   const qy = query(
-    colProduccion,
+    collectionGroup(db, 'items'),
     where('ano','==', Number(state.ano)),
     where('mesNum','==', Number(state.mesNum)),
-    where('estadoImportacion','==','confirmada')
+    where('confirmado','==', true)
   );
 
   const snap = await getDocs(qy);
@@ -244,14 +238,16 @@ async function loadProduccionMes(){
 
   snap.forEach(d=>{
     const x = d.data() || {};
-    if(x.anulado === true) return; // no borramos; solo ignoramos anulados
 
-    // raw podría venir como map con headers originales del CSV
-    const raw = (x.raw && typeof x.raw === 'object') ? x.raw : x;
+    // reglas duras según tu schema real
+    if(x.suspendida === true) return;
+    if(x.estado && normalize(x.estado) !== 'activa') return;
 
     out.push({
       id: d.id,
-      raw
+      // guardo todo el doc + raw dentro (porque tú lo tienes)
+      item: x,
+      raw: (x.raw && typeof x.raw === 'object') ? x.raw : x
     });
   });
 
@@ -259,10 +255,7 @@ async function loadProduccionMes(){
 }
 
 /* =========================
-   Cruzar tarifa desde procedimientos.tarifas
-   Estructura que tú tienes (según tu screenshot):
-   procedimientos/{PC0001}.tarifas[ C002 ].pacientes[ particular ].honorarios[ r_cirujano ] = 1050000
-   + derechosPabellon, insumos (que NO se pagan a profesional)
+   Leer honorario desde procedimientos.tarifas
 ========================= */
 function getHonorarioFromTarifa(procDoc, clinicaId, tipoPaciente, roleId){
   try{
@@ -288,15 +281,11 @@ function getHonorarioFromTarifa(procDoc, clinicaId, tipoPaciente, roleId){
 }
 
 /* =========================
-   Construir liquidación desde producción
+   Helpers para raw (fallback)
 ========================= */
 function pickRaw(raw, key){
-  // soporta header exacto y variantes comunes
-  // (tu CSV trae: "Tipo de Paciente", "Nombre Paciente", "Clínica", "Cirugía", etc.)
   const direct = raw?.[key];
   if(direct !== undefined) return direct;
-
-  // fallback por normalización
   const nk = normalize(key);
   for(const k of Object.keys(raw || {})){
     if(normalize(k) === nk) return raw[k];
@@ -304,47 +293,69 @@ function pickRaw(raw, key){
   return '';
 }
 
+/* =========================
+   Construir liquidaciones desde producción REAL
+========================= */
 function buildLiquidaciones(){
-  const lines = []; // líneas “pago por rol”
+  const lines = [];
 
   for(const row of state.prodRows){
+    const item = row.item || {};
     const raw = row.raw || {};
 
-    const suspendida = normalize(pickRaw(raw,'Suspendida')) === 'si' || normalize(pickRaw(raw,'Suspendida')) === 'true';
-    if(suspendida) continue; // opcional: no considerar suspendidas
+    // Fecha/hora
+    const fecha = fmtDateISOorDMY(item.fechaISO || pickRaw(raw,'Fecha'));
+    const hora = cleanReminder(item.horaHM || pickRaw(raw,'Hora'));
 
-    const confirmado = normalize(pickRaw(raw,'Confirmado'));
-    // si viene Confirmado y es NO, lo ignoramos
-    if(confirmado && (confirmado === 'no' || confirmado === 'false')) continue;
+    // Clínica: preferir clinicaId del item (ya viene mapeado)
+    const clinicaId =
+      cleanReminder(item.clinicaId) ||
+      (()=>{
+        const clinicaName = toUpperSafe(cleanReminder(item.clinica || pickRaw(raw,'Clínica')));
+        return state.clinicasByName.get(normalize(clinicaName)) || '';
+      })();
 
-    const fecha = fmtDateISOorDMY(pickRaw(raw,'Fecha'));
-    const hora = cleanReminder(pickRaw(raw,'Hora'));
-    const clinicaName = toUpperSafe(cleanReminder(pickRaw(raw,'Clínica')));
-    const cirugiaName = toUpperSafe(cleanReminder(pickRaw(raw,'Cirugía')));
-    const pacienteTipo = tipoPacienteNorm(pickRaw(raw,'Tipo de Paciente') || pickRaw(raw,'Previsión'));
-    const pacienteNombre = toUpperSafe(cleanReminder(pickRaw(raw,'Nombre Paciente')));
-    const valor = asNumberLoose(pickRaw(raw,'Valor')); // total (informativo)
-    const hmq = asNumberLoose(pickRaw(raw,'HMQ'));     // total honorarios (informativo)
-    const dp = asNumberLoose(pickRaw(raw,'Derechos de Pabellón')); // informativo
-    const ins = asNumberLoose(pickRaw(raw,'Insumos')); // informativo
+    const clinicaNameFromItem = toUpperSafe(cleanReminder(item.clinica || pickRaw(raw,'Clínica')));
+    const clinicaLabel = clinicaId
+      ? (state.clinicasById.get(clinicaId) || clinicaNameFromItem || clinicaId)
+      : (clinicaNameFromItem || '(Sin clínica)');
 
-    // Map clínicaId por nombre
-    const clinicaId = state.clinicasByName.get(normalize(clinicaName)) || '';
-    const clinicaLabel = clinicaId ? (state.clinicasById.get(clinicaId) || clinicaName || clinicaId) : (clinicaName || '(Sin clínica)');
-
-    // Map procedimiento por nombre (tu procedimiento en Firestore es "Manga", y CSV trae "Manga" etc.)
+    // Procedimiento: item.cirugia + raw['Cirugía']
+    const cirugiaName = toUpperSafe(cleanReminder(item.cirugia || pickRaw(raw,'Cirugía')));
     const procDoc = state.procedimientosByName.get(normalize(cirugiaName)) || null;
     const procId = procDoc?.id || '';
     const procLabel = procDoc?.nombre || cirugiaName || '(Sin procedimiento)';
 
-    // Por cada rol del CSV, generamos línea si hay nombre de profesional
-    for(const rf of CSV_ROLE_FIELDS){
-      const profName = toUpperSafe(cleanReminder(pickRaw(raw, rf.field)));
-      if(!profName) continue;
+    // Tipo paciente: item.tipoPaciente (viene "Isapre") o raw
+    const pacienteTipo = tipoPacienteNorm(item.tipoPaciente || pickRaw(raw,'Tipo de Paciente') || pickRaw(raw,'Previsión'));
+    const pacienteNombre = toUpperSafe(cleanReminder(item.nombrePaciente || pickRaw(raw,'Nombre Paciente')));
+    const pacienteRut = cleanReminder(item.rut || pickRaw(raw,'RUT'));
 
-      const profDoc = state.profesionalesByName.get(normalize(profName)) || null;
+    // Informativos
+    const valor = asNumberLoose(item.valor || pickRaw(raw,'Valor'));
+    const hmq = asNumberLoose(item.hmq || pickRaw(raw,'HMQ'));
+    const dp = asNumberLoose(item.derechosPabellon || pickRaw(raw,'Derechos de Pabellón'));
+    const ins = asNumberLoose(item.insumos || pickRaw(raw,'Insumos'));
 
-      // Reglas de pendiente y monto:
+    // Por cada rol, generamos línea si existe profesional
+    const profMap = (item.profesionales && typeof item.profesionales === 'object') ? item.profesionales : {};
+    const profIdMap = (item.profesionalesId && typeof item.profesionalesId === 'object') ? item.profesionalesId : {};
+
+    for(const rf of ROLE_SOURCES){
+      const profName =
+        toUpperSafe(cleanReminder(profMap?.[rf.mapKey] || pickRaw(raw, rf.rawField)));
+
+      const profId =
+        cleanReminder(profIdMap?.[rf.profIdKey] || '');
+
+      if(!profName && !profId) continue;
+
+      // resolver profesional por ID (preferido), si no por nombre
+      const profDocById = profId ? (state.profesionalesById.get(profId) || null) : null;
+      const profDocByName = !profDocById && profName ? (state.profesionalesByName.get(normalize(profName)) || null) : null;
+      const profDoc = profDocById || profDocByName;
+
+      // pendiente + monto
       let monto = 0;
       const pend = [];
 
@@ -356,34 +367,38 @@ function buildLiquidaciones(){
         const tar = getHonorarioFromTarifa(procDoc, clinicaId, pacienteTipo, rf.roleId);
         if(tar.ok) monto = tar.monto;
         else pend.push(tar.reason || 'Tarifa incompleta');
-      }else{
-        // igual dejamos monto=0, queda pendiente
       }
 
       if(!profDoc) pend.push('Profesional no existe en catálogo');
 
       lines.push({
-        prodId: row.id,
+        // ids
+        prodItemId: row.id,
+        importId: cleanReminder(item.importId || ''),
+        // paciente
+        pacienteNombre,
+        pacienteRut,
+        tipoPaciente: pacienteTipo,
+        // contexto
         fecha,
         hora,
         clinicaId,
         clinicaNombre: clinicaLabel,
         procedimientoId: procId,
         procedimientoNombre: procLabel,
-        tipoPaciente: pacienteTipo,
-        pacienteNombre,
+        // rol/profesional
         roleId: rf.roleId,
         roleNombre: state.rolesMap.get(rf.roleId) || rf.label,
-        profesionalNombre: profDoc?.nombre || profName,
-        profesionalId: profDoc?.id || '',
+        profesionalNombre: profDoc?.nombre || profName || '(Sin nombre)',
+        profesionalId: profDoc?.id || (profId || ''),
         profesionalRut: profDoc?.rut || '',
         profesionalTipo: profDoc?.tipo || '',
+        // pago
         monto,
         pendiente: pend.length > 0,
         observacion: pend.join(' · '),
-
-        // campos informativos del CSV (por si quieres verlos en detalle)
-        info: { valor, hmq, dp, ins }
+        // informativos
+        info: { valor, hmq, dp, ins, pagado: !!item.pagado, fechaPago: item.fechaPago || null }
       });
     }
   }
@@ -426,7 +441,6 @@ function buildLiquidaciones(){
     return (b.total||0) - (a.total||0);
   });
 
-  // guardar
   state.liquidResumen = resumen;
 }
 
@@ -439,7 +453,7 @@ function matchesSearch(agg, q){
 
   const hay = normalize([
     agg.nombre, agg.rut, agg.tipo,
-    ...agg.lines.map(l=> `${l.roleNombre} ${l.clinicaNombre} ${l.procedimientoNombre} ${l.pacienteNombre} ${l.tipoPaciente} ${l.observacion}`)
+    ...agg.lines.map(l=> `${l.roleNombre} ${l.clinicaNombre} ${l.procedimientoNombre} ${l.pacienteNombre} ${l.pacienteRut} ${l.tipoPaciente} ${l.observacion}`)
   ].join(' '));
 
   return hay.includes(s);
@@ -455,6 +469,7 @@ function paint(){
   // estado global
   const pendientes = rows.reduce((a,b)=> a + (b.pendientesCount||0), 0);
   const pill = $('pillEstado');
+
   if(!state.prodRows.length){
     pill.className = 'pill warn';
     pill.textContent = 'Sin producción confirmada';
@@ -506,7 +521,7 @@ function paint(){
     tb.appendChild(tr);
   }
 
-  $('lastLoad').textContent = `Filas producción: ${state.prodRows.length} · Último cálculo: ${new Date().toLocaleString()}`;
+  $('lastLoad').textContent = `Items producción: ${state.prodRows.length} · Último cálculo: ${new Date().toLocaleString()}`;
 }
 
 /* =========================
@@ -524,7 +539,6 @@ function openDetalle(agg){
   const tb = $('modalTbody');
   tb.innerHTML = '';
 
-  // orden por fecha
   const lines = [...(agg.lines || [])].sort((a,b)=>{
     const fa = normalize(a.fecha);
     const fb = normalize(b.fecha);
@@ -541,9 +555,9 @@ function openDetalle(agg){
     const tr = document.createElement('tr');
     tr.innerHTML = `
       <td class="mono">${escapeHtml(l.fecha || '')} ${escapeHtml(l.hora || '')}</td>
-      <td>${escapeHtml(l.clinicaNombre || '')}</td>
+      <td>${escapeHtml(l.clinicaNombre || '')}<div class="mini muted mono">${escapeHtml(l.clinicaId || '')}</div></td>
       <td>${escapeHtml(l.procedimientoNombre || '')}<div class="mini muted mono">${escapeHtml(l.procedimientoId || '')}</div></td>
-      <td>${escapeHtml(l.pacienteNombre || '')}<div class="mini muted">${escapeHtml((l.tipoPaciente||'').toUpperCase())}</div></td>
+      <td>${escapeHtml(l.pacienteNombre || '')}<div class="mini muted">${escapeHtml((l.tipoPaciente||'').toUpperCase())} · ${escapeHtml(l.pacienteRut || '')}</div></td>
       <td>${escapeHtml(l.roleNombre || '')}<div class="mini muted mono">${escapeHtml(l.roleId || '')}</div></td>
       <td><b>${clp(l.monto || 0)}</b></td>
       <td>${st}</td>
@@ -578,14 +592,15 @@ function exportResumenCSV(){
 }
 
 function exportDetalleCSV(){
-  // detalle global (todos los profesionales)
   const headers = [
     'mes','ano',
     'profesional','rut','tipo',
     'fecha','hora',
-    'clinica','procedimiento','tipoPaciente','paciente',
+    'clinicaId','clinica',
+    'procedimientoId','procedimiento',
+    'tipoPaciente','paciente','pacienteRut',
     'rol','monto','pendiente','observacion',
-    'prodId'
+    'prodItemId','importId'
   ];
 
   const items = [];
@@ -599,15 +614,19 @@ function exportDetalleCSV(){
         tipo: a.tipo || '',
         fecha: l.fecha || '',
         hora: l.hora || '',
+        clinicaId: l.clinicaId || '',
         clinica: l.clinicaNombre || '',
+        procedimientoId: l.procedimientoId || '',
         procedimiento: l.procedimientoNombre || '',
         tipoPaciente: l.tipoPaciente || '',
         paciente: l.pacienteNombre || '',
+        pacienteRut: l.pacienteRut || '',
         rol: l.roleNombre || '',
         monto: String(l.monto || 0),
         pendiente: l.pendiente ? 'SI' : 'NO',
         observacion: l.observacion || '',
-        prodId: l.prodId || ''
+        prodItemId: l.prodItemId || '',
+        importId: l.importId || ''
       });
     }
   }
@@ -622,9 +641,11 @@ function exportDetalleProfesional(agg){
     'mes','ano',
     'profesional','rut','tipo',
     'fecha','hora',
-    'clinica','procedimiento','tipoPaciente','paciente',
+    'clinicaId','clinica',
+    'procedimientoId','procedimiento',
+    'tipoPaciente','paciente','pacienteRut',
     'rol','monto','pendiente','observacion',
-    'prodId'
+    'prodItemId','importId'
   ];
 
   const items = (agg.lines || []).map(l=>({
@@ -635,15 +656,19 @@ function exportDetalleProfesional(agg){
     tipo: agg.tipo || '',
     fecha: l.fecha || '',
     hora: l.hora || '',
+    clinicaId: l.clinicaId || '',
     clinica: l.clinicaNombre || '',
+    procedimientoId: l.procedimientoId || '',
     procedimiento: l.procedimientoNombre || '',
     tipoPaciente: l.tipoPaciente || '',
     paciente: l.pacienteNombre || '',
+    pacienteRut: l.pacienteRut || '',
     rol: l.roleNombre || '',
     monto: String(l.monto || 0),
     pendiente: l.pendiente ? 'SI' : 'NO',
     observacion: l.observacion || '',
-    prodId: l.prodId || ''
+    prodItemId: l.prodItemId || '',
+    importId: l.importId || ''
   }));
 
   const csv = toCSV(headers, items);
@@ -666,7 +691,7 @@ function initMonthYearSelectors(){
     mesSel.appendChild(opt);
   }
 
-  // Año (rango simple)
+  // Año
   const now = new Date();
   const y = now.getFullYear();
   const anoSel = $('ano');
@@ -678,7 +703,6 @@ function initMonthYearSelectors(){
     anoSel.appendChild(opt);
   }
 
-  // defaults
   state.mesNum = now.getMonth()+1;
   state.ano = y;
 
@@ -712,7 +736,6 @@ requireAuth({
   onUser: async (user)=>{
     state.user = user;
 
-    // Sidebar común
     await loadSidebar({ active: 'liquidaciones' });
     setActiveNav('liquidaciones');
 
@@ -739,12 +762,10 @@ requireAuth({
       if(e.target === $('modalBackdrop')) closeDetalle();
     });
     $('btnExportDetalleProf').addEventListener('click', ()=>{
-      // export del último detalle abierto (si existe)
       if(!state.lastDetailExportLines.length){
         toast('No hay detalle abierto');
         return;
       }
-      // reconstruimos un agg temporal (solo para export)
       const first = state.lastDetailExportLines[0];
       const agg = {
         nombre: first?.profesionalNombre || 'Profesional',
@@ -755,7 +776,7 @@ requireAuth({
       exportDetalleProfesional(agg);
     });
 
-    // cargar catálogos (1 sola vez)
+    // catálogos
     await Promise.all([
       loadRoles(),
       loadClinicas(),
@@ -763,7 +784,6 @@ requireAuth({
       loadProcedimientos()
     ]);
 
-    // primer cálculo
     await recalc();
   }
 });
