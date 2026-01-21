@@ -156,7 +156,12 @@
           </div>
           <div class="field">
             <label>Importación</label>
-            <input id="importId" class="mono" readonly placeholder="(se genera al cargar CSV)"/>
+            <input id="importId"
+                   list="importIdList"
+                   placeholder="(se genera al cargar CSV)"
+                   autocomplete="off" />
+            
+            <datalist id="importIdList"></datalist>
           </div>
         </div>
 
