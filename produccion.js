@@ -164,6 +164,20 @@ function parseHora24(s){
   return `${pad(hh,2)}${pad(mm,2)}`; // HHMM (para docId)
 }
 
+function setDefaultToPreviousMonth(){
+  const meses = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+
+  const d = new Date();
+  // nos vamos al día 1 para evitar efectos raros (meses cortos)
+  d.setDate(1);
+  // retrocede 1 mes
+  d.setMonth(d.getMonth() - 1);
+
+  $('mes').value = meses[d.getMonth()];
+  $('ano').value = String(d.getFullYear());
+}
+
+
 function normalizeRutKey(rut){
   // DocId seguro: sin puntos/espacios, mayúscula, conserva dígitos y K
   const t = clean(rut).toUpperCase();
@@ -2071,11 +2085,9 @@ requireAuth({
     $('who').textContent = `Conectado: ${user.email}`;
     wireLogout();
 
-    if(!$('mes').value) {
-      const now = new Date();
-      const meses = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
-      $('mes').value = meses[now.getMonth()];
-    }
+    // ✅ Al entrar: por defecto muestra el MES PASADO (ej: enero 2026 → diciembre 2025)
+    setDefaultToPreviousMonth();
+
     buildThead();
 
     await loadMappings();
