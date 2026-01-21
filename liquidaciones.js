@@ -1,10 +1,10 @@
-// liquidaciones.js — COMPLETO (adaptado a tu Firestore REAL)
-// ✅ Fuente única: Producción confirmada en:
-//    produccion/{ANO}/meses/{MES}/pacientes/{RUTDOC}/items/{FECHAISO_HHMM}
-//    (se lee vía collectionGroup('items') con filtros)
-// ✅ Cálculo: cruza con Tarifario de procedimientos (procedimientos.tarifas)
+// liquidaciones.js — COMPLETO (AJUSTADO A TU FIRESTORE REAL)
+// ✅ Fuente única: Producción confirmada (collectionGroup: items) del mes/año
+// ✅ Usa IDs si existen: clinicaId, cirugiaId/ambulatorioId, profesionalesId.*
+// ✅ Fallback a raw (CSV) si faltan IDs
+// ✅ Cálculo: cruza con Tarifario de procedimientos
 // ✅ Agrupa por profesional y genera detalle por línea (rol)
-// ✅ Pendientes: clínica/procedimiento no mapeado, profesional no existe, tarifa incompleta
+// ✅ Pendientes: clínica/proc no mapeado, profesional no existe, tarifa incompleta
 // ✅ Export CSV (resumen + detalle)
 // ✅ Sidebar común via layout.js
 
@@ -20,7 +20,14 @@ import {
 } from 'https://www.gstatic.com/firebasejs/11.7.3/firebase-firestore.js';
 
 /* =========================
-   Const / helpers
+   AJUSTE ÚNICO (SI CAMBIAS NOMBRES)
+========================= */
+// En tu esquema real, la producción está en: produccion/{ano}/meses/{mes}/pacientes/{rut}/items/{...}
+// Así que lo correcto es usar collectionGroup('items')
+const PROD_ITEMS_GROUP = 'items';
+
+/* =========================
+   Helpers
 ========================= */
 const $ = (id)=> document.getElementById(id);
 
@@ -61,6 +68,8 @@ function tipoPacienteNorm(v){
   if(x.includes('fona')) return 'fonasa';
   if(x.includes('isap')) return 'isapre';
   if(x.includes('part')) return 'particular';
+  // a veces viene "Vidatres" u otra isapre => tu import guarda tipoPaciente:"Isapre"
+  // si viene texto raro, dejamos normalizado
   return x || '';
 }
 function pillHtml(kind, text){
@@ -78,17 +87,14 @@ function download(filename, text, mime='text/plain'){
 }
 
 /* =========================
-   Mapping de roles
-   - roleId = clave en tarifario (procedimientos.tarifas.*.pacientes.*.honorarios[roleId])
-   - mapKey = clave en item.profesionales (tu schema real)
-   - rawField = fallback si viene desde raw (headers del CSV)
+   Mapping roles (tu item trae map profesionales / profesionalesId)
 ========================= */
-const ROLE_SOURCES = [
-  { mapKey: 'cirujano',     profIdKey: 'cirujanoId',     rawField: 'Cirujano',     roleId: 'r_cirujano',     label: 'CIRUJANO' },
-  { mapKey: 'anestesista',  profIdKey: 'anestesistaId',  rawField: 'Anestesista',  roleId: 'r_anestesista',  label: 'ANESTESISTA' },
-  { mapKey: 'ayudante1',    profIdKey: 'ayudante1Id',    rawField: 'Ayudante 1',   roleId: 'r_ayudante_1',   label: 'AYUDANTE 1' },
-  { mapKey: 'ayudante2',    profIdKey: 'ayudante2Id',    rawField: 'Ayudante 2',   roleId: 'r_ayudante_2',   label: 'AYUDANTE 2' },
-  { mapKey: 'arsenalera',   profIdKey: 'arsenaleraId',   rawField: 'Arsenalera',   roleId: 'r_arsenalera',   label: 'ARSENALERA' },
+const ROLE_SPEC = [
+  { roleId:'r_cirujano',    label:'CIRUJANO',    key:'cirujano',    idKey:'cirujanoId',    csvField:'Cirujano' },
+  { roleId:'r_anestesista', label:'ANESTESISTA', key:'anestesista', idKey:'anestesistaId', csvField:'Anestesista' },
+  { roleId:'r_ayudante_1',  label:'AYUDANTE 1',  key:'ayudante1',   idKey:'ayudante1Id',   csvField:'Ayudante 1' },
+  { roleId:'r_ayudante_2',  label:'AYUDANTE 2',  key:'ayudante2',   idKey:'ayudante2Id',   csvField:'Ayudante 2' },
+  { roleId:'r_arsenalera',  label:'ARSENALERA',  key:'arsenalera',  idKey:'arsenaleraId',  csvField:'Arsenalera' },
 ];
 
 /* =========================
@@ -97,28 +103,27 @@ const ROLE_SOURCES = [
 const state = {
   user: null,
 
-  // filtros UI
-  mesNum: null, // 1..12
+  mesNum: null,
   ano: null,
   q: '',
 
-  // catálogos
-  rolesMap: new Map(),             // roleId -> nombre
-  clinicasById: new Map(),         // C001 -> NOMBRE
-  clinicasByName: new Map(),       // normalize(nombre) -> C001
-  profesionalesByName: new Map(),  // normalize(nombre) -> profDoc
-  profesionalesById: new Map(),    // id -> profDoc   (🔥 para usar profesionalesId.*)
+  rolesMap: new Map(),          // roleId -> nombre
+  clinicasById: new Map(),      // C001 -> NOMBRE
+  clinicasByName: new Map(),    // normalize(nombre) -> C001
+
+  profesionalesByName: new Map(), // normalize(nombre) -> profDoc
+  profesionalesById: new Map(),   // id (string) -> profDoc
+
   procedimientosByName: new Map(), // normalize(nombre) -> procDoc
   procedimientosById: new Map(),   // id -> procDoc
 
-  // data
-  prodRows: [],        // items confirmados del mes (collectionGroup)
-  liquidResumen: [],   // agrupación por profesional
+  prodRows: [],          // docs items del mes
+  liquidResumen: [],
   lastDetailExportLines: []
 };
 
 /* =========================
-   Firestore refs (catálogos)
+   Firestore refs
 ========================= */
 const colRoles = collection(db, 'roles');
 const colClinicas = collection(db, 'clinicas');
@@ -159,7 +164,6 @@ async function loadClinicas(){
 
 async function loadProfesionales(){
   const snap = await getDocs(colProfesionales);
-
   const byName = new Map();
   const byId = new Map();
 
@@ -174,7 +178,7 @@ async function loadProfesionales(){
       estado: (cleanReminder(x.estado) || 'activo').toLowerCase()
     };
 
-    byId.set(d.id, doc);
+    byId.set(String(d.id), doc);
     if(nombre) byName.set(normalize(nombre), doc);
   });
 
@@ -198,12 +202,12 @@ async function loadProcedimientos(){
     const doc = {
       id,
       codigo: cleanReminder(x.codigo) || id,
-      nombre: toUpperSafe(nombre),
+      nombre: toUpperSafe(nombre || id),
       tipo,
       tarifas
     };
 
-    byId.set(id, doc);
+    byId.set(String(id), doc);
     if(nombre) byName.set(normalize(nombre), doc);
   });
 
@@ -212,9 +216,7 @@ async function loadProcedimientos(){
 }
 
 /* =========================
-   Load Producción confirmada (mes/año)
-   🔥 TU FIRESTORE: .../pacientes/{rutDoc}/items/{...}
-   -> usamos collectionGroup('items') filtrando por ano/mesNum/confirmado
+   Load Producción (collectionGroup items)
 ========================= */
 function monthNameEs(m){
   return ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'][m-1] || '';
@@ -223,11 +225,15 @@ function monthNameEs(m){
 async function loadProduccionMes(){
   if(!state.mesNum || !state.ano) return;
 
-  // OJO:
-  // Esto requiere un índice compuesto si tu proyecto lo pide.
-  // Si Firestore te muestra link de "create index", créalo (es normal).
+  const colItemsGroup = collectionGroup(db, PROD_ITEMS_GROUP);
+
+  // Tu item real tiene:
+  // - ano (number)
+  // - mesNum (number)
+  // - confirmado (boolean)
+  // - estado (string) "activa" / "anulada" etc.
   const qy = query(
-    collectionGroup(db, 'items'),
+    colItemsGroup,
     where('ano','==', Number(state.ano)),
     where('mesNum','==', Number(state.mesNum)),
     where('confirmado','==', true)
@@ -239,23 +245,18 @@ async function loadProduccionMes(){
   snap.forEach(d=>{
     const x = d.data() || {};
 
-    // reglas duras según tu schema real
-    if(x.suspendida === true) return;
-    if(x.estado && normalize(x.estado) !== 'activa') return;
+    // Ignorar anuladas (si tu import usa otro texto, agrega aquí)
+    const est = normalize(x.estado || '');
+    if(est === 'anulada' || est === 'anulado' || est === 'cancelada') return;
 
-    out.push({
-      id: d.id,
-      // guardo todo el doc + raw dentro (porque tú lo tienes)
-      item: x,
-      raw: (x.raw && typeof x.raw === 'object') ? x.raw : x
-    });
+    out.push({ id: d.id, data: x });
   });
 
   state.prodRows = out;
 }
 
 /* =========================
-   Leer honorario desde procedimientos.tarifas
+   Tarifario: procedimientos.tarifas[clinicaId].pacientes[tipo].honorarios[roleId]
 ========================= */
 function getHonorarioFromTarifa(procDoc, clinicaId, tipoPaciente, roleId){
   try{
@@ -281,11 +282,12 @@ function getHonorarioFromTarifa(procDoc, clinicaId, tipoPaciente, roleId){
 }
 
 /* =========================
-   Helpers para raw (fallback)
+   Fallback raw (por si faltan IDs)
 ========================= */
 function pickRaw(raw, key){
   const direct = raw?.[key];
   if(direct !== undefined) return direct;
+
   const nk = normalize(key);
   for(const k of Object.keys(raw || {})){
     if(normalize(k) === nk) return raw[k];
@@ -294,75 +296,70 @@ function pickRaw(raw, key){
 }
 
 /* =========================
-   Construir liquidaciones desde producción REAL
+   Build liquidaciones
 ========================= */
 function buildLiquidaciones(){
   const lines = [];
 
   for(const row of state.prodRows){
-    const item = row.item || {};
-    const raw = row.raw || {};
+    const x = row.data || {};
+    const raw = (x.raw && typeof x.raw === 'object') ? x.raw : {};
 
-    // Fecha/hora
-    const fecha = fmtDateISOorDMY(item.fechaISO || pickRaw(raw,'Fecha'));
-    const hora = cleanReminder(item.horaHM || pickRaw(raw,'Hora'));
+    // Fecha/hora: tu item trae fechaISO y horaHM
+    const fecha = fmtDateISOorDMY(x.fechaISO || pickRaw(raw,'Fecha'));
+    const hora = cleanReminder(x.horaHM || pickRaw(raw,'Hora'));
 
-    // Clínica: preferir clinicaId del item (ya viene mapeado)
-    const clinicaId =
-      cleanReminder(item.clinicaId) ||
-      (()=>{
-        const clinicaName = toUpperSafe(cleanReminder(item.clinica || pickRaw(raw,'Clínica')));
-        return state.clinicasByName.get(normalize(clinicaName)) || '';
-      })();
-
-    const clinicaNameFromItem = toUpperSafe(cleanReminder(item.clinica || pickRaw(raw,'Clínica')));
+    // Clínica: usa clinicaId si viene
+    const clinicaId = cleanReminder(x.clinicaId) || '';
+    const clinicaName = toUpperSafe(cleanReminder(x.clinica || pickRaw(raw,'Clínica')));
     const clinicaLabel = clinicaId
-      ? (state.clinicasById.get(clinicaId) || clinicaNameFromItem || clinicaId)
-      : (clinicaNameFromItem || '(Sin clínica)');
+      ? (state.clinicasById.get(clinicaId) || clinicaName || clinicaId)
+      : (clinicaName || '(Sin clínica)');
 
-    // Procedimiento: item.cirugia + raw['Cirugía']
-    const cirugiaName = toUpperSafe(cleanReminder(item.cirugia || pickRaw(raw,'Cirugía')));
-    const procDoc = state.procedimientosByName.get(normalize(cirugiaName)) || null;
-    const procId = procDoc?.id || '';
+    // Procedimiento: usa cirugiaId/ambulatorioId si viene
+    const procId = cleanReminder(x.cirugiaId || x.ambulatorioId) || '';
+    const cirugiaName = toUpperSafe(cleanReminder(x.cirugia || pickRaw(raw,'Cirugía')));
+    const procDoc =
+      (procId && state.procedimientosById.get(String(procId))) ||
+      state.procedimientosByName.get(normalize(cirugiaName)) ||
+      null;
+
     const procLabel = procDoc?.nombre || cirugiaName || '(Sin procedimiento)';
+    const procRealId = procDoc?.id || procId || '';
 
-    // Tipo paciente: item.tipoPaciente (viene "Isapre") o raw
-    const pacienteTipo = tipoPacienteNorm(item.tipoPaciente || pickRaw(raw,'Tipo de Paciente') || pickRaw(raw,'Previsión'));
-    const pacienteNombre = toUpperSafe(cleanReminder(item.nombrePaciente || pickRaw(raw,'Nombre Paciente')));
-    const pacienteRut = cleanReminder(item.rut || pickRaw(raw,'RUT'));
+    // Tipo paciente: tu item trae tipoPaciente (ej: "Isapre")
+    const pacienteTipo = tipoPacienteNorm(x.tipoPaciente || pickRaw(raw,'Tipo de Paciente') || pickRaw(raw,'Previsión'));
+    const pacienteNombre = toUpperSafe(cleanReminder(x.nombrePaciente || pickRaw(raw,'Nombre Paciente')));
 
-    // Informativos
-    const valor = asNumberLoose(item.valor || pickRaw(raw,'Valor'));
-    const hmq = asNumberLoose(item.hmq || pickRaw(raw,'HMQ'));
-    const dp = asNumberLoose(item.derechosPabellon || pickRaw(raw,'Derechos de Pabellón'));
-    const ins = asNumberLoose(item.insumos || pickRaw(raw,'Insumos'));
+    const valor = Number(x.hmq || 0) ? (Number(x.valor || 0) || 0) : (asNumberLoose(pickRaw(raw,'Valor')));
+    const hmq = Number(x.hmq || 0) || asNumberLoose(pickRaw(raw,'HMQ'));
+    const dp  = Number(x.derechosPabellon || 0) || asNumberLoose(pickRaw(raw,'Derechos de Pabellón'));
+    const ins = Number(x.insumos || 0) || asNumberLoose(pickRaw(raw,'Insumos'));
 
-    // Por cada rol, generamos línea si existe profesional
-    const profMap = (item.profesionales && typeof item.profesionales === 'object') ? item.profesionales : {};
-    const profIdMap = (item.profesionalesId && typeof item.profesionalesId === 'object') ? item.profesionalesId : {};
-
-    for(const rf of ROLE_SOURCES){
+    // Por cada rol, generar línea si hay profesional
+    for(const rf of ROLE_SPEC){
       const profName =
-        toUpperSafe(cleanReminder(profMap?.[rf.mapKey] || pickRaw(raw, rf.rawField)));
+        toUpperSafe(cleanReminder(x.profesionales?.[rf.key] || pickRaw(raw, rf.csvField))) || '';
 
       const profId =
-        cleanReminder(profIdMap?.[rf.profIdKey] || '');
+        cleanReminder(x.profesionalesId?.[rf.idKey]) || '';
 
       if(!profName && !profId) continue;
 
-      // resolver profesional por ID (preferido), si no por nombre
-      const profDocById = profId ? (state.profesionalesById.get(profId) || null) : null;
-      const profDocByName = !profDocById && profName ? (state.profesionalesByName.get(normalize(profName)) || null) : null;
-      const profDoc = profDocById || profDocByName;
+      const profDoc =
+        (profId && state.profesionalesById.get(String(profId))) ||
+        (profName && state.profesionalesByName.get(normalize(profName))) ||
+        null;
 
-      // pendiente + monto
       let monto = 0;
       const pend = [];
 
-      if(!clinicaId) pend.push('Clínica no mapeada');
-      if(!procDoc) pend.push('Procedimiento no mapeado');
+      // Reglas de pendiente
+      if(!clinicaId) pend.push('ClínicaId vacío (import)');
+      if(!procDoc) pend.push('Procedimiento no mapeado (nombre/id)');
       if(!pacienteTipo) pend.push('Tipo paciente vacío');
 
+      // Tarifa
       if(clinicaId && procDoc && pacienteTipo){
         const tar = getHonorarioFromTarifa(procDoc, clinicaId, pacienteTipo, rf.roleId);
         if(tar.ok) monto = tar.monto;
@@ -372,38 +369,38 @@ function buildLiquidaciones(){
       if(!profDoc) pend.push('Profesional no existe en catálogo');
 
       lines.push({
-        // ids
-        prodItemId: row.id,
-        importId: cleanReminder(item.importId || ''),
-        // paciente
-        pacienteNombre,
-        pacienteRut,
-        tipoPaciente: pacienteTipo,
-        // contexto
+        prodId: row.id,
+
         fecha,
         hora,
+
         clinicaId,
         clinicaNombre: clinicaLabel,
-        procedimientoId: procId,
+
+        procedimientoId: procRealId,
         procedimientoNombre: procLabel,
-        // rol/profesional
+
+        tipoPaciente: pacienteTipo,
+        pacienteNombre,
+
         roleId: rf.roleId,
         roleNombre: state.rolesMap.get(rf.roleId) || rf.label,
-        profesionalNombre: profDoc?.nombre || profName || '(Sin nombre)',
-        profesionalId: profDoc?.id || (profId || ''),
+
+        profesionalNombre: profDoc?.nombre || profName || (profId ? String(profId) : ''),
+        profesionalId: profDoc?.id || profId || '',
         profesionalRut: profDoc?.rut || '',
         profesionalTipo: profDoc?.tipo || '',
-        // pago
+
         monto,
         pendiente: pend.length > 0,
         observacion: pend.join(' · '),
-        // informativos
-        info: { valor, hmq, dp, ins, pagado: !!item.pagado, fechaPago: item.fechaPago || null }
+
+        info: { valor, hmq, dp, ins }
       });
     }
   }
 
-  // Agrupar por profesionalKey
+  // Agrupar por profesional
   const map = new Map();
 
   for(const ln of lines){
@@ -432,7 +429,6 @@ function buildLiquidaciones(){
     return { ...x, status };
   });
 
-  // Orden: OK primero por total desc, luego pendientes
   resumen.sort((a,b)=>{
     if(a.status !== b.status){
       if(a.status === 'ok') return -1;
@@ -453,7 +449,7 @@ function matchesSearch(agg, q){
 
   const hay = normalize([
     agg.nombre, agg.rut, agg.tipo,
-    ...agg.lines.map(l=> `${l.roleNombre} ${l.clinicaNombre} ${l.procedimientoNombre} ${l.pacienteNombre} ${l.pacienteRut} ${l.tipoPaciente} ${l.observacion}`)
+    ...agg.lines.map(l=> `${l.roleNombre} ${l.clinicaNombre} ${l.procedimientoNombre} ${l.pacienteNombre} ${l.tipoPaciente} ${l.observacion}`)
   ].join(' '));
 
   return hay.includes(s);
@@ -466,7 +462,6 @@ function paint(){
   const rows = state.liquidResumen.filter(x=> matchesSearch(x, state.q));
   $('pillCount').textContent = `${rows.length} profesional${rows.length===1?'':'es'}`;
 
-  // estado global
   const pendientes = rows.reduce((a,b)=> a + (b.pendientesCount||0), 0);
   const pill = $('pillEstado');
 
@@ -555,9 +550,9 @@ function openDetalle(agg){
     const tr = document.createElement('tr');
     tr.innerHTML = `
       <td class="mono">${escapeHtml(l.fecha || '')} ${escapeHtml(l.hora || '')}</td>
-      <td>${escapeHtml(l.clinicaNombre || '')}<div class="mini muted mono">${escapeHtml(l.clinicaId || '')}</div></td>
+      <td>${escapeHtml(l.clinicaNombre || '')}</td>
       <td>${escapeHtml(l.procedimientoNombre || '')}<div class="mini muted mono">${escapeHtml(l.procedimientoId || '')}</div></td>
-      <td>${escapeHtml(l.pacienteNombre || '')}<div class="mini muted">${escapeHtml((l.tipoPaciente||'').toUpperCase())} · ${escapeHtml(l.pacienteRut || '')}</div></td>
+      <td>${escapeHtml(l.pacienteNombre || '')}<div class="mini muted">${escapeHtml((l.tipoPaciente||'').toUpperCase())}</div></td>
       <td>${escapeHtml(l.roleNombre || '')}<div class="mini muted mono">${escapeHtml(l.roleId || '')}</div></td>
       <td><b>${clp(l.monto || 0)}</b></td>
       <td>${st}</td>
@@ -596,11 +591,9 @@ function exportDetalleCSV(){
     'mes','ano',
     'profesional','rut','tipo',
     'fecha','hora',
-    'clinicaId','clinica',
-    'procedimientoId','procedimiento',
-    'tipoPaciente','paciente','pacienteRut',
+    'clinica','procedimiento','tipoPaciente','paciente',
     'rol','monto','pendiente','observacion',
-    'prodItemId','importId'
+    'prodId'
   ];
 
   const items = [];
@@ -614,19 +607,15 @@ function exportDetalleCSV(){
         tipo: a.tipo || '',
         fecha: l.fecha || '',
         hora: l.hora || '',
-        clinicaId: l.clinicaId || '',
         clinica: l.clinicaNombre || '',
-        procedimientoId: l.procedimientoId || '',
         procedimiento: l.procedimientoNombre || '',
         tipoPaciente: l.tipoPaciente || '',
         paciente: l.pacienteNombre || '',
-        pacienteRut: l.pacienteRut || '',
         rol: l.roleNombre || '',
         monto: String(l.monto || 0),
         pendiente: l.pendiente ? 'SI' : 'NO',
         observacion: l.observacion || '',
-        prodItemId: l.prodItemId || '',
-        importId: l.importId || ''
+        prodId: l.prodId || ''
       });
     }
   }
@@ -641,11 +630,9 @@ function exportDetalleProfesional(agg){
     'mes','ano',
     'profesional','rut','tipo',
     'fecha','hora',
-    'clinicaId','clinica',
-    'procedimientoId','procedimiento',
-    'tipoPaciente','paciente','pacienteRut',
+    'clinica','procedimiento','tipoPaciente','paciente',
     'rol','monto','pendiente','observacion',
-    'prodItemId','importId'
+    'prodId'
   ];
 
   const items = (agg.lines || []).map(l=>({
@@ -656,19 +643,15 @@ function exportDetalleProfesional(agg){
     tipo: agg.tipo || '',
     fecha: l.fecha || '',
     hora: l.hora || '',
-    clinicaId: l.clinicaId || '',
     clinica: l.clinicaNombre || '',
-    procedimientoId: l.procedimientoId || '',
     procedimiento: l.procedimientoNombre || '',
     tipoPaciente: l.tipoPaciente || '',
     paciente: l.pacienteNombre || '',
-    pacienteRut: l.pacienteRut || '',
     rol: l.roleNombre || '',
     monto: String(l.monto || 0),
     pendiente: l.pendiente ? 'SI' : 'NO',
     observacion: l.observacion || '',
-    prodItemId: l.prodItemId || '',
-    importId: l.importId || ''
+    prodId: l.prodId || ''
   }));
 
   const csv = toCSV(headers, items);
@@ -681,7 +664,6 @@ function exportDetalleProfesional(agg){
    Boot / UI init
 ========================= */
 function initMonthYearSelectors(){
-  // Meses
   const mesSel = $('mes');
   mesSel.innerHTML = '';
   for(let m=1;m<=12;m++){
@@ -691,7 +673,6 @@ function initMonthYearSelectors(){
     mesSel.appendChild(opt);
   }
 
-  // Año
   const now = new Date();
   const y = now.getFullYear();
   const anoSel = $('ano');
@@ -744,23 +725,21 @@ requireAuth({
 
     initMonthYearSelectors();
 
-    // buscador
     $('q').addEventListener('input', (e)=>{
       state.q = (e.target.value || '').toString();
       paint();
     });
 
-    // botones
     $('btnRecalcular').addEventListener('click', recalc);
     $('btnCSVResumen').addEventListener('click', exportResumenCSV);
     $('btnCSVDetalle').addEventListener('click', exportDetalleCSV);
 
-    // modal
     $('btnClose').addEventListener('click', closeDetalle);
     $('btnCerrar2').addEventListener('click', closeDetalle);
     $('modalBackdrop').addEventListener('click', (e)=>{
       if(e.target === $('modalBackdrop')) closeDetalle();
     });
+
     $('btnExportDetalleProf').addEventListener('click', ()=>{
       if(!state.lastDetailExportLines.length){
         toast('No hay detalle abierto');
@@ -776,7 +755,6 @@ requireAuth({
       exportDetalleProfesional(agg);
     });
 
-    // catálogos
     await Promise.all([
       loadRoles(),
       loadClinicas(),
