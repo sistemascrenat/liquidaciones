@@ -1,16 +1,4 @@
 // liquidaciones.js — COMPLETO (AJUSTADO A TU FIRESTORE REAL)
-// ✅ Fuente única: Producción confirmada (collectionGroup: items) del mes/año
-// ✅ Usa IDs si existen: clinicaId, cirugiaId/ambulatorioId, profesionalesId.*
-// ✅ Fallback a raw (CSV) si faltan IDs
-// ✅ Cálculo: cruza con Tarifario de procedimientos
-// ✅ Agrupa por profesional (si no existe en catálogo, agrupa por nombre de producción)
-// ✅ NUEVO: ALERTAS vs PENDIENTES
-//    - ALERTA = falta de maestro (profesional/clinica/procedimiento) -> hay que corregir/importar
-//    - PENDIENTE = tarifa incompleta (existe maestro pero falta honorario)
-// ✅ Orden tabla: ALERTA arriba, luego PENDIENTE, luego OK (dentro por TOTAL desc)
-// ✅ UI: siempre muestra Nombre profesional + RUT personal. Si es jurídica: muestra empresa + RUT empresa en gris
-// ✅ Export CSV (resumen + detalle + por profesional)
-// ✅ Sidebar común via layout.js
 
 import { db } from './firebase-init.js';
 import { requireAuth } from './auth.js';
@@ -103,7 +91,7 @@ function download(filename, text, mime='text/plain'){
 ========================= */
 
 // Ajusta esto si quieres un logo (opcional). Si no existe, simplemente no lo dibuja.
-const PDF_ASSET_LOGO_URL = 'logo-rennat.png'; // pon tu ruta real o déjalo así si lo subirás
+const PDF_ASSET_LOGO_URL = 'logoCR.png'; // pon tu ruta real o déjalo así si lo subirás
 
 async function fetchAsArrayBuffer(url){
   try{
@@ -153,19 +141,32 @@ async function generarPDFLiquidacionProfesional(agg){
   page.drawRectangle({ x:M, y:y-48, width:width-2*M, height:48, color:soft, borderColor:rgb(0.86,0.90,0.93), borderWidth:1 });
   page.drawRectangle({ x:M, y:y-48, width:6, height:48, color:teal });
 
-  // Logo (opcional)
+  // Logo (opcional) — arriba a la derecha, con tamaño consistente
   const logoBytes = await fetchAsArrayBuffer(PDF_ASSET_LOGO_URL);
-  if(logoBytes){
-    try{
-      // intenta PNG
+  if (logoBytes) {
+    try {
       const logo = await pdfDoc.embedPng(logoBytes);
-      const w = 70;
-      const h = (logo.height/logo.width)*w;
-      page.drawImage(logo, { x: width - M - w, y: y - 40, width:w, height:h });
-    }catch(_e){
-      // si no es png, no lo dibuja
+
+      // Tamaño recomendado (ajústalo a gusto)
+      const logoW = 110;
+      const logoH = (logo.height / logo.width) * logoW;
+
+      // Ubicación: esquina superior derecha, respetando margen
+      const logoX = width - M - logoW;
+      const logoY = (y - 10) - logoH; // y actual es la parte "alta" del header
+
+      page.drawImage(logo, { x: logoX, y: logoY, width: logoW, height: logoH });
+
+      // Baja el cursor (y) para que el título/mes no se cruce con el logo
+      // (solo si el logo ocupa más altura que tu header)
+      // Ajuste suave: si quieres más aire, cambia 10 por 16.
+      // OJO: NO cambiamos "y" globalmente aquí, solo el "y" local del flujo:
+      // (como tú bajas y después con y -= 68, esto evita choques visuales)
+    } catch (_e) {
+      // si no es png o falla, no lo dibuja
     }
   }
+
 
   // Título
   page.drawText('LIQUIDACIÓN DE HONORARIOS', { x:M+14, y:y-30, size:14, font:fontBold, color:ink });
