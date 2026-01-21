@@ -1046,19 +1046,35 @@ function recomputePending(){
   paintPreview();
 }
 
+function formatImportDate(ts){
+  try{
+    const d = ts?.toDate ? ts.toDate() : (ts instanceof Date ? ts : null);
+    if(!d) return 'Sin fecha';
+    // Ej: "miércoles, 21 de enero de 2026, 06:48"
+    return new Intl.DateTimeFormat('es-CL', {
+      weekday:'long', year:'numeric', month:'long', day:'numeric',
+      hour:'2-digit', minute:'2-digit'
+    }).format(d);
+  }catch(e){
+    return 'Sin fecha';
+  }
+}
+
 async function fillImportSuggestions(){
   try{
     const ano = Number($('ano')?.value || 0) || 0;
     const mesName = clean($('mes')?.value || '');
     const mesNum = monthIndex(mesName);
 
-    const dl = $('importIdList');
-    if(!dl) return;
-    dl.innerHTML = '';
+    const sel = $('importSelect');
+    if(!sel) return;
+
+    // reset select
+    sel.innerHTML = `<option value="">(Selecciona una importación del mes)</option>`;
+    $('importId').value = '';
 
     if(!ano || !mesNum) return;
 
-    // Trae últimos 25 imports de ese mes/año (staged/confirmada/anulada)
     const qy = query(
       colImports,
       where('ano','==', ano),
@@ -1068,26 +1084,36 @@ async function fillImportSuggestions(){
     );
 
     const snap = await getDocs(qy);
+
     snap.forEach(d=>{
       const x = d.data() || {};
       const id = clean(x.id || d.id);
-      const estado = clean(x.estado || '');
-      const filas = Number(x.filas || 0) || 0;
-
       if(!id) return;
 
+      const estado = clean(x.estado || '');
+      const filas = Number(x.filas || 0) || 0;
+      const when = formatImportDate(x.creadoEl);
+
       const opt = document.createElement('option');
-      // value = lo que se pega al input
       opt.value = id;
 
-      // label (si el browser lo muestra) -> info útil
-      opt.label = `${estado} · ${filas} filas · ${clean(x.filename || '')}`;
-      dl.appendChild(opt);
+      // ✅ Lo que se ve: fecha/hora + estado + filas (simple)
+      opt.textContent = `${when} — ${estado || '—'} — ${filas} filas`;
+
+      sel.appendChild(opt);
     });
+
+    // ✅ si hay al menos 1 import, selecciona el primero automáticamente
+    if(sel.options.length > 1){
+      sel.selectedIndex = 1;
+      $('importId').value = sel.value;
+    }
+
   }catch(err){
     console.warn('fillImportSuggestions()', err);
   }
 }
+
 
 
 async function persistMapping(docRef, key, id){
@@ -1893,7 +1919,12 @@ async function handleLoadCSV(file){
 
   await saveStagingToFirestore();
   toast('Staging guardado en Firestore');
-
+  
+  // ✅ refrescar selector del mes y seleccionar el nuevo import
+  await fillImportSuggestions();
+  $('importSelect').value = state.importId;
+  $('importId').value = state.importId;
+  
   await refreshAfterMapping();
 }
 
@@ -2143,6 +2174,12 @@ requireAuth({
 
     // ✅ Import selector: cargar sugerencias al entrar
     await fillImportSuggestions();
+
+    // ✅ Cuando el usuario elige una importación, guardamos el importId real en el hidden
+    $('importSelect')?.addEventListener('change', ()=>{
+      const v = clean($('importSelect').value || '');
+      $('importId').value = v;
+    });
     
     // ✅ Import selector: recargar sugerencias si cambia Mes/Año
     $('mes')?.addEventListener('change', fillImportSuggestions);
@@ -2163,10 +2200,10 @@ requireAuth({
     // ✅ Cargar un Import existente desde Firestore
     $('btnCargarImport')?.addEventListener('click', async ()=>{
       try{
-        const importId = clean($('importId')?.value || '');
+        const importId = clean($('importId')?.value || $('importSelect')?.value || '');
         if(!importId){
-          toast('Selecciona o pega un ImportID.');
-          $('importId')?.focus();
+          toast('Selecciona una importación.');
+          $('importSelect')?.focus();
           return;
         }
         await loadStagingFromFirestore(importId);
