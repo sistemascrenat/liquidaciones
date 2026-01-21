@@ -156,12 +156,14 @@
           </div>
           <div class="field">
             <label>Importación</label>
-            <input id="importId"
-                   list="importIdList"
-                   placeholder="(se genera al cargar CSV)"
-                   autocomplete="off" />
-            
-            <datalist id="importIdList"></datalist>
+          
+            <!-- ✅ Select real (muestra fecha/hora/estado) -->
+            <select id="importSelect">
+              <option value="">(Selecciona una importación del mes)</option>
+            </select>
+          
+            <!-- ✅ ImportID real (técnico) que usa el JS internamente -->
+            <input id="importId" type="hidden" />
           </div>
         </div>
 
