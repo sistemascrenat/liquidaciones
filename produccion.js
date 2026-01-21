@@ -1992,7 +1992,11 @@ requireAuth({
     $('who').textContent = `Conectado: ${user.email}`;
     wireLogout();
 
-    $('mes').value = 'Octubre';
+    if(!$('mes').value) {
+      const now = new Date();
+      const meses = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+      $('mes').value = meses[now.getMonth()];
+    }
     buildThead();
 
     await loadMappings();
