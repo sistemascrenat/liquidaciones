@@ -2108,6 +2108,28 @@ requireAuth({
 
     $('btnResolver').addEventListener('click', openResolverModal);
 
+    // ✅ Cargar un Import existente desde Firestore
+    $('btnCargarImport')?.addEventListener('click', async ()=>{
+      try{
+        const importId = clean($('importId')?.value || '');
+        if(!importId){
+          toast('Pega un ImportID para cargar.');
+          $('importId')?.focus();
+          return;
+        }
+    
+        await loadStagingFromFirestore(importId);
+    
+        // refresca UI
+        setButtons();
+        paintPreview();
+      }catch(err){
+        console.error(err);
+        toast('Error cargando import (ver consola)');
+      }
+    });
+
+
     $('btnConfirmar').addEventListener('click', async ()=>{
       try{ await confirmarImportacion(); }
       catch(err){ console.error(err); toast('Error confirmando (ver consola)'); }
