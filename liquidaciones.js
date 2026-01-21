@@ -404,7 +404,7 @@ function buildLiquidaciones(){
   const map = new Map();
 
   for(const ln of lines){
-    const key = ln.profesionalId ? `prof:${ln.profesionalId}` : `name:${normalize(ln.profesionalNombre)}`;
+    const key = ln.profesionalId ? `RUT Personal:${ln.profesionalId}` : `Nombre:${normalize(ln.profesionalNombre)}`;
     if(!map.has(key)){
       map.set(key, {
         key,
