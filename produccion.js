@@ -1418,6 +1418,10 @@ async function saveStagingToFirestore(){
 
     slice.forEach((it, k)=>{
       const itemId = `ITEM_${pad(idx + k + 1, 4)}`;
+    
+      // ✅ clave: guardamos el itemId dentro del objeto en memoria
+      it.itemId = itemId;
+    
       batch.set(doc(itemsCol, itemId), {
         importId,
         itemId,
@@ -1434,6 +1438,60 @@ async function saveStagingToFirestore(){
     idx += chunkSize;
   }
 }
+
+async function loadStagingFromFirestore(importId){
+  if(!importId){ toast('Falta ImportID'); return; }
+
+  const refImport = doc(db, 'produccion_imports', importId);
+  const snapImp = await getDoc(refImport);
+  if(!snapImp.exists()){
+    toast('No existe ese ImportID');
+    return;
+  }
+
+  const imp = snapImp.data() || {};
+
+  // set estado base
+  state.importId = importId;
+  state.status = clean(imp.estado) || 'staged';
+  state.monthName = clean(imp.mes) || '';
+  state.monthNum = Number(imp.mesNum || 0) || 0;
+  state.year = Number(imp.ano || 0) || 0;
+  state.filename = clean(imp.filename) || '';
+
+  $('importId').value = importId;
+  if(state.year) $('ano').value = String(state.year);
+  if(state.monthName) $('mes').value = state.monthName;
+
+  // leer items staging
+  const itemsCol = collection(db, 'produccion_imports', importId, 'items');
+  const qy = query(itemsCol, orderBy('idx','asc'));
+  const snapItems = await getDocs(qy);
+
+  const staged = [];
+  snapItems.forEach(d=>{
+    const x = d.data() || {};
+    staged.push({
+      idx: Number(x.idx || 0) || 0,
+      itemId: clean(x.itemId) || d.id, // ✅ clave para editar
+      raw: x.raw || {},
+      normalizado: x.normalizado || {},
+      resolved: null,
+      _search: null
+    });
+  });
+
+  state.stagedItems = staged;
+  state.ui.page = 1;
+  state.ui.query = '';
+  $('q').value = '';
+
+  buildThead();
+  await refreshAfterMapping();
+
+  toast(`✅ Cargado import ${importId} (${staged.length} filas)`);
+}
+
 
 async function reemplazarMesAntesDeConfirmar(YYYY, MM, newImportId){
   // 1) Marcar items activos del mes como “reemplazado”
@@ -1917,6 +1975,27 @@ async function saveOneItemPatch(it, patch){
 
   // 2) recalcula resolución local
   it.resolved = resolveOneItem(it.normalizado);
+
+  // 3) ✅ si está en STAGING, persiste el cambio en produccion_imports/{importId}/items/{itemId}
+  if(state.status === 'staged'){
+    const importId = state.importId;
+    const itemId = it.itemId;
+  
+    if(importId && itemId){
+      const refStagingItem = doc(db, 'produccion_imports', importId, 'items', itemId);
+  
+      await setDoc(refStagingItem, {
+        raw: it.raw,
+        normalizado: it.normalizado,
+        actualizadoEl: serverTimestamp(),
+        actualizadoPor: state.user?.email || ''
+      }, { merge:true });
+  
+    } else {
+      // si no hay itemId, no podemos persistir (por eso el patch #1 es clave)
+      console.warn('STAGING edit sin itemId/importId, no se pudo guardar en Firestore', { importId, itemId });
+    }
+  }
 
   // 3) si ya está confirmada, persiste en producción
   if(state.status === 'confirmada'){
