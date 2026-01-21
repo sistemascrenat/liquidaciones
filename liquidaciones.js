@@ -3,9 +3,13 @@
 // ✅ Usa IDs si existen: clinicaId, cirugiaId/ambulatorioId, profesionalesId.*
 // ✅ Fallback a raw (CSV) si faltan IDs
 // ✅ Cálculo: cruza con Tarifario de procedimientos
-// ✅ Agrupa por profesional y genera detalle por línea (rol)
-// ✅ Pendientes: clínica/proc no mapeado, profesional no existe, tarifa incompleta
-// ✅ Export CSV (resumen + detalle)
+// ✅ Agrupa por profesional (si no existe en catálogo, agrupa por nombre de producción)
+// ✅ NUEVO: ALERTAS vs PENDIENTES
+//    - ALERTA = falta de maestro (profesional/clinica/procedimiento) -> hay que corregir/importar
+//    - PENDIENTE = tarifa incompleta (existe maestro pero falta honorario)
+// ✅ Orden tabla: ALERTA arriba, luego PENDIENTE, luego OK (dentro por TOTAL desc)
+// ✅ UI: siempre muestra Nombre profesional + RUT personal. Si es jurídica: muestra empresa + RUT empresa en gris
+// ✅ Export CSV (resumen + detalle + por profesional)
 // ✅ Sidebar común via layout.js
 
 import { db } from './firebase-init.js';
@@ -23,7 +27,6 @@ import {
    AJUSTE ÚNICO (SI CAMBIAS NOMBRES)
 ========================= */
 // En tu esquema real, la producción está en: produccion/{ano}/meses/{mes}/pacientes/{rut}/items/{...}
-// Así que lo correcto es usar collectionGroup('items')
 const PROD_ITEMS_GROUP = 'items';
 
 /* =========================
@@ -68,11 +71,10 @@ function tipoPacienteNorm(v){
   if(x.includes('fona')) return 'fonasa';
   if(x.includes('isap')) return 'isapre';
   if(x.includes('part')) return 'particular';
-  // a veces viene "Vidatres" u otra isapre => tu import guarda tipoPaciente:"Isapre"
-  // si viene texto raro, dejamos normalizado
   return x || '';
 }
 function pillHtml(kind, text){
+  // kind: ok | warn | bad
   const cls = kind === 'ok' ? 'ok' : (kind === 'warn' ? 'warn' : (kind === 'bad' ? 'bad' : ''));
   return `<span class="pill ${cls}">${escapeHtml(text)}</span>`;
 }
@@ -107,17 +109,20 @@ const state = {
   ano: null,
   q: '',
 
-  rolesMap: new Map(),          // roleId -> nombre
-  clinicasById: new Map(),      // C001 -> NOMBRE
-  clinicasByName: new Map(),    // normalize(nombre) -> C001
+  rolesMap: new Map(),            // roleId -> nombre
+  clinicasById: new Map(),        // C001 -> NOMBRE
+  clinicasByName: new Map(),      // normalize(nombre) -> C001
 
-  profesionalesByName: new Map(), // normalize(nombre) -> profDoc
-  profesionalesById: new Map(),   // id (string) -> profDoc
+  // Catálogo profesionales (TU esquema real):
+  // docId = rutId (sin guiones, sin ceros) normalmente
+  // campos: nombreProfesional, razonSocial, rut, rutEmpresa, tipoPersona, estado...
+  profesionalesByName: new Map(), // normalize(nombreProfesional) -> profDoc
+  profesionalesById: new Map(),   // rutId string -> profDoc
 
   procedimientosByName: new Map(), // normalize(nombre) -> procDoc
   procedimientosById: new Map(),   // id -> procDoc
 
-  prodRows: [],          // docs items del mes
+  prodRows: [],              // docs items del mes
   liquidResumen: [],
   lastDetailExportLines: []
 };
@@ -169,17 +174,34 @@ async function loadProfesionales(){
 
   snap.forEach(d=>{
     const x = d.data() || {};
-    const nombre = cleanReminder(x.nombre) || cleanReminder(x.empresa) || cleanReminder(x.razonSocial) || '';
+
+    // TU ESQUEMA REAL
+    const rutId = cleanReminder(x.rutId) || d.id; // docId suele ser rutId
+    const nombreProfesional = cleanReminder(x.nombreProfesional) || '';
+    const razonSocial = cleanReminder(x.razonSocial) || '';
+    const rutPersonal = cleanReminder(x.rut) || '';
+    const rutEmpresa = cleanReminder(x.rutEmpresa) || '';
+    const tipoPersona = (cleanReminder(x.tipoPersona) || '').toLowerCase(); // natural | juridica
+    const estado = (cleanReminder(x.estado) || 'activo').toLowerCase();
+
     const doc = {
-      id: d.id,
-      nombre: toUpperSafe(nombre || d.id),
-      rut: cleanReminder(x.rut) || '',
-      tipo: cleanReminder(x.tipo) || cleanReminder(x.personaTipo) || '',
-      estado: (cleanReminder(x.estado) || 'activo').toLowerCase()
+      id: String(rutId || d.id),
+      rutId: String(rutId || d.id),
+
+      // Siempre persona (titular)
+      nombreProfesional: toUpperSafe(nombreProfesional || ''),
+      rut: rutPersonal,
+
+      // Empresa (si aplica)
+      razonSocial: toUpperSafe(razonSocial || ''),
+      rutEmpresa: rutEmpresa,
+
+      tipoPersona: tipoPersona || '',
+      estado
     };
 
-    byId.set(String(d.id), doc);
-    if(nombre) byName.set(normalize(nombre), doc);
+    byId.set(String(doc.id), doc);
+    if(nombreProfesional) byName.set(normalize(nombreProfesional), doc);
   });
 
   state.profesionalesByName = byName;
@@ -188,7 +210,6 @@ async function loadProfesionales(){
 
 async function loadProcedimientos(){
   const snap = await getDocs(colProcedimientos);
-
   const byName = new Map();
   const byId = new Map();
 
@@ -245,7 +266,7 @@ async function loadProduccionMes(){
   snap.forEach(d=>{
     const x = d.data() || {};
 
-    // Ignorar anuladas (si tu import usa otro texto, agrega aquí)
+    // Ignorar anuladas
     const est = normalize(x.estado || '');
     if(est === 'anulada' || est === 'anulado' || est === 'cancelada') return;
 
@@ -305,32 +326,43 @@ function buildLiquidaciones(){
     const x = row.data || {};
     const raw = (x.raw && typeof x.raw === 'object') ? x.raw : {};
 
-    // Fecha/hora: tu item trae fechaISO y horaHM
+    // Fecha/hora
     const fecha = fmtDateISOorDMY(x.fechaISO || pickRaw(raw,'Fecha'));
     const hora = cleanReminder(x.horaHM || pickRaw(raw,'Hora'));
 
-    // Clínica: usa clinicaId si viene
+    // Clínica (label siempre con lo que venga, pero alert si no existe en catálogo)
     const clinicaId = cleanReminder(x.clinicaId) || '';
-    const clinicaName = toUpperSafe(cleanReminder(x.clinica || pickRaw(raw,'Clínica')));
+    const clinicaNameRaw = toUpperSafe(cleanReminder(x.clinica || pickRaw(raw,'Clínica')));
     const clinicaLabel = clinicaId
-      ? (state.clinicasById.get(clinicaId) || clinicaName || clinicaId)
-      : (clinicaName || '(Sin clínica)');
+      ? (state.clinicasById.get(clinicaId) || clinicaNameRaw || clinicaId)
+      : (clinicaNameRaw || '(Sin clínica)');
 
-    // Procedimiento: usa cirugiaId/ambulatorioId si viene
+    const clinicaExists = !!(clinicaId && state.clinicasById.has(clinicaId));
+
+    // Procedimiento
     const procId = cleanReminder(x.cirugiaId || x.ambulatorioId) || '';
-    const cirugiaName = toUpperSafe(cleanReminder(x.cirugia || pickRaw(raw,'Cirugía')));
+    const cirugiaNameRaw = toUpperSafe(cleanReminder(x.cirugia || pickRaw(raw,'Cirugía')));
+
     const procDoc =
       (procId && state.procedimientosById.get(String(procId))) ||
-      state.procedimientosByName.get(normalize(cirugiaName)) ||
+      (cirugiaNameRaw && state.procedimientosByName.get(normalize(cirugiaNameRaw))) ||
       null;
 
-    const procLabel = procDoc?.nombre || cirugiaName || '(Sin procedimiento)';
+    const procLabel = procDoc?.nombre || cirugiaNameRaw || '(Sin procedimiento)';
     const procRealId = procDoc?.id || procId || '';
 
-    // Tipo paciente: tu item trae tipoPaciente (ej: "Isapre")
-    const pacienteTipo = tipoPacienteNorm(x.tipoPaciente || pickRaw(raw,'Tipo de Paciente') || pickRaw(raw,'Previsión'));
+    const procedimientoExists = !!procDoc;
+
+    // Tipo paciente
+    const pacienteTipo = tipoPacienteNorm(
+      x.tipoPaciente ||
+      pickRaw(raw,'Tipo de Paciente') ||
+      pickRaw(raw,'Previsión')
+    );
+
     const pacienteNombre = toUpperSafe(cleanReminder(x.nombrePaciente || pickRaw(raw,'Nombre Paciente')));
 
+    // Info import
     const valor = Number(x.hmq || 0) ? (Number(x.valor || 0) || 0) : (asNumberLoose(pickRaw(raw,'Valor')));
     const hmq = Number(x.hmq || 0) || asNumberLoose(pickRaw(raw,'HMQ'));
     const dp  = Number(x.derechosPabellon || 0) || asNumberLoose(pickRaw(raw,'Derechos de Pabellón'));
@@ -338,35 +370,51 @@ function buildLiquidaciones(){
 
     // Por cada rol, generar línea si hay profesional
     for(const rf of ROLE_SPEC){
-      const profName =
+      const profNameRaw =
         toUpperSafe(cleanReminder(x.profesionales?.[rf.key] || pickRaw(raw, rf.csvField))) || '';
 
-      const profId =
+      const profIdRaw =
         cleanReminder(x.profesionalesId?.[rf.idKey]) || '';
 
-      if(!profName && !profId) continue;
+      if(!profNameRaw && !profIdRaw) continue;
 
+      // Buscar en catálogo: por ID o por nombre personal
       const profDoc =
-        (profId && state.profesionalesById.get(String(profId))) ||
-        (profName && state.profesionalesByName.get(normalize(profName))) ||
+        (profIdRaw && state.profesionalesById.get(String(profIdRaw))) ||
+        (profNameRaw && state.profesionalesByName.get(normalize(profNameRaw))) ||
         null;
 
+      // Datos de “titular” siempre = persona (cuando existe en catálogo),
+      // si NO existe en catálogo, usamos lo que viene en producción.
+      const titularNombre = profDoc?.nombreProfesional || profNameRaw || (profIdRaw ? String(profIdRaw) : '');
+      const titularRut = profDoc?.rut || ''; // si no existe catálogo, rut puede quedar vacío
+      const tipoPersona = (profDoc?.tipoPersona || '').toLowerCase();
+      const empresaNombre = (tipoPersona === 'juridica') ? (profDoc?.razonSocial || '') : '';
+      const empresaRut = (tipoPersona === 'juridica') ? (profDoc?.rutEmpresa || '') : '';
+
+      // ALERTAS (maestros faltantes) vs PENDIENTES (tarifa)
+      const alerts = [];
+      const pendings = [];
+
+      // Alertas de maestro (esto se corrige “en origen”)
+      if(!profDoc) alerts.push('Profesional no existe en nómina (catálogo)');
+      if(!clinicaId) alerts.push('clinicaId vacío (import)');
+      else if(!clinicaExists) alerts.push('Clínica no existe en catálogo');
+      if(!procedimientoExists) alerts.push('Procedimiento no mapeado (catálogo)');
+
+      // Pendientes por datos faltantes (no maestro)
+      if(!pacienteTipo) pendings.push('Tipo paciente vacío');
+
+      // Tarifa (si hay base mínima)
       let monto = 0;
-      const pend = [];
-
-      // Reglas de pendiente
-      if(!clinicaId) pend.push('ClínicaId vacío (import)');
-      if(!procDoc) pend.push('Procedimiento no mapeado (nombre/id)');
-      if(!pacienteTipo) pend.push('Tipo paciente vacío');
-
-      // Tarifa
-      if(clinicaId && procDoc && pacienteTipo){
+      if(clinicaId && clinicaExists && procDoc && pacienteTipo){
         const tar = getHonorarioFromTarifa(procDoc, clinicaId, pacienteTipo, rf.roleId);
         if(tar.ok) monto = tar.monto;
-        else pend.push(tar.reason || 'Tarifa incompleta');
+        else pendings.push(tar.reason || 'Tarifa incompleta');
+      }else{
+        // Si falta maestro, no lo marcamos como “pendiente tarifa”, porque es “alerta”
+        // (así no se mezcla la causa real)
       }
-
-      if(!profDoc) pend.push('Profesional no existe en catálogo');
 
       lines.push({
         prodId: row.id,
@@ -374,11 +422,14 @@ function buildLiquidaciones(){
         fecha,
         hora,
 
+        // clínica y procedimiento SIEMPRE con label de lo que venga
         clinicaId,
         clinicaNombre: clinicaLabel,
+        clinicaExists,
 
         procedimientoId: procRealId,
         procedimientoNombre: procLabel,
+        procedimientoExists,
 
         tipoPaciente: pacienteTipo,
         pacienteNombre,
@@ -386,14 +437,29 @@ function buildLiquidaciones(){
         roleId: rf.roleId,
         roleNombre: state.rolesMap.get(rf.roleId) || rf.label,
 
-        profesionalNombre: profDoc?.nombre || profName || (profId ? String(profId) : ''),
-        profesionalId: profDoc?.id || profId || '',
-        profesionalRut: profDoc?.rut || '',
-        profesionalTipo: profDoc?.tipo || '',
+        // Profesional (titular siempre persona)
+        profesionalNombre: titularNombre,
+        profesionalId: profDoc?.id || profIdRaw || '',
+        profesionalRut: titularRut,
+        tipoPersona,
+
+        // Empresa (solo si juridica)
+        empresaNombre,
+        empresaRut,
 
         monto,
-        pendiente: pend.length > 0,
-        observacion: pend.join(' · '),
+
+        // flags
+        isAlerta: alerts.length > 0,
+        isPendiente: pendings.length > 0,
+        alerts,
+        pendings,
+
+        // texto para búsquedas/export
+        observacion: [
+          ...(alerts.length ? [`ALERTA: ${alerts.join(' · ')}`] : []),
+          ...(pendings.length ? [`PENDIENTE: ${pendings.join(' · ')}`] : []),
+        ].join(' | '),
 
         info: { valor, hmq, dp, ins }
       });
@@ -404,36 +470,63 @@ function buildLiquidaciones(){
   const map = new Map();
 
   for(const ln of lines){
-    const key = ln.profesionalId ? `RUT Personal:${ln.profesionalId}` : `Nombre:${normalize(ln.profesionalNombre)}`;
+    // Si existe en catálogo => agrupar por ID (rutId)
+    // Si no existe => agrupar por NOMBRE que viene en producción (para corregir fácil)
+    const key = ln.profesionalId
+      ? `ID:${String(ln.profesionalId)}`
+      : `DESCONOCIDO:${normalize(ln.profesionalNombre)}`;
+
     if(!map.has(key)){
       map.set(key, {
         key,
+
+        // Datos de UI:
         nombre: ln.profesionalNombre,
-        rut: ln.profesionalRut,
-        tipo: ln.profesionalTipo,
+        rut: ln.profesionalRut || '',
+        tipoPersona: ln.tipoPersona || '',
+
+        empresaNombre: ln.empresaNombre || '',
+        empresaRut: ln.empresaRut || '',
+
         casos: 0,
         total: 0,
+
+        alertasCount: 0,
         pendientesCount: 0,
+
         lines: []
       });
     }
+
     const agg = map.get(key);
     agg.casos += 1;
     agg.total += Number(ln.monto || 0) || 0;
-    if(ln.pendiente) agg.pendientesCount += 1;
+
+    if(ln.isAlerta) agg.alertasCount += 1;
+    if(!ln.isAlerta && ln.isPendiente) agg.pendientesCount += 1; // prioridad: si hay alerta no lo contamos como pendiente
+
+    // si dentro del mismo profesional hay líneas que sí traen empresa (jurídica),
+    // consolidamos para UI (por si algunas líneas venían sin doc al principio y luego sí)
+    if(!agg.tipoPersona && ln.tipoPersona) agg.tipoPersona = ln.tipoPersona;
+    if(!agg.empresaNombre && ln.empresaNombre) agg.empresaNombre = ln.empresaNombre;
+    if(!agg.empresaRut && ln.empresaRut) agg.empresaRut = ln.empresaRut;
+
     agg.lines.push(ln);
   }
 
   const resumen = [...map.values()].map(x=>{
-    const status = x.pendientesCount > 0 ? 'pendiente' : 'ok';
+    let status = 'ok';
+    if(x.alertasCount > 0) status = 'alerta';
+    else if(x.pendientesCount > 0) status = 'pendiente';
     return { ...x, status };
   });
 
+  // ORDEN: ALERTA arriba, luego PENDIENTE, luego OK (dentro por TOTAL desc)
+  const prio = (st)=> st === 'alerta' ? 0 : (st === 'pendiente' ? 1 : 2);
   resumen.sort((a,b)=>{
-    if(a.status !== b.status){
-      if(a.status === 'ok') return -1;
-      if(b.status === 'ok') return 1;
-    }
+    const pa = prio(a.status);
+    const pb = prio(b.status);
+    if(pa !== pb) return pa - pb;
     return (b.total||0) - (a.total||0);
   });
 
@@ -448,8 +541,20 @@ function matchesSearch(agg, q){
   if(!s) return true;
 
   const hay = normalize([
-    agg.nombre, agg.rut, agg.tipo,
-    ...agg.lines.map(l=> `${l.roleNombre} ${l.clinicaNombre} ${l.procedimientoNombre} ${l.pacienteNombre} ${l.tipoPaciente} ${l.observacion}`)
+    agg.nombre,
+    agg.rut,
+    agg.tipoPersona,
+    agg.empresaNombre,
+    agg.empresaRut,
+    ...agg.lines.map(l=> [
+      l.roleNombre,
+      l.clinicaNombre,
+      l.procedimientoNombre,
+      l.pacienteNombre,
+      l.tipoPaciente,
+      ...(l.alerts || []),
+      ...(l.pendings || [])
+    ].join(' '))
   ].join(' '));
 
   return hay.includes(s);
@@ -462,12 +567,16 @@ function paint(){
   const rows = state.liquidResumen.filter(x=> matchesSearch(x, state.q));
   $('pillCount').textContent = `${rows.length} profesional${rows.length===1?'':'es'}`;
 
+  const alertas = rows.reduce((a,b)=> a + (b.alertasCount||0), 0);
   const pendientes = rows.reduce((a,b)=> a + (b.pendientesCount||0), 0);
   const pill = $('pillEstado');
 
   if(!state.prodRows.length){
     pill.className = 'pill warn';
     pill.textContent = 'Sin producción confirmada';
+  }else if(alertas > 0){
+    pill.className = 'pill bad';
+    pill.textContent = `Alertas: ${alertas}`;
   }else if(pendientes > 0){
     pill.className = 'pill warn';
     pill.textContent = `Pendientes: ${pendientes}`;
@@ -483,22 +592,39 @@ function paint(){
   for(const agg of rows){
     const tr = document.createElement('tr');
 
-    const tipoTxt = agg.tipo ? toUpperSafe(agg.tipo) : '—';
-    const rutTxt = agg.rut || '—';
+    // UI: SIEMPRE mostrar nombre titular + RUT personal (si existe).
+    // Si juridica: subtítulo con empresa + rutEmpresa en gris.
+    const nombreTitular = agg.nombre || '—';
+    const rutTitular = agg.rut || '—';
+
+    const empresaSub = (agg.tipoPersona === 'juridica' && (agg.empresaNombre || agg.empresaRut))
+      ? `<div class="mini muted">${escapeHtml(agg.empresaNombre || '')}</div>`
+      : '';
+
+    const rutEmpresaSub = (agg.tipoPersona === 'juridica' && agg.empresaRut)
+      ? `<div class="mini muted mono">${escapeHtml(agg.empresaRut)}</div>`
+      : '';
 
     const statusPill =
       agg.status === 'ok'
         ? pillHtml('ok','OK')
-        : pillHtml('warn',`PENDIENTE · ${agg.pendientesCount}`);
+        : (agg.status === 'pendiente'
+            ? pillHtml('warn',`PENDIENTE · ${agg.pendientesCount}`)
+            : pillHtml('bad',`ALERTA · ${agg.alertasCount}`)
+          );
 
     tr.innerHTML = `
       <td class="mono">${i++}</td>
       <td>
-        <div class="big">${escapeHtml(agg.nombre || '—')}</div>
+        <div class="big">${escapeHtml(nombreTitular)}</div>
+        ${empresaSub}
         <div class="mini muted">${escapeHtml(agg.key)}</div>
       </td>
-      <td class="mono">${escapeHtml(rutTxt)}</td>
-      <td>${escapeHtml(tipoTxt)}</td>
+      <td class="mono">
+        ${escapeHtml(rutTitular)}
+        ${rutEmpresaSub}
+      </td>
+      <td>${escapeHtml((agg.tipoPersona || '—').toUpperCase())}</td>
       <td class="mono">${agg.casos}</td>
       <td><b>${clp(agg.total)}</b></td>
       <td>${statusPill}</td>
@@ -525,11 +651,24 @@ function paint(){
 function openDetalle(agg){
   $('modalBackdrop').style.display = 'grid';
 
+  // título siempre el nombre del profesional (persona)
   $('modalTitle').textContent = agg.nombre || 'Detalle';
-  $('modalSub').textContent = `${monthNameEs(state.mesNum)} ${state.ano} · Casos: ${agg.casos} · ${agg.rut ? 'RUT: '+agg.rut : ''}`;
+
+  // subtítulo: mes/año + casos + rut personal + (rut empresa si aplica)
+  const extraEmpresa = (agg.tipoPersona === 'juridica' && (agg.empresaNombre || agg.empresaRut))
+    ? ` · Empresa: ${agg.empresaNombre || ''}${agg.empresaRut ? ' ('+agg.empresaRut+')' : ''}`
+    : '';
+
+  $('modalSub').textContent =
+    `${monthNameEs(state.mesNum)} ${state.ano} · Casos: ${agg.casos}` +
+    (agg.rut ? ` · RUT: ${agg.rut}` : '') +
+    extraEmpresa;
 
   $('modalPillTotal').textContent = `TOTAL: ${clp(agg.total)}`;
-  $('modalPillPendientes').textContent = `Pendientes: ${agg.pendientesCount}`;
+  $('modalPillPendientes').textContent =
+    agg.alertasCount > 0
+      ? `Alertas: ${agg.alertasCount} · Pendientes: ${agg.pendientesCount}`
+      : `Pendientes: ${agg.pendientesCount}`;
 
   const tb = $('modalTbody');
   tb.innerHTML = '';
@@ -544,19 +683,43 @@ function openDetalle(agg){
   state.lastDetailExportLines = lines;
 
   for(const l of lines){
-    const st = l.pendiente ? pillHtml('warn','PENDIENTE') : pillHtml('ok','OK');
-    const obs = l.observacion || '';
+    const st = l.isAlerta ? pillHtml('bad','ALERTA') : (l.isPendiente ? pillHtml('warn','PENDIENTE') : pillHtml('ok','OK'));
+
+    // Mostrar en observación: primero alertas, luego pendientes (separado)
+    const obs = [
+      ...(l.alerts?.length ? [`ALERTA: ${l.alerts.join(' · ')}`] : []),
+      ...(l.pendings?.length ? [`PENDIENTE: ${l.pendings.join(' · ')}`] : []),
+    ].join(' | ');
+
+    // En clínica/procedimiento: mostrar lo que venga pero si falta maestro, dejar evidencia
+    const clinWarn = (!l.clinicaId || !l.clinicaExists)
+      ? `<div class="mini muted">${escapeHtml(l.clinicaId ? 'No existe en catálogo' : 'Sin clinicaId')}</div>`
+      : '';
+
+    const procWarn = (!l.procedimientoExists)
+      ? `<div class="mini muted">No existe / no mapeado</div>`
+      : '';
 
     const tr = document.createElement('tr');
     tr.innerHTML = `
       <td class="mono">${escapeHtml(l.fecha || '')} ${escapeHtml(l.hora || '')}</td>
-      <td>${escapeHtml(l.clinicaNombre || '')}</td>
-      <td>${escapeHtml(l.procedimientoNombre || '')}<div class="mini muted mono">${escapeHtml(l.procedimientoId || '')}</div></td>
-      <td>${escapeHtml(l.pacienteNombre || '')}<div class="mini muted">${escapeHtml((l.tipoPaciente||'').toUpperCase())}</div></td>
-      <td>${escapeHtml(l.roleNombre || '')}<div class="mini muted mono">${escapeHtml(l.roleId || '')}</div></td>
+      <td>${escapeHtml(l.clinicaNombre || '')}${clinWarn}</td>
+      <td>
+        ${escapeHtml(l.procedimientoNombre || '')}
+        <div class="mini muted mono">${escapeHtml(l.procedimientoId || '')}</div>
+        ${procWarn}
+      </td>
+      <td>
+        ${escapeHtml(l.pacienteNombre || '')}
+        <div class="mini muted">${escapeHtml((l.tipoPaciente||'').toUpperCase())}</div>
+      </td>
+      <td>
+        ${escapeHtml(l.roleNombre || '')}
+        <div class="mini muted mono">${escapeHtml(l.roleId || '')}</div>
+      </td>
       <td><b>${clp(l.monto || 0)}</b></td>
       <td>${st}</td>
-      <td class="mini">${escapeHtml(obs)}</td>
+      <td class="mini">${escapeHtml(obs || '')}</td>
     `;
     tb.appendChild(tr);
   }
@@ -570,51 +733,92 @@ function closeDetalle(){
    CSV Exports
 ========================= */
 function exportResumenCSV(){
-  const headers = ['mes','ano','profesional','rut','tipo','casos','total','pendientes'];
+  // ✅ Agrego columnas empresa y rutEmpresa al final (no rompe lo anterior)
+  const headers = [
+    'mes','ano',
+    'profesional','rut',
+    'empresa','rutEmpresa',
+    'tipoPersona',
+    'casos','total',
+    'alertas','pendientes'
+  ];
+
   const items = state.liquidResumen.map(a=>({
     mes: monthNameEs(state.mesNum),
     ano: String(state.ano),
+
     profesional: a.nombre || '',
     rut: a.rut || '',
-    tipo: a.tipo || '',
+
+    empresa: a.empresaNombre || '',
+    rutEmpresa: a.empresaRut || '',
+
+    tipoPersona: a.tipoPersona || '',
     casos: String(a.casos || 0),
     total: String(a.total || 0),
-    pendientes: String(a.pendientesCount || 0)
+
+    alertas: String(a.alertasCount || 0),
+    pendientes: String(a.pendientesCount || 0),
   }));
+
   const csv = toCSV(headers, items);
   download(`liquidaciones_resumen_${state.ano}_${String(state.mesNum).padStart(2,'0')}.csv`, csv, 'text/csv');
   toast('CSV resumen exportado');
 }
 
 function exportDetalleCSV(){
+  // ✅ Mantengo lo anterior y agrego empresa/rutEmpresa + flags alerta/pendiente
   const headers = [
     'mes','ano',
-    'profesional','rut','tipo',
+    'profesional','rut',
+    'empresa','rutEmpresa',
+    'tipoPersona',
+
     'fecha','hora',
-    'clinica','procedimiento','tipoPaciente','paciente',
-    'rol','monto','pendiente','observacion',
+    'clinica','clinicaId','clinicaExiste',
+    'procedimiento','procedimientoId','procedimientoExiste',
+    'tipoPaciente','paciente',
+    'rol','monto',
+    'estadoLinea', // ALERTA | PENDIENTE | OK
+    'observacion',
     'prodId'
   ];
 
   const items = [];
   for(const a of state.liquidResumen){
     for(const l of (a.lines || [])){
+      const estadoLinea = l.isAlerta ? 'ALERTA' : (l.isPendiente ? 'PENDIENTE' : 'OK');
+
       items.push({
         mes: monthNameEs(state.mesNum),
         ano: String(state.ano),
+
         profesional: a.nombre || '',
         rut: a.rut || '',
-        tipo: a.tipo || '',
+        empresa: a.empresaNombre || '',
+        rutEmpresa: a.empresaRut || '',
+        tipoPersona: a.tipoPersona || '',
+
         fecha: l.fecha || '',
         hora: l.hora || '',
+
         clinica: l.clinicaNombre || '',
+        clinicaId: l.clinicaId || '',
+        clinicaExiste: l.clinicaExists ? 'SI' : 'NO',
+
         procedimiento: l.procedimientoNombre || '',
+        procedimientoId: l.procedimientoId || '',
+        procedimientoExiste: l.procedimientoExists ? 'SI' : 'NO',
+
         tipoPaciente: l.tipoPaciente || '',
         paciente: l.pacienteNombre || '',
+
         rol: l.roleNombre || '',
         monto: String(l.monto || 0),
-        pendiente: l.pendiente ? 'SI' : 'NO',
+
+        estadoLinea,
         observacion: l.observacion || '',
+
         prodId: l.prodId || ''
       });
     }
@@ -628,31 +832,56 @@ function exportDetalleCSV(){
 function exportDetalleProfesional(agg){
   const headers = [
     'mes','ano',
-    'profesional','rut','tipo',
+    'profesional','rut',
+    'empresa','rutEmpresa',
+    'tipoPersona',
+
     'fecha','hora',
-    'clinica','procedimiento','tipoPaciente','paciente',
-    'rol','monto','pendiente','observacion',
+    'clinica','clinicaId','clinicaExiste',
+    'procedimiento','procedimientoId','procedimientoExiste',
+    'tipoPaciente','paciente',
+    'rol','monto',
+    'estadoLinea',
+    'observacion',
     'prodId'
   ];
 
-  const items = (agg.lines || []).map(l=>({
-    mes: monthNameEs(state.mesNum),
-    ano: String(state.ano),
-    profesional: agg.nombre || '',
-    rut: agg.rut || '',
-    tipo: agg.tipo || '',
-    fecha: l.fecha || '',
-    hora: l.hora || '',
-    clinica: l.clinicaNombre || '',
-    procedimiento: l.procedimientoNombre || '',
-    tipoPaciente: l.tipoPaciente || '',
-    paciente: l.pacienteNombre || '',
-    rol: l.roleNombre || '',
-    monto: String(l.monto || 0),
-    pendiente: l.pendiente ? 'SI' : 'NO',
-    observacion: l.observacion || '',
-    prodId: l.prodId || ''
-  }));
+  const items = (agg.lines || []).map(l=>{
+    const estadoLinea = l.isAlerta ? 'ALERTA' : (l.isPendiente ? 'PENDIENTE' : 'OK');
+
+    return ({
+      mes: monthNameEs(state.mesNum),
+      ano: String(state.ano),
+
+      profesional: agg.nombre || '',
+      rut: agg.rut || '',
+      empresa: agg.empresaNombre || '',
+      rutEmpresa: agg.empresaRut || '',
+      tipoPersona: agg.tipoPersona || '',
+
+      fecha: l.fecha || '',
+      hora: l.hora || '',
+
+      clinica: l.clinicaNombre || '',
+      clinicaId: l.clinicaId || '',
+      clinicaExiste: l.clinicaExists ? 'SI' : 'NO',
+
+      procedimiento: l.procedimientoNombre || '',
+      procedimientoId: l.procedimientoId || '',
+      procedimientoExiste: l.procedimientoExists ? 'SI' : 'NO',
+
+      tipoPaciente: l.tipoPaciente || '',
+      paciente: l.pacienteNombre || '',
+
+      rol: l.roleNombre || '',
+      monto: String(l.monto || 0),
+
+      estadoLinea,
+      observacion: l.observacion || '',
+
+      prodId: l.prodId || ''
+    });
+  });
 
   const csv = toCSV(headers, items);
   const safeName = normalize(agg.nombre || 'profesional').replace(/[^a-z0-9\-]/g,'-').slice(0,40);
@@ -746,12 +975,16 @@ requireAuth({
         return;
       }
       const first = state.lastDetailExportLines[0];
+
       const agg = {
         nombre: first?.profesionalNombre || 'Profesional',
         rut: first?.profesionalRut || '',
-        tipo: first?.profesionalTipo || '',
+        tipoPersona: first?.tipoPersona || '',
+        empresaNombre: first?.empresaNombre || '',
+        empresaRut: first?.empresaRut || '',
         lines: state.lastDetailExportLines
       };
+
       exportDetalleProfesional(agg);
     });
 
