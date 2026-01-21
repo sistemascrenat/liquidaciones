@@ -1046,6 +1046,50 @@ function recomputePending(){
   paintPreview();
 }
 
+async function fillImportSuggestions(){
+  try{
+    const ano = Number($('ano')?.value || 0) || 0;
+    const mesName = clean($('mes')?.value || '');
+    const mesNum = monthIndex(mesName);
+
+    const dl = $('importIdList');
+    if(!dl) return;
+    dl.innerHTML = '';
+
+    if(!ano || !mesNum) return;
+
+    // Trae últimos 25 imports de ese mes/año (staged/confirmada/anulada)
+    const qy = query(
+      colImports,
+      where('ano','==', ano),
+      where('mesNum','==', mesNum),
+      orderBy('creadoEl','desc'),
+      limit(25)
+    );
+
+    const snap = await getDocs(qy);
+    snap.forEach(d=>{
+      const x = d.data() || {};
+      const id = clean(x.id || d.id);
+      const estado = clean(x.estado || '');
+      const filas = Number(x.filas || 0) || 0;
+
+      if(!id) return;
+
+      const opt = document.createElement('option');
+      // value = lo que se pega al input
+      opt.value = id;
+
+      // label (si el browser lo muestra) -> info útil
+      opt.label = `${estado} · ${filas} filas · ${clean(x.filename || '')}`;
+      dl.appendChild(opt);
+    });
+  }catch(err){
+    console.warn('fillImportSuggestions()', err);
+  }
+}
+
+
 async function persistMapping(docRef, key, id){
   await setDoc(docRef, {
     map: { [key]: { id, actualizadoEl: serverTimestamp(), actualizadoPor: state.user?.email || '' } },
@@ -2097,6 +2141,14 @@ requireAuth({
     setButtons();
     paintPreview();
 
+    // ✅ Import selector: cargar sugerencias al entrar
+    await fillImportSuggestions();
+    
+    // ✅ Import selector: recargar sugerencias si cambia Mes/Año
+    $('mes')?.addEventListener('change', fillImportSuggestions);
+    $('ano')?.addEventListener('change', fillImportSuggestions);
+
+
     $('btnCargar').addEventListener('click', async ()=>{
       try{
         await handleLoadCSV($('fileCSV').files?.[0]);
@@ -2113,14 +2165,11 @@ requireAuth({
       try{
         const importId = clean($('importId')?.value || '');
         if(!importId){
-          toast('Pega un ImportID para cargar.');
+          toast('Selecciona o pega un ImportID.');
           $('importId')?.focus();
           return;
         }
-    
         await loadStagingFromFirestore(importId);
-    
-        // refresca UI
         setButtons();
         paintPreview();
       }catch(err){
