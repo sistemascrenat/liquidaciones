@@ -146,7 +146,7 @@ async function generarPDFLiquidacionProfesional(agg){
   const soft = rgb(0.95, 0.98, 0.99);
 
   // Margenes
-  const M = 42;
+  const M = 26;
   let y = height - M;
 
   // Header bar
@@ -238,22 +238,33 @@ async function generarPDFLiquidacionProfesional(agg){
   y -= 10;
 
   const colX = {
-    fecha: M,
-    clinica: M+90,
-    tipo: M+230,
-    proc: M+300,
-    rol: M+470,
-    monto: M+535
+    fecha:  M,
+    clinica:M + 86,
+    tipo:   M + 220,
+    proc:   M + 285,
+    rol:    M + 490,
+    montoR: (width - M)  // borde derecho real para alinear $ a la derecha
   };
 
   // Header tabla
   page.drawRectangle({ x:M, y:y-18, width:width-2*M, height:18, color:soft, borderColor:rgb(0.86,0.90,0.93), borderWidth:1 });
-  page.drawText('Fecha', { x:colX.fecha+6, y:y-13, size:9.2, font:fontBold, color:gray });
-  page.drawText('Clínica', { x:colX.clinica+6, y:y-13, size:9.2, font:fontBold, color:gray });
-  page.drawText('Tipo', { x:colX.tipo+6, y:y-13, size:9.2, font:fontBold, color:gray });
-  page.drawText('Procedimiento / Paciente', { x:colX.proc+6, y:y-13, size:9.2, font:fontBold, color:gray });
-  page.drawText('Rol', { x:colX.rol+6, y:y-13, size:9.2, font:fontBold, color:gray });
-  page.drawText('$', { x:colX.monto-10, y:y-13, size:9.2, font:fontBold, color:gray });
+  const HFS = 8.0; // header font size
+  
+  page.drawText('Fecha', { x:colX.fecha+6, y:y-13, size:HFS, font:fontBold, color:gray });
+  page.drawText('Clínica', { x:colX.clinica+6, y:y-13, size:HFS, font:fontBold, color:gray });
+  page.drawText('Tipo', { x:colX.tipo+6, y:y-13, size:HFS, font:fontBold, color:gray });
+  page.drawText('Procedimiento / Paciente', { x:colX.proc+6, y:y-13, size:HFS, font:fontBold, color:gray });
+  page.drawText('Rol', { x:colX.rol+6, y:y-13, size:HFS, font:fontBold, color:gray });
+  
+  // $ alineado al extremo derecho (no se encime)
+  page.drawText('$', { 
+    x: colX.montoR - 12, 
+    y: y-13, 
+    size: HFS, 
+    font: fontBold, 
+    color: gray 
+  });
+
 
   y -= 22;
 
@@ -266,26 +277,28 @@ async function generarPDFLiquidacionProfesional(agg){
   });
 
   const rowH = 18;
-  for(const l of lines){
-    // salto de página si se acaba
-    if(y < M + 80){
-      // nueva página
-      y = height - M;
-      const p2 = pdfDoc.addPage([595.28, 841.89]);
-      // reusamos "page" cambiando referencia
-      // (trampa simple: reasignamos variables)
-      page = p2; // eslint-disable-line no-func-assign
-      // (si tu linter molesta, lo ajustamos cuando lo integremos fino)
-    }
+  const RFS = 7.6;     // row font size (más chico)
+  const RFS_B = 7.6;   // bold row font size
+  
+  page.drawText(fechaTxt.slice(0,18), { x:colX.fecha+6,  y:y-13, size:RFS, font, color:ink });
+  page.drawText(clinTxt.slice(0,22),  { x:colX.clinica+6,y:y-13, size:RFS, font, color:ink });
+  page.drawText(tipoTxt.slice(0,10),  { x:colX.tipo+6,   y:y-13, size:RFS, font, color:ink });
+  
+  // un poco más largo el texto principal, porque ahora hay más ancho
+  const procPac = `${procTxt} — ${pacTxt}`.trim();
+  page.drawText(procPac.slice(0,40),  { x:colX.proc+6,   y:y-13, size:7.4, font, color:ink });
+  
+  page.drawText(rolTxt.slice(0,16),   { x:colX.rol+6,    y:y-13, size:RFS, font, color:ink });
+  
+  // monto alineado al borde derecho real
+  page.drawText(montoTxt, { 
+    x: colX.montoR - 6 - fontBold.widthOfTextAtSize(montoTxt, RFS_B),
+    y: y-13,
+    size: RFS_B,
+    font: fontBold,
+    color: ink
+  });
 
-    const estado = buildLineaEstado(l);
-    const fechaTxt = `${l.fecha || ''} ${l.hora || ''}`.trim();
-    const clinTxt = (l.clinicaNombre || '').toString();
-    const tipoTxt = ((l.tipoPaciente || '') || '').toString().toUpperCase();
-    const procTxt = (l.procedimientoNombre || '').toString();
-    const pacTxt = (l.pacienteNombre || '').toString();
-    const rolTxt = (l.roleNombre || '').toString();
-    const montoTxt = clp(l.monto || 0);
 
     // fila
     page.drawRectangle({ x:M, y:y-rowH, width:width-2*M, height:rowH, color:rgb(1,1,1), borderColor:rgb(0.93,0.95,0.97), borderWidth:1 });
