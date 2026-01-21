@@ -580,7 +580,7 @@ function paintPreview(){
 
     // ✅ Detalle (funciona sobre staging también, pero guarda solo si está confirmada)
     tds.push(`<td>
-      <button class="btn small" type="button" data-open-item="${escapeHtml(String(it.idx || ''))}">Detalle</button>
+      <button class="btn small" type="button" data-open-item="${escapeHtml(String(it.idx || ''))}">Editar</button>
     </td>`);
 
     tr.innerHTML = tds.join('');
@@ -1957,7 +1957,173 @@ async function refreshAfterMapping(){
   );
 }
 
+/* =========================================================
+   EDIT ITEM — SOLO SELECTS (Opción A)
+   ========================================================= */
+
+// value especial para “pendiente”
+const PEND_VALUE = '__PEND__';
+
+function optionHtml(value, label, selected=false){
+  const sel = selected ? 'selected' : '';
+  return `<option value="${escapeHtml(value)}" ${sel}>${escapeHtml(label)}</option>`;
+}
+
+function buildSelectClinicaHTML(it){
+  const n = it.normalizado || {};
+  const raw = it.raw || {};
+  const r = it.resolved || {};
+
+  const clinCsv = clean(n.clinica || raw['Clínica'] || '');
+  const clinicaId = clean(r.clinicaId || '');
+
+  const opts = [];
+
+  // ✅ Opción A: si hay ID, NO mostramos pendiente, preseleccionamos ID
+  if(clinicaId){
+    // opción “(seleccionada)” por ID
+    for(const c of (state.catalogs.clinicas || [])){
+      opts.push(optionHtml(c.id, `${c.nombre} (${c.id})`, c.id === clinicaId));
+    }
+    // fallback: si por alguna razón el ID no está en el catálogo cargado
+    if(!opts.some(o => o.includes(`value="${escapeHtml(clinicaId)}"`))){
+      opts.unshift(optionHtml(clinicaId, `(ID no encontrado en catálogo) ${clinicaId}`, true));
+      for(const c of (state.catalogs.clinicas || [])){
+        opts.push(optionHtml(c.id, `${c.nombre} (${c.id})`, false));
+      }
+    }
+    return opts.join('');
+  }
+
+  // ✅ Si NO hay ID => aparece pendiente
+  opts.push(optionHtml(PEND_VALUE, `⚠️ PENDIENTE: ${clinCsv || '(sin clínica)'}`, true));
+  opts.push(optionHtml('', '(Seleccionar clínica)', false));
+  for(const c of (state.catalogs.clinicas || [])){
+    opts.push(optionHtml(c.id, `${c.nombre} (${c.id})`, false));
+  }
+  return opts.join('');
+}
+
+function buildSelectTipoPacienteHTML(it){
+  const n = it.normalizado || {};
+  const raw = it.raw || {};
+  const tipoCsv = clean(n.tipoPaciente || raw['Tipo de Paciente'] || '');
+
+  const opts = [];
+  // Para tipo paciente NO hay “ID”; dejamos la lógica simple:
+  // si viene vacío => pendiente, si viene con valor => seleccionado.
+  if(!tipoCsv){
+    opts.push(optionHtml(PEND_VALUE, '⚠️ PENDIENTE: (sin Tipo de Paciente)', true));
+  } else {
+    // Si viene con algo que no calza con catálogo, lo dejamos como primera opción “actual”
+    if(!TIPOS_PACIENTE.some(t => normalizeKey(t) === normalizeKey(tipoCsv))){
+      opts.push(optionHtml(tipoCsv, `Actual: ${tipoCsv}`, true));
+    }
+  }
+
+  // listado oficial
+  opts.push(optionHtml('', '(Seleccionar tipo)', !tipoCsv));
+  for(const t of TIPOS_PACIENTE){
+    const selected = normalizeKey(t) === normalizeKey(tipoCsv);
+    opts.push(optionHtml(t, t, selected));
+  }
+  return opts.join('');
+}
+
+function buildSelectCirugiaHTML(it){
+  const n = it.normalizado || {};
+  const raw = it.raw || {};
+  const r = it.resolved || {};
+
+  const cirCsv = clean(n.cirugia || raw['Cirugía'] || '');
+  const cirugiaId = clean(r.cirugiaId || '');
+
+  const opts = [];
+
+  // ✅ Opción A: si hay ID, NO mostramos pendiente, preseleccionamos ID
+  if(cirugiaId){
+    for(const s of (state.catalogs.cirugias || [])){
+      opts.push(optionHtml(s.id, `${s.nombre} (${s.codigo || s.id})`, s.id === cirugiaId));
+    }
+    if(!opts.some(o => o.includes(`value="${escapeHtml(cirugiaId)}"`))){
+      opts.unshift(optionHtml(cirugiaId, `(ID no encontrado en catálogo) ${cirugiaId}`, true));
+      for(const s of (state.catalogs.cirugias || [])){
+        opts.push(optionHtml(s.id, `${s.nombre} (${s.codigo || s.id})`, false));
+      }
+    }
+    return opts.join('');
+  }
+
+  // ✅ Si NO hay ID => aparece pendiente
+  opts.push(optionHtml(PEND_VALUE, `⚠️ PENDIENTE: ${cirCsv || '(sin cirugía)'}`, true));
+  opts.push(optionHtml('', '(Seleccionar cirugía)', false));
+  for(const s of (state.catalogs.cirugias || [])){
+    opts.push(optionHtml(s.id, `${s.nombre} (${s.codigo || s.id})`, false));
+  }
+  return opts.join('');
+}
+
+function buildSelectProfesionalHTML(it, roleField, resolvedIdField, label){
+  const n = it.normalizado || {};
+  const raw = it.raw || {};
+  const r = it.resolved || {};
+
+  const profCsv = clean((n.profesionales||{})[roleField] || raw[label] || '');
+  const profId = clean(r[resolvedIdField] || '');
+
+  const opts = [];
+
+  // ✅ Opción A: si hay ID, NO mostramos pendiente
+  if(profId){
+    // orden A-Z como ya hacías en resolver modal
+    const profSorted = [...(state.catalogs.profesionales || [])]
+      .map(p => ({...p, _nombreUp:(p.nombre||'(sin nombre)').toUpperCase().trim()}))
+      .sort((a,b)=> a._nombreUp.localeCompare(b._nombreUp,'es'));
+
+    for(const p of profSorted){
+      opts.push(optionHtml(p.id, `${p._nombreUp} (${p.id})`, p.id === profId));
+    }
+    if(!opts.some(o => o.includes(`value="${escapeHtml(profId)}"`))){
+      opts.unshift(optionHtml(profId, `(ID no encontrado en catálogo) ${profId}`, true));
+      for(const p of profSorted){
+        opts.push(optionHtml(p.id, `${p._nombreUp} (${p.id})`, false));
+      }
+    }
+    return opts.join('');
+  }
+
+  // Si no hay nombre en CSV, permitimos “(vacío)” sin bloquear
+  if(!profCsv){
+    opts.push(optionHtml('', '(Sin profesional)', true));
+  } else {
+    // ✅ Si no hay ID y hay texto => pendiente
+    opts.push(optionHtml(PEND_VALUE, `⚠️ PENDIENTE: ${profCsv}`, true));
+    opts.push(optionHtml('', '(Seleccionar profesional)', false));
+  }
+
+  const profSorted = [...(state.catalogs.profesionales || [])]
+    .map(p => ({...p, _nombreUp:(p.nombre||'(sin nombre)').toUpperCase().trim()}))
+    .sort((a,b)=> a._nombreUp.localeCompare(b._nombreUp,'es'));
+
+  for(const p of profSorted){
+    opts.push(optionHtml(p.id, `${p._nombreUp} (${p.id})`, false));
+  }
+
+  return opts.join('');
+}
+
+function getTextFromSelect(selectEl){
+  // devuelve label “limpio” del option seleccionado (sin el “(ID)”)
+  if(!selectEl) return '';
+  const opt = selectEl.options?.[selectEl.selectedIndex];
+  return clean(opt?.textContent || '');
+}
+
+
 function openItemModal(it){
+
+  state._editingItemRef = it; // ✅ fallback para textos “PENDIENTE” en los selects
+  
   $('modalItemBackdrop').style.display = 'block';
 
   const n = it.normalizado || {};
@@ -1976,36 +2142,74 @@ function openItemModal(it){
     : `Item staging (sin ID estable)`;
 
   // Form simple: editar campos críticos
+  // ✅ SOLO SELECTS (Opción A: si hay ID => preselecciona; si no hay ID => muestra PENDIENTE)
   const form = `
     <div class="grid2">
       <div class="field">
-        <label>Clínica (texto)</label>
-        <input id="edClinica" value="${escapeHtml(n.clinica || raw['Clínica'] || '')}"/>
+        <label>Clínica</label>
+        <select id="edClinicaSel">
+          ${buildSelectClinicaHTML(it)}
+        </select>
+        <div class="help">Si ya había ID, queda seleccionado sin “pendiente”.</div>
       </div>
+  
       <div class="field">
-        <label>Tipo Paciente</label>
-        <input id="edTipo" value="${escapeHtml(n.tipoPaciente || raw['Tipo de Paciente'] || '')}"/>
+        <label>Tipo de Paciente</label>
+        <select id="edTipoSel">
+          ${buildSelectTipoPacienteHTML(it)}
+        </select>
       </div>
     </div>
-
+  
     <div class="field" style="margin-top:10px;">
-      <label>Cirugía (texto)</label>
-      <input id="edCirugia" value="${escapeHtml(n.cirugia || raw['Cirugía'] || '')}"/>
+      <label>Cirugía</label>
+      <select id="edCirugiaSel">
+        ${buildSelectCirugiaHTML(it)}
+      </select>
+      <div class="help">La cirugía se resuelve por Clínica + Tipo Paciente + Cirugía.</div>
     </div>
-
+  
     <div class="grid2" style="margin-top:10px;">
-      <div class="field"><label>Cirujano</label><input id="edCirujano" value="${escapeHtml((n.profesionales||{}).cirujano || raw['Cirujano'] || '')}"/></div>
-      <div class="field"><label>Anestesista</label><input id="edAnestesista" value="${escapeHtml((n.profesionales||{}).anestesista || raw['Anestesista'] || '')}"/></div>
+      <div class="field">
+        <label>Cirujano</label>
+        <select id="edCirujanoSel">
+          ${buildSelectProfesionalHTML(it, 'cirujano', 'cirujanoId', 'Cirujano')}
+        </select>
+      </div>
+  
+      <div class="field">
+        <label>Anestesista</label>
+        <select id="edAnestesistaSel">
+          ${buildSelectProfesionalHTML(it, 'anestesista', 'anestesistaId', 'Anestesista')}
+        </select>
+      </div>
     </div>
-
+  
     <div class="grid3" style="margin-top:10px;">
-      <div class="field"><label>Ayudante 1</label><input id="edAy1" value="${escapeHtml((n.profesionales||{}).ayudante1 || raw['Ayudante 1'] || '')}"/></div>
-      <div class="field"><label>Ayudante 2</label><input id="edAy2" value="${escapeHtml((n.profesionales||{}).ayudante2 || raw['Ayudante 2'] || '')}"/></div>
-      <div class="field"><label>Arsenalera</label><input id="edArs" value="${escapeHtml((n.profesionales||{}).arsenalera || raw['Arsenalera'] || '')}"/></div>
+      <div class="field">
+        <label>Ayudante 1</label>
+        <select id="edAy1Sel">
+          ${buildSelectProfesionalHTML(it, 'ayudante1', 'ayudante1Id', 'Ayudante 1')}
+        </select>
+      </div>
+  
+      <div class="field">
+        <label>Ayudante 2</label>
+        <select id="edAy2Sel">
+          ${buildSelectProfesionalHTML(it, 'ayudante2', 'ayudante2Id', 'Ayudante 2')}
+        </select>
+      </div>
+  
+      <div class="field">
+        <label>Arsenalera</label>
+        <select id="edArsSel">
+          ${buildSelectProfesionalHTML(it, 'arsenalera', 'arsenaleraId', 'Arsenalera')}
+        </select>
+      </div>
     </div>
-
+  
     <div class="help" style="margin-top:10px;">
-      Tip: aquí ajustas el texto; luego el sistema recalcula resolución (IDs / pendientes).
+      ✅ Este modal ya no edita texto libre: todo se corrige desde catálogo (selects).
     </div>
   `;
   $('itemForm').innerHTML = form;
@@ -2035,23 +2239,82 @@ function openItemModal(it){
 function closeItemModal(){
   $('modalItemBackdrop').style.display = 'none';
   $('itemForm').innerHTML = '';
+   state._editingItemRef = null; 
 }
 
 function collectItemPatchFromModal(){
+  // Clínica
+  const clinSel = $('edClinicaSel');
+  const clinVal = clean(clinSel?.value || '');
+  let clinicaTxt = '';
+
+  if(clinVal && clinVal !== PEND_VALUE){
+    // Si eligió una clínica del catálogo, guardamos su NOMBRE (para que el resolver por texto funcione)
+    const c = state.catalogs.clinicasById.get(clinVal);
+    clinicaTxt = clean(c?.nombre || '');
+  } else {
+    // pendiente: mantenemos el texto original (no lo inventamos)
+    const it = state._editingItemRef || null;
+    clinicaTxt = clean(it?.normalizado?.clinica || it?.raw?.['Clínica'] || '');
+  }
+
+  // Tipo Paciente
+  const tipoSel = $('edTipoSel');
+  const tipoVal = clean(tipoSel?.value || '');
+  let tipoTxt = '';
+  if(tipoVal && tipoVal !== PEND_VALUE) tipoTxt = tipoVal;
+  else {
+    const it = state._editingItemRef || null;
+    tipoTxt = clean(it?.normalizado?.tipoPaciente || it?.raw?.['Tipo de Paciente'] || '');
+  }
+
+  // Cirugía
+  const cirSel = $('edCirugiaSel');
+  const cirVal = clean(cirSel?.value || '');
+  let cirugiaTxt = '';
+  if(cirVal && cirVal !== PEND_VALUE){
+    const s = state.catalogs.cirugiasById.get(cirVal);
+    cirugiaTxt = clean(s?.nombre || '');
+  } else {
+    const it = state._editingItemRef || null;
+    cirugiaTxt = clean(it?.normalizado?.cirugia || it?.raw?.['Cirugía'] || '');
+  }
+
+  // Profesionales (guardamos el NOMBRE del catálogo si eligió uno)
+  function pickProfText(selId, resolvedIdField, fallbackLabel){
+    const sel = $(selId);
+    const v = clean(sel?.value || '');
+
+    if(!v) return ''; // “Sin profesional”
+
+    if(v !== PEND_VALUE){
+      const p = state.catalogs.profById.get(v);
+      return clean(p?.nombre || '');
+    }
+    // pendiente => mantiene texto original
+    const it = state._editingItemRef || null;
+    return clean(
+      it?.normalizado?.profesionales?.[fallbackLabel] ||
+      it?.raw?.[fallbackLabel] ||
+      ''
+    );
+  }
+
   return {
-    clinica: clean($('edClinica').value),
-    tipoPaciente: clean($('edTipo').value),
-    cirugia: clean($('edCirugia').value),
+    clinica: clinicaTxt,
+    tipoPaciente: tipoTxt,
+    cirugia: cirugiaTxt,
 
     profesionales: {
-      cirujano: clean($('edCirujano').value),
-      anestesista: clean($('edAnestesista').value),
-      ayudante1: clean($('edAy1').value),
-      ayudante2: clean($('edAy2').value),
-      arsenalera: clean($('edArs').value)
+      cirujano:     pickProfText('edCirujanoSel',    'cirujanoId',    'Cirujano'),
+      anestesista:  pickProfText('edAnestesistaSel', 'anestesistaId', 'Anestesista'),
+      ayudante1:    pickProfText('edAy1Sel',         'ayudante1Id',   'Ayudante 1'),
+      ayudante2:    pickProfText('edAy2Sel',         'ayudante2Id',   'Ayudante 2'),
+      arsenalera:   pickProfText('edArsSel',         'arsenaleraId',  'Arsenalera')
     }
   };
 }
+
 
 async function saveOneItemPatch(it, patch){
   // 1) aplica al staging en memoria
