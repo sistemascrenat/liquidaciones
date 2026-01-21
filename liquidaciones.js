@@ -278,55 +278,74 @@ async function generarPDFLiquidacionProfesional(agg){
   });
 
   const rowH = 18;
-  const RFS = 7.6;     // row font size (más chico)
-  const RFS_B = 7.6;   // bold row font size
-  
-  page.drawText(fechaTxt.slice(0,18), { x:colX.fecha+6,  y:y-13, size:RFS, font, color:ink });
-  page.drawText(clinTxt.slice(0,22),  { x:colX.clinica+6,y:y-13, size:RFS, font, color:ink });
-  page.drawText(tipoTxt.slice(0,10),  { x:colX.tipo+6,   y:y-13, size:RFS, font, color:ink });
-  
-  // un poco más largo el texto principal, porque ahora hay más ancho
-  const procPac = `${procTxt} — ${pacTxt}`.trim();
-  page.drawText(procPac.slice(0,40),  { x:colX.proc+6,   y:y-13, size:7.4, font, color:ink });
-  
-  page.drawText(rolTxt.slice(0,16),   { x:colX.rol+6,    y:y-13, size:RFS, font, color:ink });
-  
-  // monto alineado al borde derecho real
-  page.drawText(montoTxt, { 
-    x: colX.montoR - 6 - fontBold.widthOfTextAtSize(montoTxt, RFS_B),
-    y: y-13,
-    size: RFS_B,
-    font: fontBold,
-    color: ink
-  });
+  const RFS = 7.6;     // tamaño texto filas (más chico)
+  const RFS_B = 7.6;   // monto en negrita
 
+  for (const l of lines) {
+    // Si se acaba la página, por ahora cortamos (después podemos paginar)
+    if (y - rowH < M + 20) break;
 
-    // fila
-    page.drawRectangle({ x:M, y:y-rowH, width:width-2*M, height:rowH, color:rgb(1,1,1), borderColor:rgb(0.93,0.95,0.97), borderWidth:1 });
+    const fechaTxt = `${cleanReminder(l.fecha)} ${cleanReminder(l.hora)}`.trim();
+    const clinTxt  = cleanReminder(l.clinicaNombre || '');
+    const tipoTxt  = cleanReminder(l.tipoPaciente || '');
+    const procTxt  = cleanReminder(l.procedimientoNombre || '');
+    const pacTxt   = cleanReminder(l.pacienteNombre || '');
+    const rolTxt   = cleanReminder(l.roleNombre || '');
+    const montoTxt = clp(l.monto || 0);
 
-    page.drawText(fechaTxt.slice(0,18), { x:colX.fecha+6, y:y-13, size:8.8, font, color:ink });
-    page.drawText(clinTxt.slice(0,18), { x:colX.clinica+6, y:y-13, size:8.8, font, color:ink });
-    page.drawText(tipoTxt.slice(0,8), { x:colX.tipo+6, y:y-13, size:8.8, font, color:ink });
+    const estado = buildLineaEstado(l);
+
+    // fila (fondo + borde suave)
+    page.drawRectangle({
+      x: M,
+      y: y - rowH,
+      width: width - 2 * M,
+      height: rowH,
+      color: rgb(1, 1, 1),
+      borderColor: rgb(0.93, 0.95, 0.97),
+      borderWidth: 1
+    });
+
+    // textos
+    page.drawText(fechaTxt.slice(0, 18), { x: colX.fecha + 6,   y: y - 13, size: RFS, font, color: ink });
+    page.drawText(clinTxt.slice(0, 22),  { x: colX.clinica + 6, y: y - 13, size: RFS, font, color: ink });
+    page.drawText(tipoTxt.slice(0, 10),  { x: colX.tipo + 6,    y: y - 13, size: RFS, font, color: ink });
 
     const procPac = `${procTxt} — ${pacTxt}`.trim();
-    page.drawText(procPac.slice(0,28), { x:colX.proc+6, y:y-13, size:8.6, font, color:ink });
+    page.drawText(procPac.slice(0, 40),  { x: colX.proc + 6,    y: y - 13, size: 7.4, font, color: ink });
 
-    page.drawText(rolTxt.slice(0,14), { x:colX.rol+6, y:y-13, size:8.8, font, color:ink });
-    page.drawText(montoTxt, { x:colX.monto - fontBold.widthOfTextAtSize(montoTxt, 8.8), y:y-13, size:8.8, font:fontBold, color:ink });
+    page.drawText(rolTxt.slice(0, 16),   { x: colX.rol + 6,     y: y - 13, size: RFS, font, color: ink });
 
-    // marca de alerta/pendiente (mini)
-    if(estado !== 'OK'){
-      const badge = estado === 'ALERTA' ? 'ALERTA' : 'PEND';
-      const bcol = estado === 'ALERTA' ? rgb(0.62,0.07,0.22) : rgb(0.60,0.32,0.05);
-      page.drawText(badge, { x:M+width-2*M-44, y:y-13, size:7.8, font:fontBold, color:bcol });
+    // monto alineado al borde derecho real
+    page.drawText(montoTxt, {
+      x: colX.montoR - 6 - fontBold.widthOfTextAtSize(montoTxt, RFS_B),
+      y: y - 13,
+      size: RFS_B,
+      font: fontBold,
+      color: ink
+    });
+
+    // badge mini (derecha) si no es OK
+    if (estado !== 'OK') {
+      const badge = (estado === 'ALERTA') ? 'ALERTA' : 'PEND';
+      const bcol  = (estado === 'ALERTA') ? rgb(0.62, 0.07, 0.22) : rgb(0.60, 0.32, 0.05);
+      page.drawText(badge, {
+        x: width - M - 44,
+        y: y - 13,
+        size: 7.4,
+        font: fontBold,
+        color: bcol
+      });
     }
 
     y -= rowH;
   }
 
+  // ✅ cerrar PDF y devolver bytes
   const bytes = await pdfDoc.save();
   return bytes;
 }
+
 
 function downloadBytes(filename, bytes, mime='application/pdf'){
   const blob = new Blob([bytes], { type: mime });
