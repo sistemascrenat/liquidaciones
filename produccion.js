@@ -2207,10 +2207,6 @@ function openItemModal(it){
         </select>
       </div>
     </div>
-  
-    <div class="help" style="margin-top:10px;">
-      ✅ Este modal ya no edita texto libre: todo se corrige desde catálogo (selects).
-    </div>
   `;
   $('itemForm').innerHTML = form;
 
