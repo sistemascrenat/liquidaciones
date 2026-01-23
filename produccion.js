@@ -193,6 +193,19 @@ const TIPOS_PACIENTE = [
   'MLE'
 ];
 
+function normalizeTipoPaciente(v){
+  // Normaliza lo que venga del CSV a tu set fijo:
+  // - "isapre" o "particular" => "Particular / Isapre"
+  // - "fonasa" => "Fonasa"
+  // - "mle" => "MLE"
+  // - otros / vacío => '' (para que quede pendiente)
+  const x = normalizeKey(v);
+  if(!x) return '';
+  if(x.includes('fonasa')) return 'Fonasa';
+  if(x.includes('mle')) return 'MLE';
+  if(x.includes('isapre') || x.includes('particular')) return 'Particular / Isapre';
+  return ''; // desconocido => pendiente
+}
 
 /* =========================
    CSV parsing
@@ -277,10 +290,12 @@ const state = {
     clinicas: [], clinicasByNorm: new Map(), clinicasById: new Map(),
     cirugias: [], cirugiasByNorm: new Map(), cirugiasById: new Map(),
     amb: [], ambByNorm: new Map(), ambById: new Map(),
-
+  
     profesionales: [],
-    profByNorm: new Map(),
-    profById: new Map()
+    profByNorm: new Map(),      // nombre completo normalizado -> [{id,nombre}]
+    profById: new Map(),        // id -> prof
+    profByLastToken: new Map(), // apellido (último token) -> [{id,nombre}]
+    profTokens: new Map()       // id -> Set(tokens) (para ranking parcial)
   },
 
   maps: {
@@ -639,7 +654,8 @@ function buildNormalizado(raw){
 
   const clinica = raw['Clínica'] ?? null;
   const cirugia = raw['Cirugía'] ?? null;
-  const tipoPaciente = raw['Tipo de Paciente'] ?? null;
+  const tipoPaciente = raw['Tipo de Paciente'] ?? '';
+  const tipoPacienteNorm = normalizeTipoPaciente(tipoPaciente);
 
   const nombrePaciente = raw['Nombre Paciente'] ?? null;
   const rut = raw['RUT'] ?? null;
@@ -662,7 +678,7 @@ function buildNormalizado(raw){
     horaHM,
     clinica: clinica || null,
     cirugia: cirugia || null,
-    tipoPaciente: tipoPaciente || null,
+    tipoPaciente: tipoPacienteNorm ? tipoPacienteNorm : (clean(tipoPaciente) || null),
     nombrePaciente: nombrePaciente || null,
     rut: rut || null,
 
@@ -784,14 +800,34 @@ async function loadCatalogs(){
     state.catalogs.profesionales = activos;
     state.catalogs.profById = new Map(activos.map(p=> [p.id, p]));
 
-    const idx = new Map();
+    const idxFull = new Map();       // nombre completo normalizado
+    const idxLast = new Map();       // apellido (último token)
+    const idxTokens = new Map();     // id -> Set(tokens)
+    
     for(const p of activos){
-      const k = normalizeProName(p.nombre);
-      if(!k) continue;
-      if(!idx.has(k)) idx.set(k, []);
-      idx.get(k).push({ id: p.id, nombre: p.nombre });
+      const full = normalizeProName(p.nombre); // ya quita dr/dra/etc
+      if(!full) continue;
+    
+      // 1) Índice por nombre completo
+      if(!idxFull.has(full)) idxFull.set(full, []);
+      idxFull.get(full).push({ id: p.id, nombre: p.nombre });
+    
+      // 2) Índice por último token (apellido probable)
+      const toks = full.split(' ').filter(Boolean);
+      const last = toks[toks.length - 1] || '';
+      if(last){
+        if(!idxLast.has(last)) idxLast.set(last, []);
+        idxLast.get(last).push({ id: p.id, nombre: p.nombre });
+      }
+    
+      // 3) Tokens por id (para ranking parcial)
+      idxTokens.set(p.id, new Set(toks));
     }
-    state.catalogs.profByNorm = idx;
+    
+    state.catalogs.profByNorm = idxFull;
+    state.catalogs.profByLastToken = idxLast;
+    state.catalogs.profTokens = idxTokens;
+
   }
 }
 
@@ -814,6 +850,48 @@ function suggestCirugias(normCir){
     }
   }
   return out;
+}
+
+function findProfesionalesCandidates(nameCsv){
+  // Devuelve candidatos ordenados por score (mejor primero)
+  const norm = normalizeProName(nameCsv);
+  if(!norm) return [];
+
+  // 1) Match exacto por nombre completo normalizado
+  const exact = state.catalogs.profByNorm.get(norm) || [];
+  if(exact.length) return exact.slice(0, 8);
+
+  const parts = norm.split(' ').filter(Boolean);
+
+  // 2) Si viene 1 token (probable apellido): buscar por último token
+  if(parts.length === 1){
+    const last = parts[0];
+    const byLast = state.catalogs.profByLastToken.get(last) || [];
+    return byLast.slice(0, 8);
+  }
+
+  // 3) Ranking parcial: puntuar por tokens compartidos
+  // Regla simple y buena:
+  // - score = cantidad de tokens del CSV que aparecen en tokens del profesional
+  // - preferimos score más alto
+  const wanted = new Set(parts);
+  const scored = [];
+
+  for(const p of (state.catalogs.profesionales || [])){
+    const tokSet = state.catalogs.profTokens.get(p.id);
+    if(!tokSet) continue;
+
+    let score = 0;
+    for(const t of wanted){
+      if(tokSet.has(t)) score++;
+    }
+    if(score > 0){
+      scored.push({ id: p.id, nombre: p.nombre, score });
+    }
+  }
+
+  scored.sort((a,b)=> (b.score - a.score) || a.nombre.localeCompare(b.nombre,'es'));
+  return scored.slice(0, 8).map(x=> ({ id:x.id, nombre:x.nombre }));
 }
 
 function resolveOneItem(n){
@@ -933,9 +1011,9 @@ function resolveOneItem(n){
       continue;
     }
 
-    // 2) match exacto por nombre normalizado (si hay único)
-    const norm = normalizeProName(nameCsv);
-    const candidates = state.catalogs.profByNorm.get(norm) || [];
+    // 2) match inteligente (exacto / apellido / parcial con ranking)
+    const candidates = findProfesionalesCandidates(nameCsv);
+    
     if(candidates.length === 1){
       resolved[r.out] = candidates[0].id;
       resolved[r.ok] = true;
@@ -946,9 +1024,11 @@ function resolveOneItem(n){
         resolved[r.out] = null;
         resolved[`_pend_${r.field}`] = true;
       } else {
+        // si hay 2+ candidatos, queda pendiente para que el usuario elija
         resolved[r.ok] = false;
       }
     }
+
   }
 
 
@@ -1022,16 +1102,16 @@ function recomputePending(){
       seenProf.add(key);
 
       // sugerencias por nombre normalizado
-      const norm = normalizeProName(nameCsv);
-      const candidates = state.catalogs.profByNorm.get(norm) || [];
-
+      const candidates = findProfesionalesCandidates(nameCsv);
+      
       state.pending.prof.push({
         key,
         roleId: d.role,
         roleLabel: d.label,
         csvName: nameCsv,
-        suggestions: candidates.slice(0, 8) // [{id,nombre}]
+        suggestions: candidates // [{id,nombre}] ya viene top 8
       });
+
     }
   }
 
