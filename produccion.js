@@ -2243,10 +2243,347 @@ function getTextFromSelect(selectEl){
   return clean(opt?.textContent || '');
 }
 
+/* =========================================================
+   EDITAR MÁS INFORMACIÓN (Modal avanzado - edición libre RAW)
+   - Permite editar TODAS las columnas fuera del modal simple
+   - Permite agregar campos nuevos (keys nuevas) => raw[key]=value
+   - En STAGED: persiste en produccion_imports/{importId}/items/{itemId}
+   - En CONFIRMADA: persiste en producción, pero NO permite cambiar Fecha/Hora/RUT
+   ========================================================= */
+
+const MORE_BLOCKED_KEYS_CONFIRMED = new Set(['Fecha','Hora','RUT']); // mover doc sería otro flujo
+
+function ensureMoreModalDOM(){
+  if(document.getElementById('modalMoreBackdrop')) return;
+
+  const wrap = document.createElement('div');
+  wrap.innerHTML = `
+    <div id="modalMoreBackdrop" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.35); z-index:9999;">
+      <div style="max-width:980px; margin:5vh auto; background:#fff; border-radius:16px; box-shadow:0 18px 60px rgba(0,0,0,.25); overflow:hidden;">
+        <div style="display:flex; align-items:center; justify-content:space-between; padding:14px 16px; border-bottom:1px solid #e5e7eb;">
+          <div>
+            <div style="font-weight:900; font-size:16px;">Editar más información</div>
+            <div id="moreSub" style="font-size:12px; color:#6b7280; margin-top:2px;">—</div>
+          </div>
+          <button id="btnMoreCloseX" type="button" class="btn" style="border-radius:10px;">✕</button>
+        </div>
+
+        <div style="padding:14px 16px; border-bottom:1px solid #e5e7eb; display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+          <input id="moreSearch" type="text" placeholder="Buscar campo…" style="flex:1; min-width:220px; padding:10px 12px; border:1px solid #e5e7eb; border-radius:12px;">
+          <button id="btnMoreAddField" type="button" class="btn soft">+ Agregar campo</button>
+          <div id="moreHint" style="font-size:12px; color:#6b7280;"></div>
+        </div>
+
+        <div id="moreList" style="padding:14px 16px; max-height:62vh; overflow:auto;"></div>
+
+        <div style="padding:14px 16px; border-top:1px solid #e5e7eb; display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap;">
+          <button id="btnMoreCancel" type="button" class="btn">Cerrar</button>
+          <div style="display:flex; gap:10px; flex-wrap:wrap;">
+            <button id="btnMoreApply" type="button" class="btn soft">Aplicar al ítem</button>
+            <button id="btnMoreSave" type="button" class="btn primary">Guardar cambios</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(wrap);
+
+  // Cerrar por X / Cancel / backdrop
+  document.getElementById('btnMoreCloseX').addEventListener('click', closeMoreModal);
+  document.getElementById('btnMoreCancel').addEventListener('click', closeMoreModal);
+  document.getElementById('modalMoreBackdrop').addEventListener('click', (e)=>{
+    if(e.target === document.getElementById('modalMoreBackdrop')) closeMoreModal();
+  });
+
+  // Buscar
+  document.getElementById('moreSearch').addEventListener('input', ()=>{
+    const it = state._moreEditingItemRef;
+    if(it) paintMoreModal(it);
+  });
+
+  // Agregar campo nuevo
+  document.getElementById('btnMoreAddField').addEventListener('click', ()=>{
+    addMoreRow('', '');
+  });
+
+  // Aplicar / Guardar
+  document.getElementById('btnMoreApply').addEventListener('click', ()=>{
+    const it = state._moreEditingItemRef;
+    if(!it) return;
+    const patch = collectMorePatch();
+    applyMorePatchToItemInMemory(it, patch);
+    toast('✅ Aplicado al ítem (en memoria).');
+    // no cerramos, para seguir editando
+    paintMoreModal(it);
+    paintPreview();
+  });
+
+  document.getElementById('btnMoreSave').addEventListener('click', async ()=>{
+    const it = state._moreEditingItemRef;
+    if(!it) return;
+
+    const patch = collectMorePatch();
+
+    // En confirmada: NO permitir Fecha/Hora/RUT (mover doc sería otro flujo)
+    if(state.status === 'confirmada'){
+      for(const k of Object.keys(patch)){
+        if(MORE_BLOCKED_KEYS_CONFIRMED.has(k)){
+          toast('En confirmada no se puede cambiar Fecha/Hora/RUT desde este modal (movería el documento).');
+          return;
+        }
+      }
+    }
+
+    await saveMorePatch(it, patch);
+    toast('✅ Cambios guardados');
+    paintMoreModal(it);
+  });
+}
+
+function closeMoreModal(){
+  const back = document.getElementById('modalMoreBackdrop');
+  if(back) back.style.display = 'none';
+  state._moreEditingItemRef = null;
+}
+
+function addMoreRow(key, value){
+  const list = document.getElementById('moreList');
+  if(!list) return;
+
+  const row = document.createElement('div');
+  row.className = 'moreRow';
+  row.style.display = 'grid';
+  row.style.gridTemplateColumns = '260px 1fr auto';
+  row.style.gap = '10px';
+  row.style.alignItems = 'start';
+  row.style.padding = '10px 0';
+  row.style.borderBottom = '1px dashed #e5e7eb';
+
+  row.innerHTML = `
+    <div>
+      <div style="font-size:12px; color:#6b7280; margin-bottom:6px;">Campo</div>
+      <input class="moreKey" type="text" value="${escapeHtml(key)}"
+        style="width:100%; padding:10px 12px; border:1px solid #e5e7eb; border-radius:12px;">
+    </div>
+
+    <div>
+      <div style="font-size:12px; color:#6b7280; margin-bottom:6px;">Valor</div>
+      <textarea class="moreVal"
+        style="width:100%; min-height:44px; padding:10px 12px; border:1px solid #e5e7eb; border-radius:12px; resize:vertical;">${escapeHtml(value)}</textarea>
+    </div>
+
+    <div style="display:flex; justify-content:flex-end; padding-top:22px;">
+      <button type="button" class="btn moreDel" style="border-radius:10px;">Eliminar</button>
+    </div>
+  `;
+
+  row.querySelector('.moreDel').addEventListener('click', ()=> row.remove());
+
+  list.appendChild(row);
+}
+
+function keysInSimpleModal(){
+  // Campos que ya están en el modal simple (no los repetimos aquí por defecto)
+  return new Set([
+    'Clínica','Tipo de Paciente','Cirugía',
+    'Cirujano','Anestesista','Ayudante 1','Ayudante 2','Arsenalera'
+  ]);
+}
+
+function paintMoreModal(it){
+  ensureMoreModalDOM();
+
+  const n = it.normalizado || {};
+  const raw = it.raw || {};
+
+  // subtitle
+  const fechaISO = n.fechaISO || parseDateToISO(raw['Fecha'] || '');
+  const horaHM = n.horaHM || parseHora24(raw['Hora'] || '');
+  const rutKey = normalizeRutKey(n.rut || raw['RUT'] || '');
+  const timeId = (fechaISO && horaHM) ? `${fechaISO}_${horaHM}` : '(sin fecha/hora)';
+  const pacienteId = rutKey || '(sin RUT)';
+
+  document.getElementById('moreSub').textContent = `Paciente: ${pacienteId} · Item: ${timeId} · Estado: ${state.status}`;
+
+  // hint
+  const hint = (state.status === 'confirmada')
+    ? 'En confirmada: NO se permite cambiar Fecha/Hora/RUT (movería el documento).'
+    : 'En staged: puedes cambiar cualquier campo (se guarda en staging).';
+  document.getElementById('moreHint').textContent = hint;
+
+  const q = normalizeKey(document.getElementById('moreSearch').value || '');
+
+  const list = document.getElementById('moreList');
+  list.innerHTML = '';
+
+  const skip = keysInSimpleModal();
+
+  // 1) Base: todas las EXPECTED_COLS excepto las del simple modal y '#'
+  const baseKeys = EXPECTED_COLS.filter(k => k !== '#' && !skip.has(k));
+
+  // 2) Extras: keys que existan en raw pero no estén en baseKeys ni en skip
+  const extraKeys = Object.keys(raw || {}).filter(k => !baseKeys.includes(k) && !skip.has(k));
+
+  // orden final: baseKeys + extras (extras ordenadas)
+  extraKeys.sort((a,b)=> normalizeKey(a).localeCompare(normalizeKey(b)));
+  const allKeys = [...baseKeys, ...extraKeys];
+
+  // pintar filas
+  for(const k of allKeys){
+    const v = raw[k] ?? '';
+    const show = !q || normalizeKey(k).includes(q) || normalizeKey(String(v)).includes(q);
+    if(!show) continue;
+    addMoreRow(k, String(v ?? ''));
+  }
+
+  // si con búsqueda no quedó nada, mostrar hint
+  if(!list.children.length){
+    const msg = document.createElement('div');
+    msg.className = 'muted tiny';
+    msg.textContent = 'Sin resultados para esa búsqueda. Usa “+ Agregar campo” para crear uno nuevo.';
+    list.appendChild(msg);
+  }
+
+  // mostrar modal
+  document.getElementById('modalMoreBackdrop').style.display = 'block';
+}
+
+function openMoreModalFromItemModal(){
+  const it = state._editingItemRef;
+  if(!it) return;
+  state._moreEditingItemRef = it;
+  paintMoreModal(it);
+}
+
+function collectMorePatch(){
+  const list = document.getElementById('moreList');
+  const patch = {};
+  if(!list) return patch;
+
+  const rows = [...list.querySelectorAll('.moreRow')];
+  for(const row of rows){
+    const k = clean(row.querySelector('.moreKey')?.value || '');
+    const v = (row.querySelector('.moreVal')?.value ?? '').toString();
+
+    if(!k) continue;
+    patch[k] = v; // puede ser string vacío; eso significa "vaciar"
+  }
+  return patch;
+}
+
+function applyMorePatchToItemInMemory(it, patch){
+  it.raw = it.raw || {};
+
+  // aplicar patch a raw (vaciar => deja string vacío)
+  for(const [k,v] of Object.entries(patch)){
+    it.raw[k] = v;
+  }
+
+  // si tocó campos “estructurales”, recalculamos normalizado+resolved
+  const structuralKeys = new Set([
+    'Fecha','Hora','Clínica','Cirugía','Tipo de Paciente',
+    'Nombre Paciente','RUT',
+    'Valor','Derechos de Pabellón','HMQ','Insumos',
+    'Suspendida','Confirmado','Pagado','Fecha de Pago',
+    'Cirujano','Anestesista','Ayudante 1','Ayudante 2','Arsenalera'
+  ]);
+
+  let needsRebuild = false;
+  for(const k of Object.keys(patch)){
+    if(structuralKeys.has(k)){ needsRebuild = true; break; }
+  }
+
+  if(needsRebuild){
+    it.normalizado = buildNormalizado(it.raw);
+    it.resolved = resolveOneItem(it.normalizado || {});
+    it._search = null;
+  } else {
+    // igual invalida búsqueda por seguridad
+    it._search = null;
+  }
+}
+
+async function saveMorePatch(it, patch){
+  // 1) aplica en memoria
+  applyMorePatchToItemInMemory(it, patch);
+
+  // 2) persistencia según estado
+  if(state.status === 'staged'){
+    const importId = state.importId;
+    const itemId = it.itemId;
+    if(!importId || !itemId){
+      console.warn('saveMorePatch: falta importId/itemId', { importId, itemId });
+      toast('No se pudo guardar: falta itemId/importId (ver consola).');
+      return;
+    }
+
+    const refStagingItem = doc(db, 'produccion_imports', importId, 'items', itemId);
+    await setDoc(refStagingItem, {
+      raw: it.raw,
+      normalizado: it.normalizado,
+      actualizadoEl: serverTimestamp(),
+      actualizadoPor: state.user?.email || ''
+    }, { merge:true });
+
+    recomputePending();
+    paintPreview();
+    return;
+  }
+
+  if(state.status === 'confirmada'){
+    const n = it.normalizado || {};
+    const fechaISO = n.fechaISO || parseDateToISO(it.raw['Fecha'] || '');
+    const horaHM = n.horaHM || parseHora24(it.raw['Hora'] || '');
+    const rutKey = normalizeRutKey(n.rut || it.raw['RUT'] || '');
+    if(!fechaISO || !horaHM || !rutKey){
+      toast('No se pudo guardar en confirmada: falta Fecha/Hora/RUT.');
+      return;
+    }
+
+    const YYYY = String(state.year);
+    const MM = pad(state.monthNum,2);
+    const pacienteId = rutKey;
+    const timeId = `${fechaISO}_${horaHM}`;
+
+    const refItem = doc(db, 'produccion', YYYY, 'meses', MM, 'pacientes', pacienteId, 'items', timeId);
+
+    // guardamos raw + normalizado recalculado (si aplica) + resolved ids recalculados
+    await updateDoc(refItem, {
+      raw: it.raw,
+      // opcional pero útil para consistencia:
+      clinica: n.clinica ?? null,
+      cirugia: n.cirugia ?? null,
+      tipoPaciente: n.tipoPaciente ?? null,
+      profesionales: n.profesionales || {},
+
+      clinicaId: it.resolved?.clinicaId ?? null,
+      cirugiaId: it.resolved?.cirugiaId ?? null,
+
+      profesionalesId: {
+        cirujanoId: it.resolved?.cirujanoId ?? null,
+        anestesistaId: it.resolved?.anestesistaId ?? null,
+        ayudante1Id: it.resolved?.ayudante1Id ?? null,
+        ayudante2Id: it.resolved?.ayudante2Id ?? null,
+        arsenaleraId: it.resolved?.arsenaleraId ?? null
+      },
+
+      actualizadoEl: serverTimestamp(),
+      actualizadoPor: state.user?.email || ''
+    });
+
+    recomputePending();
+    paintPreview();
+    return;
+  }
+
+  // otros estados: no hacemos nada
+  toast('Estado no permite guardar desde este modal.');
+}
 
 function openItemModal(it){
 
   state._editingItemRef = it; // ✅ fallback para textos “PENDIENTE” en los selects
+  ensureMoreModalDOM();       // ✅ crea el modal avanzado si aún no existe
   
   $('modalItemBackdrop').style.display = 'block';
 
@@ -2266,7 +2603,6 @@ function openItemModal(it){
     : `Item staging (sin ID estable)`;
 
   // Form simple: editar campos críticos
-  // ✅ SOLO SELECTS (Opción A: si hay ID => preselecciona; si no hay ID => muestra PENDIENTE)
   const form = `
     <div class="grid2">
       <div class="field">
@@ -2276,7 +2612,7 @@ function openItemModal(it){
         </select>
         <div class="help">Si ya había ID, queda seleccionado sin “pendiente”.</div>
       </div>
-  
+
       <div class="field">
         <label>Tipo de Paciente</label>
         <select id="edTipoSel">
@@ -2284,7 +2620,7 @@ function openItemModal(it){
         </select>
       </div>
     </div>
-  
+
     <div class="field" style="margin-top:10px;">
       <label>Cirugía</label>
       <select id="edCirugiaSel">
@@ -2292,7 +2628,7 @@ function openItemModal(it){
       </select>
       <div class="help">La cirugía se resuelve por Clínica + Tipo Paciente + Cirugía.</div>
     </div>
-  
+
     <div class="grid2" style="margin-top:10px;">
       <div class="field">
         <label>Cirujano</label>
@@ -2300,7 +2636,7 @@ function openItemModal(it){
           ${buildSelectProfesionalHTML(it, 'cirujano', 'cirujanoId', 'Cirujano')}
         </select>
       </div>
-  
+
       <div class="field">
         <label>Anestesista</label>
         <select id="edAnestesistaSel">
@@ -2308,7 +2644,7 @@ function openItemModal(it){
         </select>
       </div>
     </div>
-  
+
     <div class="grid3" style="margin-top:10px;">
       <div class="field">
         <label>Ayudante 1</label>
@@ -2316,14 +2652,14 @@ function openItemModal(it){
           ${buildSelectProfesionalHTML(it, 'ayudante1', 'ayudante1Id', 'Ayudante 1')}
         </select>
       </div>
-  
+
       <div class="field">
         <label>Ayudante 2</label>
         <select id="edAy2Sel">
           ${buildSelectProfesionalHTML(it, 'ayudante2', 'ayudante2Id', 'Ayudante 2')}
         </select>
       </div>
-  
+
       <div class="field">
         <label>Arsenalera</label>
         <select id="edArsSel">
@@ -2331,8 +2667,18 @@ function openItemModal(it){
         </select>
       </div>
     </div>
+
+    <!-- ✅ NUEVO: botón para abrir modal avanzado -->
+    <div style="display:flex; justify-content:flex-end; margin-top:12px;">
+      <button id="btnMoreInfo" type="button" class="btn soft">Editar más información</button>
+    </div>
   `;
   $('itemForm').innerHTML = form;
+
+  // ✅ click botón "Editar más información"
+  $('btnMoreInfo').onclick = ()=>{
+    openMoreModalFromItemModal();
+  };
 
   // key estable para acumular cambios
   const key = (pacienteId && timeId) ? `${pacienteId}||${timeId}` : `STAGING||${it.idx}`;
