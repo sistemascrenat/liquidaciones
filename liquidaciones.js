@@ -573,15 +573,26 @@ function getHonorarioFromTarifa(procDoc, clinicaId, tipoPaciente, roleId){
 }
 
 /* =========================
-   Fallback raw (por si faltan IDs)
+   Fallback raw (más robusto)
 ========================= */
-function pickRaw(raw, key){
-  const direct = raw?.[key];
-  if(direct !== undefined) return direct;
+function normKeyLoose(s=''){
+  return (s ?? '')
+    .toString()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g,''); // 🔥 quita espacios, guiones, puntos, etc.
+}
 
-  const nk = normalize(key);
-  for(const k of Object.keys(raw || {})){
-    if(normalize(k) === nk) return raw[k];
+function pickRaw(raw, key){
+  if(!raw || typeof raw !== 'object') return '';
+
+  // 1) directo exacto
+  if(raw[key] !== undefined) return raw[key];
+
+  // 2) match “loose” (ignora espacios/puntuación)
+  const nk = normKeyLoose(key);
+  for(const k of Object.keys(raw)){
+    if(normKeyLoose(k) === nk) return raw[k];
   }
   return '';
 }
