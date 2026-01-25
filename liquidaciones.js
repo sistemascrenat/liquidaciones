@@ -1197,8 +1197,20 @@ function initMonthYearSelectors(){
     mesSel.appendChild(opt);
   }
 
+  // ✅ Por defecto: MES ANTERIOR al actual (con ajuste de año)
   const now = new Date();
-  const y = now.getFullYear();
+
+  // Mes actual en 1..12
+  const mesActual = now.getMonth() + 1;
+
+  // Mes anterior en 1..12
+  const mesPrev = (mesActual === 1) ? 12 : (mesActual - 1);
+
+  // Año: si estamos en Enero, el mes anterior es Diciembre del año anterior
+  const anoPrev = (mesActual === 1) ? (now.getFullYear() - 1) : now.getFullYear();
+
+  // Rango de años (centrado en el año "prev" para que aparezca seleccionado)
+  const y = anoPrev;
   const anoSel = $('ano');
   anoSel.innerHTML = '';
   for(let yy=y-2; yy<=y+3; yy++){
@@ -1208,9 +1220,11 @@ function initMonthYearSelectors(){
     anoSel.appendChild(opt);
   }
 
-  state.mesNum = now.getMonth()+1;
-  state.ano = y;
+  // ✅ set default state
+  state.mesNum = mesPrev;
+  state.ano = anoPrev;
 
+  // ✅ set UI selects
   mesSel.value = String(state.mesNum);
   anoSel.value = String(state.ano);
 
