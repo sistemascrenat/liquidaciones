@@ -71,6 +71,45 @@ function normalizeProName(s){
   return x;
 }
 
+/* =========================
+   ETIQUETA "AGENDA"
+   - SIEMPRE: DR(A) APELLIDOS, NOMBRES (RUT)
+   - TODO EN MAYÚSCULAS (como hoy)
+   - Reglas por cantidad de palabras:
+     2 -> N | A
+     3 -> N | A A
+     4 -> N N | A A
+     5+ -> N N N | A A (resto queda en apellidos)
+   ========================= */
+function proEtiquetaAgenda(nombreRaw, rut){
+  const cleanName = normalizeProName(nombreRaw || ''); // ya quita dr/dra, etc.
+  const parts = cleanName.split(/\s+/).filter(Boolean);
+
+  let nombres = '';
+  let apellidos = '';
+
+  if(parts.length <= 1){
+    apellidos = parts.join(' ');
+  } else if(parts.length === 2){
+    nombres = parts[0];
+    apellidos = parts[1];
+  } else if(parts.length === 3){
+    nombres = parts[0];
+    apellidos = parts.slice(1).join(' ');
+  } else if(parts.length === 4){
+    nombres = parts.slice(0,2).join(' ');
+    apellidos = parts.slice(2).join(' ');
+  } else {
+    nombres = parts.slice(0,3).join(' ');
+    apellidos = parts.slice(3).join(' ');
+  }
+
+  const etiqueta = `DR(A) ${apellidos}, ${nombres}`.trim();
+  const rutTxt = (rut || '').trim();
+  return rutTxt ? `${etiqueta} (${rutTxt})`.toUpperCase() : etiqueta.toUpperCase();
+}
+
+
 function profKey(roleId, profNameCsv){
   return `${clean(roleId)}||${normalizeProName(profNameCsv)}`;
 }
@@ -1487,20 +1526,22 @@ function paintResolverModal(){
         const row = document.createElement('div');
         row.className = 'miniRow';
 
-        // ✅ Profesionales en mayúsculas + ordenados A→Z por nombre
+        // ✅ Profesionales “tipo agenda”: DR(A) APELLIDOS, NOMBRES (RUT)
+        // ✅ MAYÚSCULAS como hoy
+        // ✅ ORDENADO por la etiqueta transformada (APELLIDOS, NOMBRES)
         const profSorted = [...(state.catalogs.profesionales || [])]
           .map(p => ({
             ...p,
-            _nombreUp: (p.nombre || '(sin nombre)').toUpperCase().trim()
+            _agendaLabel: proEtiquetaAgenda(p.nombre || '', p.id || '')
           }))
-          .sort((a, b) => a._nombreUp.localeCompare(b._nombreUp, 'es'));
+          .sort((a, b) => (a._agendaLabel || '').localeCompare((b._agendaLabel || ''), 'es'));
         
         const options = profSorted
           .map(p => {
-            const label = `${p._nombreUp} (${p.id})`;
-            return `<option value="${escapeHtml(p.id)}">${escapeHtml(label)}</option>`;
+            return `<option value="${escapeHtml(p.id)}">${escapeHtml(p._agendaLabel)}</option>`;
           })
           .join('');
+
 
 
         const sug = (item.suggestions || [])
@@ -2155,22 +2196,22 @@ function buildSelectProfesionalHTML(it, roleField, resolvedIdField, label){
 
   // ✅ Opción A: si hay ID, NO mostramos pendiente
   if(profId){
-    // orden A-Z como ya hacías en resolver modal
+    // ✅ Orden por etiqueta agenda (APELLIDOS, NOMBRES)
     const profSorted = [...(state.catalogs.profesionales || [])]
-      .map(p => ({...p, _nombreUp:(p.nombre||'(sin nombre)').toUpperCase().trim()}))
-      .sort((a,b)=> a._nombreUp.localeCompare(b._nombreUp,'es'));
-
+      .map(p => ({ ...p, _agendaLabel: proEtiquetaAgenda(p.nombre || '', p.id || '') }))
+      .sort((a,b)=> (a._agendaLabel||'').localeCompare((b._agendaLabel||''),'es'));
+    
     for(const p of profSorted){
-      opts.push(optionHtml(p.id, `${p._nombreUp} (${p.id})`, p.id === profId));
+      opts.push(optionHtml(p.id, p._agendaLabel, p.id === profId));
     }
     if(!opts.some(o => o.includes(`value="${escapeHtml(profId)}"`))){
       opts.unshift(optionHtml(profId, `(ID no encontrado en catálogo) ${profId}`, true));
       for(const p of profSorted){
-        opts.push(optionHtml(p.id, `${p._nombreUp} (${p.id})`, false));
+        opts.push(optionHtml(p.id, p._agendaLabel, false));
       }
     }
     return opts.join('');
-  }
+
 
   // Si no hay nombre en CSV, permitimos “(vacío)” sin bloquear
   if(!profCsv){
@@ -2182,14 +2223,15 @@ function buildSelectProfesionalHTML(it, roleField, resolvedIdField, label){
   }
 
   const profSorted = [...(state.catalogs.profesionales || [])]
-    .map(p => ({...p, _nombreUp:(p.nombre||'(sin nombre)').toUpperCase().trim()}))
-    .sort((a,b)=> a._nombreUp.localeCompare(b._nombreUp,'es'));
-
+    .map(p => ({ ...p, _agendaLabel: proEtiquetaAgenda(p.nombre || '', p.id || '') }))
+    .sort((a,b)=> (a._agendaLabel||'').localeCompare((b._agendaLabel||''),'es'));
+  
   for(const p of profSorted){
-    opts.push(optionHtml(p.id, `${p._nombreUp} (${p.id})`, false));
+    opts.push(optionHtml(p.id, p._agendaLabel, false));
   }
-
+  
   return opts.join('');
+
 }
 
 function getTextFromSelect(selectEl){
