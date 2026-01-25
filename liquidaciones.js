@@ -63,11 +63,15 @@ function fmtDateISOorDMY(v){
 }
 function tipoPacienteNorm(v){
   const x = normalize(v);
+
+  // 🔥 CANÓNICO (DEBE CALZAR CON cirugias.js)
   if(x.includes('fona')) return 'fonasa';
-  if(x.includes('isap')) return 'particular/isapre';
-  if(x.includes('part')) return 'particular/isapre';
+  if(x.includes('isap')) return 'particular_isapre';
+  if(x.includes('part')) return 'particular_isapre';
+
   return x || '';
 }
+
 function pillHtml(kind, text){
   // kind: ok | warn | bad
   const cls = kind === 'ok' ? 'ok' : (kind === 'warn' ? 'warn' : (kind === 'bad' ? 'bad' : ''));
