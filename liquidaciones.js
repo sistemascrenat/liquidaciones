@@ -64,8 +64,8 @@ function fmtDateISOorDMY(v){
 function tipoPacienteNorm(v){
   const x = normalize(v);
   if(x.includes('fona')) return 'fonasa';
-  if(x.includes('isap')) return 'isapre';
-  if(x.includes('part')) return 'particular';
+  if(x.includes('isap')) return 'particular/isapre';
+  if(x.includes('part')) return 'particular/isapre';
   return x || '';
 }
 function pillHtml(kind, text){
@@ -546,6 +546,45 @@ async function loadProduccionMes(){
   state.prodRows = out;
 }
 
+// ✅ Resolver tipoPaciente contra las keys reales del tarifario.
+// Caso clave: ISAPRE / PARTICULAR deben caer en "PARTICULAR / ISAPRE" (bucket único).
+function resolveTipoPacienteKey(pacientesObj, tipoPaciente){
+  if(!pacientesObj || typeof pacientesObj !== 'object') return null;
+
+  const tp = (tipoPaciente || '').toString();
+
+  // 1) match directo
+  if(pacientesObj[tp] !== undefined) return tp;
+
+  // 2) Candidatos equivalentes para el bucket combinado
+  const tpn = normalize(tp); // usa tu normalize() existente
+  const candidates = [];
+
+  // Si viene isapre o particular => debe mapear a "particular/isapre"
+  if(tpn === 'isapre' || tpn === 'particular'){
+    candidates.push(
+      'particular/isapre',
+      'particular / isapre',
+      'PARTICULAR / ISAPRE',
+      'particular_isapre',
+      'particularisapre'
+    );
+  }
+
+  // Además: permitir que si ya viene "particular/isapre" (o parecido) también matchee
+  candidates.push(tp);
+
+  // 3) Match “loose” contra keys existentes (ignora espacios, slash, guiones, etc.)
+  // Reutiliza normKeyLoose() que YA la tienes más abajo (o la duplicamos aquí si prefieres).
+  const candLoose = candidates.map(c => normKeyLoose(c));
+  for(const k of Object.keys(pacientesObj)){
+    const kLoose = normKeyLoose(k);
+    if(candLoose.includes(kLoose)) return k;
+  }
+
+  return null;
+}
+
 /* =========================
    Tarifario: procedimientos.tarifas[clinicaId].pacientes[tipo].honorarios[roleId]
 ========================= */
@@ -557,8 +596,19 @@ function getHonorarioFromTarifa(procDoc, clinicaId, tipoPaciente, roleId){
     const clin = tarifas?.[clinicaId];
     if(!clin) return { ok:false, monto:0, reason:`Sin tarifario para clínica ${clinicaId}` };
 
-    const pac = clin?.pacientes?.[tipoPaciente];
-    if(!pac) return { ok:false, monto:0, reason:`Sin tarifario para paciente ${tipoPaciente}` };
+    const pacientesObj = clin?.pacientes;
+    const pacKey = resolveTipoPacienteKey(pacientesObj, tipoPaciente);
+    const pac = pacKey ? pacientesObj?.[pacKey] : null;
+
+    if(!pac){
+      // ✅ Mensaje más útil para depurar
+      const disponibles = pacientesObj ? Object.keys(pacientesObj).join(', ') : '(sin pacientes)';
+      return {
+        ok:false,
+        monto:0,
+        reason:`Sin tarifario para paciente ${tipoPaciente} (keys: ${disponibles})`
+      };
+    }
 
     const h = pac?.honorarios;
     if(!h || typeof h !== 'object') return { ok:false, monto:0, reason:'Sin honorarios' };
