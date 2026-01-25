@@ -2200,18 +2200,21 @@ function buildSelectProfesionalHTML(it, roleField, resolvedIdField, label){
     const profSorted = [...(state.catalogs.profesionales || [])]
       .map(p => ({ ...p, _agendaLabel: proEtiquetaAgenda(p.nombre || '', p.id || '') }))
       .sort((a,b)=> (a._agendaLabel||'').localeCompare((b._agendaLabel||''),'es'));
-    
+
     for(const p of profSorted){
       opts.push(optionHtml(p.id, p._agendaLabel, p.id === profId));
     }
+
+    // fallback: si por alguna razón el ID no está en el catálogo cargado
     if(!opts.some(o => o.includes(`value="${escapeHtml(profId)}"`))){
       opts.unshift(optionHtml(profId, `(ID no encontrado en catálogo) ${profId}`, true));
       for(const p of profSorted){
         opts.push(optionHtml(p.id, p._agendaLabel, false));
       }
     }
-    return opts.join('');
 
+    return opts.join('');
+  } // ✅ ← ESTA LLAVE FALTABA (y era la causa del error)
 
   // Si no hay nombre en CSV, permitimos “(vacío)” sin bloquear
   if(!profCsv){
@@ -2225,13 +2228,12 @@ function buildSelectProfesionalHTML(it, roleField, resolvedIdField, label){
   const profSorted = [...(state.catalogs.profesionales || [])]
     .map(p => ({ ...p, _agendaLabel: proEtiquetaAgenda(p.nombre || '', p.id || '') }))
     .sort((a,b)=> (a._agendaLabel||'').localeCompare((b._agendaLabel||''),'es'));
-  
+
   for(const p of profSorted){
     opts.push(optionHtml(p.id, p._agendaLabel, false));
   }
-  
-  return opts.join('');
 
+  return opts.join('');
 }
 
 function getTextFromSelect(selectEl){
