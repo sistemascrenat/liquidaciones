@@ -131,19 +131,51 @@ async function generarPDFLiquidacionProfesional(agg){
   const page = pdfDoc.addPage([595.28, 841.89]);
   const { width, height } = page.getSize();
 
-  // Colores suaves
-  const teal = rgb(0.0, 0.65, 0.60);
-  const gray = rgb(0.42, 0.45, 0.50);
-  const ink  = rgb(0.07, 0.09, 0.13);
-  const soft = rgb(0.95, 0.98, 0.99);
+  // Paleta RENNAT (sobria, fondo blanco)
+  const RENNAT_BLUE  = rgb(0.08, 0.26, 0.36); // azul logo
+  const RENNAT_GREEN = rgb(0.12, 0.55, 0.45); // verde logo
+  const TEXT_MAIN    = rgb(0.08, 0.09, 0.11); // casi negro
+  const TEXT_MUTED   = rgb(0.45, 0.48, 0.52); // gris
+  const BORDER_SOFT  = rgb(0.82, 0.84, 0.86); // líneas tabla
 
   // Margenes
   const M = 26;
   let y = height - M;
 
-  // Header bar
-  page.drawRectangle({ x:M, y:y-48, width:width-2*M, height:48, color:soft, borderColor:rgb(0.86,0.90,0.93), borderWidth:1 });
-  page.drawRectangle({ x:M, y:y-48, width:6, height:48, color:teal });
+  // Header limpio RENNAT (sin fondos)
+  page.drawText(
+    'LIQUIDACIÓN DE HONORARIOS',
+    {
+      x: M,
+      y: y - 28,
+      size: 15,
+      font: fontBold,
+      color: RENNAT_BLUE
+    }
+  );
+  
+  // Línea fina bajo el título
+  page.drawLine({
+    start: { x: M, y: y - 34 },
+    end:   { x: width - M, y: y - 34 },
+    thickness: 1,
+    color: RENNAT_GREEN
+  });
+  
+  // Mes / Año
+  page.drawText(
+    `Mes: ${monthNameEs(state.mesNum)} ${state.ano}`,
+    {
+      x: M,
+      y: y - 50,
+      size: 10,
+      font,
+      color: TEXT_MUTED
+    }
+  );
+  
+  y -= 70;
+
 
   // Logo (opcional) — arriba a la derecha, con tamaño consistente
   const logoBytes = await fetchAsArrayBuffer(PDF_ASSET_LOGO_URL);
@@ -189,10 +221,30 @@ async function generarPDFLiquidacionProfesional(agg){
   page.drawText('DATOS DEL PROFESIONAL', { x:M, y:y, size:11, font:fontBold, color:ink });
   y -= 10;
 
-  page.drawRectangle({ x:M, y:y-62, width:width-2*M, height:62, color:rgb(1,1,1), borderColor:rgb(0.86,0.90,0.93), borderWidth:1 });
+  // Línea separadora
+  page.drawLine({
+    start: { x: M, y: y - 8 },
+    end:   { x: width - M, y: y - 8 },
+    thickness: 1,
+    color: BORDER_SOFT
+  });
 
-  page.drawText(`Nombre: ${titularNombre || '—'}`, { x:M+12, y:y-20, size:10.5, font:fontBold, color:ink });
-  page.drawText(`RUT: ${titularRut || '—'}`, { x:M+12, y:y-38, size:10.5, font, color:ink });
+
+  page.drawText(`Nombre: ${titularNombre || '—'}`, {
+    x: M,
+    y: y - 28,
+    size: 11,
+    font: fontBold,
+    color: TEXT_MAIN
+  });
+  
+  page.drawText(`RUT: ${titularRut || '—'}`, {
+    x: M,
+    y: y - 44,
+    size: 10,
+    font,
+    color: TEXT_MAIN
+});
 
   if(esJuridica && (empresaNombre || empresaRut)){
     // Subtítulo gris (empresa)
