@@ -280,8 +280,8 @@ async function generarPDFLiquidacionProfesional(agg){
   // Tabla: RUT | PROFESIONAL | TIPO PACIENTE | # | SUBTOTAL
   const col = {
     rut:  M,
-    nom:  M + 85,
-    tipo: M + 300,
+    nom:  M + 65,
+    tipo: M + 220,
     num:  W - M - 120,
     sub:  W - M
   };
