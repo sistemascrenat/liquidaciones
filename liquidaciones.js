@@ -353,6 +353,8 @@ async function generarPDFLiquidacionProfesional(agg){
   
       y -= rowH;
     }
+
+    drawHLine(page1, y + 6, M, W - M, 0.8, BORDER_SOFT);
   
     // Subtotal del rol
     y -= 2;
