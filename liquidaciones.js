@@ -278,22 +278,18 @@ async function generarPDFLiquidacionProfesional(agg){
   y -= 14;
   
   // Tabla: RUT | PROFESIONAL | TIPO PACIENTE | # | SUBTOTAL
+  // Tabla base (columnas) — SOLO: TIPO | CANTIDAD | SUBTOTAL
   const col = {
-    rut:  M,
-    nom:  M + 65,
-    tipo: M + 220,
-    num:  W - M - 120,
-    sub:  W - M
+    tipo:  M,
+    cant:  W - M - 130,  // columna cantidad (más cerca del subtotal)
+    sub:   W - M         // subtotal alineado a la derecha
   };
   
   // Header tabla
   const headerY = y;
-  drawText(page1, 'RUT', col.rut, headerY, 9, true, TEXT_MUTED);
-  drawText(page1, 'PROFESIONAL', col.nom, headerY, 9, true, TEXT_MUTED);
   drawText(page1, 'TIPO', col.tipo, headerY, 9, true, TEXT_MUTED);
-  drawText(page1, 'CANTIDAD', col.num + 10, headerY, 9, true, TEXT_MUTED);
-  drawText(page1, 'SUBTOTAL', col.sub - measure('SUBTOTAL', 9, true), headerY, 9, true, TEXT_MUTED);
-  
+  drawText(page1, 'CANTIDAD', col.cant - measure('CANTIDAD',9,true), headerY, 9, true, TEXT_MUTED);
+  drawText(page1, 'SUBTOTAL', col.sub - measure('SUBTOTAL',9,true), headerY, 9, true, TEXT_MUTED);
   y -= 10;
   drawHLine(page1, y, M, W - M, 1, BORDER_SOFT);
   y -= 14;
