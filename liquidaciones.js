@@ -233,7 +233,7 @@ async function generarPDFLiquidacionProfesional(agg){
   drawHLine(page1, y, M, W - M, 1, BORDER_SOFT);
   y -= 18;
 
-  drawText(page1, 'Nombre:', M, y, 10, true, TEXT_MAIN);
+  drawText(page1, 'NOMBRE:', M, y, 10, true, TEXT_MAIN);
   drawText(page1, nombreMostrar, M + 70, y, 10, false, TEXT_MAIN);
   y -= 16;
 
@@ -244,8 +244,8 @@ async function generarPDFLiquidacionProfesional(agg){
   if(esJuridica){
     // mostramos también “titular persona” en chico, si existe
     if(titular){
-      drawText(page1, 'Titular:', M, y, 9, false, TEXT_MUTED);
-      drawText(page1, `${titular}${rutTitular ? ' · '+rutTitular : ''}`, M + 70, y, 9, false, TEXT_MUTED);
+      drawText(page1, 'PROFESIONAL Y RUT:', M, y, 9, false, TEXT_MUTED);
+      drawText(page1, `${titular}${rutTitular ? ' · '+rutTitular : ''}`, M + 70, y, 10, false, TEXT_MUTED);
       y -= 14;
     }
   }
