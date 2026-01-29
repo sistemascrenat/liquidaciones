@@ -121,286 +121,342 @@ function buildLineaEstado(l){
 }
 
 async function generarPDFLiquidacionProfesional(agg){
-  // Documento nuevo (sin template) para que sea simple y claro
   const pdfDoc = await PDFDocument.create();
 
   const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
   const fontBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
 
-  // Página A4
-  const page = pdfDoc.addPage([595.28, 841.89]);
-  const { width, height } = page.getSize();
+  // A4 vertical
+  const W = 595.28;
+  const H = 841.89;
 
-  // Paleta RENNAT (sobria, fondo blanco)
-  const RENNAT_BLUE  = rgb(0.08, 0.26, 0.36); // azul logo
-  const RENNAT_GREEN = rgb(0.12, 0.55, 0.45); // verde logo
-  const TEXT_MAIN    = rgb(0.08, 0.09, 0.11); // casi negro
-  const TEXT_MUTED   = rgb(0.45, 0.48, 0.52); // gris
-  const BORDER_SOFT  = rgb(0.82, 0.84, 0.86); // líneas tabla
+  // Paleta RENNAT (sobria)
+  const RENNAT_BLUE  = rgb(0.08, 0.26, 0.36);
+  const RENNAT_GREEN = rgb(0.12, 0.55, 0.45);
+  const TEXT_MAIN    = rgb(0.08, 0.09, 0.11);
+  const TEXT_MUTED   = rgb(0.45, 0.48, 0.52);
+  const BORDER_SOFT  = rgb(0.82, 0.84, 0.86);
 
-  // Margenes
-  const M = 26;
-  let y = height - M;
+  const M = 36;
 
-  // Header limpio RENNAT (sin fondos)
-  page.drawText(
-    'LIQUIDACIÓN DE HONORARIOS',
-    {
-      x: M,
-      y: y - 28,
-      size: 15,
-      font: fontBold,
-      color: RENNAT_BLUE
-    }
-  );
-  
-  // Línea fina bajo el título
-  page.drawLine({
-    start: { x: M, y: y - 34 },
-    end:   { x: width - M, y: y - 34 },
-    thickness: 1,
-    color: RENNAT_GREEN
-  });
-  
-  // Mes / Año
-  page.drawText(
-    `Mes: ${monthNameEs(state.mesNum)} ${state.ano}`,
-    {
-      x: M,
-      y: y - 50,
-      size: 10,
-      font,
-      color: TEXT_MUTED
-    }
-  );
-  
-  y -= 70;
+  // ===== Helpers internos PDF (solo layout) =====
+  const drawHLine = (page, y, x1=M, x2=W-M, thick=1, col=BORDER_SOFT) => {
+    page.drawLine({ start:{x:x1,y}, end:{x:x2,y}, thickness:thick, color:col });
+  };
 
+  const drawText = (page, text, x, y, size=10, bold=false, color=TEXT_MAIN) => {
+    page.drawText(String(text ?? ''), { x, y, size, font: bold ? fontBold : font, color });
+  };
 
-  // Logo (opcional) — arriba a la derecha, con tamaño consistente
+  const measure = (text, size=10, bold=false) => {
+    const f = bold ? fontBold : font;
+    return f.widthOfTextAtSize(String(text ?? ''), size);
+  };
+
+  const clip = (s, maxChars) => String(s ?? '').slice(0, maxChars);
+
+  const money = (n)=> clp(n || 0);
+
+  // ===== Datos cabecera =====
+  const mesTxt = `${monthNameEs(state.mesNum)} ${state.ano}`;
+  const titular = (agg?.nombre || '').toString();
+  const rutTitular = (agg?.rut || '').toString();
+
+  const esJuridica = (agg?.tipoPersona || '').toLowerCase() === 'juridica';
+  const empresaNombre = (agg?.empresaNombre || '').toString();
+  const empresaRut = (agg?.empresaRut || '').toString();
+
+  // =========================
+  // PÁGINA 1 — Resumen por Rol
+  // =========================
+  const page1 = pdfDoc.addPage([W, H]);
+  let y = H - M;
+
+  // Logo (opcional) arriba izquierda
   const logoBytes = await fetchAsArrayBuffer(PDF_ASSET_LOGO_URL);
   if (logoBytes) {
     try {
       const logo = await pdfDoc.embedPng(logoBytes);
-
-      // Tamaño recomendado (ajústalo a gusto)
-      const logoW = 110;
+      const logoW = 115;
       const logoH = (logo.height / logo.width) * logoW;
+      page1.drawImage(logo, { x: M, y: y - logoH, width: logoW, height: logoH });
+    } catch(_e){}
+  }
 
-      // Ubicación: esquina superior derecha, respetando margen
-      const logoX = width - M - logoW;
-      const logoY = (y - 10) - logoH; // y actual es la parte "alta" del header
+  // Título centrado
+  const t1 = 'LIQUIDACIÓN DE HONORARIOS';
+  const t1Size = 16;
+  drawText(page1, t1, (W - measure(t1,t1Size,true))/2, y - 24, t1Size, true, RENNAT_BLUE);
 
-      page.drawImage(logo, { x: logoX, y: logoY, width: logoW, height: logoH });
+  // Línea verde bajo título
+  drawHLine(page1, y - 30, M, W - M, 1.2, RENNAT_GREEN);
 
-      // Baja el cursor (y) para que el título/mes no se cruce con el logo
-      // (solo si el logo ocupa más altura que tu header)
-      // Ajuste suave: si quieres más aire, cambia 10 por 16.
-      // OJO: NO cambiamos "y" globalmente aquí, solo el "y" local del flujo:
-      // (como tú bajas y después con y -= 68, esto evita choques visuales)
-    } catch (_e) {
-      // si no es png o falla, no lo dibuja
+  // Mes/año (derecha)
+  const mesLabel = `Mes/Año: ${mesTxt}`;
+  drawText(page1, mesLabel, W - M - measure(mesLabel,10,false), y - 48, 10, false, TEXT_MUTED);
+
+  y -= 78;
+
+  // Datos profesional / empresa (simple, formal)
+  const nombreMostrar = esJuridica ? (empresaNombre || titular || '—') : (titular || '—');
+  const rutMostrar = esJuridica ? (empresaRut || rutTitular || '—') : (rutTitular || '—');
+
+  drawText(page1, 'DATOS DEL PROFESIONAL', M, y, 11, true, RENNAT_BLUE);
+  y -= 10;
+  drawHLine(page1, y, M, W - M, 1, BORDER_SOFT);
+  y -= 18;
+
+  drawText(page1, 'Nombre:', M, y, 10, true, TEXT_MAIN);
+  drawText(page1, nombreMostrar, M + 70, y, 10, false, TEXT_MAIN);
+  y -= 16;
+
+  drawText(page1, 'RUT:', M, y, 10, true, TEXT_MAIN);
+  drawText(page1, rutMostrar, M + 70, y, 10, false, TEXT_MAIN);
+  y -= 16;
+
+  if(esJuridica){
+    // mostramos también “titular persona” en chico, si existe
+    if(titular){
+      drawText(page1, 'Titular:', M, y, 9, false, TEXT_MUTED);
+      drawText(page1, `${titular}${rutTitular ? ' · '+rutTitular : ''}`, M + 70, y, 9, false, TEXT_MUTED);
+      y -= 14;
     }
   }
 
+  y -= 8;
 
-  // Título
-  page.drawText('LIQUIDACIÓN DE HONORARIOS', { x:M+14, y:y-30, size:14, font:fontBold, color:ink });
-  page.drawText(`Mes: ${monthNameEs(state.mesNum)}  ${state.ano}`, { x:M+14, y:y-45, size:10, font, color:gray });
+  // Agrupar líneas por rol
+  const linesAll = [...(agg?.lines || [])];
 
-  y -= 68;
+  // Orden de roles: usa ROLE_SPEC si existe en state (mismo archivo) y luego otros
+  const roleOrderIds = (Array.isArray(ROLE_SPEC) ? ROLE_SPEC.map(r=>r.roleId) : []);
+  const roleLabelById = new Map(linesAll.map(l=>[l.roleId, l.roleNombre]));
 
-  // Bloque Datos Profesional
-  const titularNombre = (agg?.nombre || '').toString();
-  const titularRut = (agg?.rut || '').toString();
-  const esJuridica = (agg?.tipoPersona || '').toLowerCase() === 'juridica';
-
-  const empresaNombre = (agg?.empresaNombre || '').toString();
-  const empresaRut = (agg?.empresaRut || '').toString();
-
-  page.drawText('DATOS DEL PROFESIONAL', { x:M, y:y, size:11, font:fontBold, color:ink });
-  y -= 10;
-
-  // Línea separadora
-  page.drawLine({
-    start: { x: M, y: y - 8 },
-    end:   { x: width - M, y: y - 8 },
-    thickness: 1,
-    color: BORDER_SOFT
-  });
-
-
-  page.drawText(`Nombre: ${titularNombre || '—'}`, {
-    x: M,
-    y: y - 28,
-    size: 11,
-    font: fontBold,
-    color: TEXT_MAIN
-  });
-  
-  page.drawText(`RUT: ${titularRut || '—'}`, {
-    x: M,
-    y: y - 44,
-    size: 10,
-    font,
-    color: TEXT_MAIN
-});
-
-  if(esJuridica && (empresaNombre || empresaRut)){
-    // Subtítulo gris (empresa)
-    page.drawText(`Empresa: ${empresaNombre || '—'}`, { x:M+12, y:y-54, size:9.5, font, color:gray });
-    if(empresaRut){
-      page.drawText(`RUT Empresa: ${empresaRut}`, { x:M+290, y:y-54, size:9.5, font, color:gray });
-    }
+  const groups = new Map(); // roleId -> lines
+  for(const l of linesAll){
+    const rid = l.roleId || 'sin_rol';
+    if(!groups.has(rid)) groups.set(rid, []);
+    groups.get(rid).push(l);
   }
 
-  y -= 82;
+  const roleIdsSorted = [
+    ...roleOrderIds.filter(id=>groups.has(id)),
+    ...[...groups.keys()].filter(id=>!roleOrderIds.includes(id)).sort()
+  ];
 
-  // IMPORTANTE (para evitar confusión): datos de Clínica Rennat deben ir CLARAMENTE como emisor
-  page.drawText('DATOS DEL EMISOR (CLÍNICA RENNAT)', { x:M, y:y, size:10.5, font:fontBold, color:ink });
+  // Resumen por rol
+  drawText(page1, 'RESUMEN POR ROL', M, y, 11, true, RENNAT_BLUE);
   y -= 10;
+  drawHLine(page1, y, M, W - M, 1, BORDER_SOFT);
+  y -= 14;
 
-  page.drawRectangle({ x:M, y:y-46, width:width-2*M, height:46, color:rgb(1,1,1), borderColor:rgb(0.86,0.90,0.93), borderWidth:1 });
-  page.drawText('Estos datos corresponden al emisor del servicio (Clínica Rennat).', { x:M+12, y:y-18, size:9.2, font, color:gray });
-  page.drawText('No corresponden a los datos del profesional.', { x:M+12, y:y-32, size:9.2, font, color:gray });
-
-  y -= 66;
-
-  // Resumen
-  const total = Number(agg?.total || 0) || 0;
-
-  page.drawRectangle({ x:M, y:y-40, width:width-2*M, height:40, color:soft, borderColor:rgb(0.86,0.90,0.93), borderWidth:1 });
-  page.drawText('TOTAL A PAGAR', { x:M+12, y:y-26, size:11, font:fontBold, color:ink });
-  page.drawText(clp(total), { x:width-M-12-fontBold.widthOfTextAtSize(clp(total), 14), y:y-28, size:14, font:fontBold, color:ink });
-
-  y -= 62;
-
-  // Alertas/Pendientes (si existen)
-  const alertasCount = Number(agg?.alertasCount || 0) || 0;
-  const pendientesCount = Number(agg?.pendientesCount || 0) || 0;
-
-  if(alertasCount > 0 || pendientesCount > 0){
-    const msg = [
-      alertasCount>0 ? `ALERTAS: ${alertasCount}` : null,
-      pendientesCount>0 ? `PENDIENTES: ${pendientesCount}` : null
-    ].filter(Boolean).join(' · ');
-
-    page.drawRectangle({ x:M, y:y-28, width:width-2*M, height:28, color:rgb(1, 0.93, 0.94), borderColor:rgb(0.98,0.80,0.82), borderWidth:1 });
-    page.drawText(`ATENCIÓN: ${msg}`, { x:M+12, y:y-18, size:10, font:fontBold, color:rgb(0.62,0.07,0.22) });
-    y -= 44;
-  }
-
-  // Tabla Detalle (simple y legible)
-  page.drawText('DETALLE DE PROCEDIMIENTOS', { x:M, y:y, size:11, font:fontBold, color:ink });
-  y -= 10;
-
-  const colX = {
-    fecha:  M,
-    clinica:M + 86,
-    tipo:   M + 220,
-    proc:   M + 285,
-    rol:    M + 490,
-    montoR: (width - M)  // borde derecho real para alinear $ a la derecha
+  // Tabla base (columnas)
+  // RUT Profesional | Nombre Profesional | # | Subtotal
+  const col = {
+    rut:   M,
+    nom:   M + 130,
+    num:   W - M - 130,
+    sub:   W - M
   };
 
   // Header tabla
-  page.drawRectangle({ x:M, y:y-18, width:width-2*M, height:18, color:soft, borderColor:rgb(0.86,0.90,0.93), borderWidth:1 });
-  const HFS = 8.0; // header font size
-  
-  page.drawText('Fecha', { x:colX.fecha+6, y:y-13, size:HFS, font:fontBold, color:gray });
-  page.drawText('Clínica', { x:colX.clinica+6, y:y-13, size:HFS, font:fontBold, color:gray });
-  page.drawText('Tipo', { x:colX.tipo+6, y:y-13, size:HFS, font:fontBold, color:gray });
-  page.drawText('Procedimiento / Paciente', { x:colX.proc+6, y:y-13, size:HFS, font:fontBold, color:gray });
-  page.drawText('Rol', { x:colX.rol+6, y:y-13, size:HFS, font:fontBold, color:gray });
-  
-  // $ alineado al extremo derecho (no se encime)
-  page.drawText('$', { 
-    x: colX.montoR - 12, 
-    y: y-13, 
-    size: HFS, 
-    font: fontBold, 
-    color: gray 
-  });
+  const headerY = y;
+  drawText(page1, 'RUT PROFESIONAL', col.rut, headerY, 9, true, TEXT_MUTED);
+  drawText(page1, 'NOMBRE PROFESIONAL', col.nom, headerY, 9, true, TEXT_MUTED);
+  drawText(page1, '#', col.num + 110, headerY, 9, true, TEXT_MUTED);
+  drawText(page1, 'SUBTOTAL', col.sub - measure('SUBTOTAL',9,true), headerY, 9, true, TEXT_MUTED);
+  y -= 10;
+  drawHLine(page1, y, M, W - M, 1, BORDER_SOFT);
+  y -= 14;
 
+  const rowH = 16;
 
+  const subtotalByRole = [];
+  for(const rid of roleIdsSorted){
+    const ls = groups.get(rid) || [];
+    const rolName = roleLabelById.get(rid) || rid;
+
+    const casos = ls.length;
+    const sub = ls.reduce((a,b)=> a + (Number(b.monto||0)||0), 0);
+
+    subtotalByRole.push({ rid, rolName, casos, sub });
+
+    // Título rol
+    if(y < M + 120) break; // si se acaba espacio, paramos (no debería; si pasa lo afinamos)
+    drawText(page1, String(rolName).toUpperCase(), M, y, 10, true, RENNAT_BLUE);
+    y -= 12;
+
+    // Fila única (rut/nombre del profesional, cantidad, subtotal)
+    const rutRow = rutTitular || '—';
+    const nomRow = titular || '—';
+
+    drawText(page1, rutRow, col.rut, y, 10, false, TEXT_MAIN);
+    drawText(page1, clip(nomRow, 40), col.nom, y, 10, false, TEXT_MAIN);
+
+    drawText(page1, String(casos), col.num + 110, y, 10, true, TEXT_MAIN);
+
+    const subTxt = money(sub);
+    drawText(page1, subTxt, col.sub - measure(subTxt,10,true), y, 10, true, TEXT_MAIN);
+
+    y -= rowH;
+    drawHLine(page1, y + 6, M, W - M, 0.8, BORDER_SOFT);
+    y -= 8;
+  }
+
+  // TOTAL GENERAL
+  const totalGeneral = Number(agg?.total || 0) || subtotalByRole.reduce((a,b)=>a+b.sub,0);
+  y -= 10;
+  drawHLine(page1, y, M, W - M, 1.2, RENNAT_GREEN);
   y -= 22;
 
-  // Filas
-  const lines = [...(agg.lines || [])].sort((a,b)=>{
+  drawText(page1, 'TOTAL GENERAL', M, y, 12, true, RENNAT_BLUE);
+  const totalTxt = money(totalGeneral);
+  drawText(page1, totalTxt, W - M - measure(totalTxt,14,true), y - 2, 14, true, TEXT_MAIN);
+  y -= 26;
+
+  // Caja advertencia si hay pendientes o alertas
+  const pendientesCount = Number(agg?.pendientesCount || 0) || 0;
+  const alertasCount = Number(agg?.alertasCount || 0) || 0;
+
+  if(pendientesCount > 0 || alertasCount > 0){
+    const msgParts = [];
+    if(alertasCount > 0) msgParts.push(`Alertas: ${alertasCount}`);
+    if(pendientesCount > 0) msgParts.push(`Pendientes: ${pendientesCount}`);
+    const msg = msgParts.join(' · ');
+
+    // caja simple (borde suave)
+    const boxH = 44;
+    page1.drawRectangle({
+      x: M,
+      y: M + 70,
+      width: W - 2*M,
+      height: boxH,
+      borderColor: BORDER_SOFT,
+      borderWidth: 1,
+      color: rgb(1,1,1)
+    });
+
+    drawText(page1, 'ATENCIÓN', M + 12, M + 70 + boxH - 18, 11, true, RENNAT_BLUE);
+    drawText(page1, msg, M + 12, M + 70 + boxH - 34, 10, false, TEXT_MAIN);
+    drawText(page1, 'Revisar pendientes/alertas en el detalle (página 2).', M + 12, M + 70 + 8, 9, false, TEXT_MUTED);
+  }
+
+  // =========================
+  // PÁGINA 2 — Detalle de Casos
+  // =========================
+  const page2 = pdfDoc.addPage([W, H]);
+  let y2 = H - M;
+
+  // Encabezado página 2 (simple)
+  const dTitle = 'DETALLE DE CASOS';
+  drawText(page2, dTitle, M, y2 - 22, 14, true, RENNAT_BLUE);
+  const sub2 = `${nombreMostrar} · ${mesTxt}`;
+  drawText(page2, sub2, M, y2 - 40, 10, false, TEXT_MUTED);
+  drawHLine(page2, y2 - 46, M, W - M, 1.2, RENNAT_GREEN);
+
+  y2 -= 70;
+
+  // Tabla detalle columnas: # | Clínica | Cirugía | Paciente | Tipo Paciente
+  const dcol = {
+    n:    M,
+    clin: M + 36,
+    cir:  M + 190,
+    pac:  M + 330,
+    tp:   W - M - 90
+  };
+
+  const drawDetailHeader = ()=>{
+    drawText(page2, '#', dcol.n, y2, 9, true, TEXT_MUTED);
+    drawText(page2, 'CLÍNICA', dcol.clin, y2, 9, true, TEXT_MUTED);
+    drawText(page2, 'CIRUGÍA', dcol.cir, y2, 9, true, TEXT_MUTED);
+    drawText(page2, 'PACIENTE', dcol.pac, y2, 9, true, TEXT_MUTED);
+    drawText(page2, 'TIPO', dcol.tp, y2, 9, true, TEXT_MUTED);
+    y2 -= 10;
+    drawHLine(page2, y2, M, W - M, 1, BORDER_SOFT);
+    y2 -= 12;
+  };
+
+  const lineSort = (a,b)=>{
     const fa = normalize(a.fecha);
     const fb = normalize(b.fecha);
     if(fa !== fb) return fa.localeCompare(fb);
-    return normalize(a.roleNombre).localeCompare(normalize(b.roleNombre));
-  });
+    const ha = normalize(a.hora);
+    const hb = normalize(b.hora);
+    if(ha !== hb) return ha.localeCompare(hb);
+    return normalize(a.pacienteNombre).localeCompare(normalize(b.pacienteNombre));
+  };
 
-  const rowH = 18;
-  const RFS = 7.6;     // tamaño texto filas (más chico)
-  const RFS_B = 7.6;   // monto en negrita
+  const rowH2 = 14;
 
-  for (const l of lines) {
-    // Si se acaba la página, por ahora cortamos (después podemos paginar)
-    if (y - rowH < M + 20) break;
+  for(const rid of roleIdsSorted){
+    const ls = [...(groups.get(rid) || [])].sort(lineSort);
+    if(!ls.length) continue;
 
-    const fechaTxt = `${cleanReminder(l.fecha)} ${cleanReminder(l.hora)}`.trim();
-    const clinTxt  = cleanReminder(l.clinicaNombre || '');
-    const tipoTxt  = cleanReminder(l.tipoPaciente || '');
-    const procTxt  = cleanReminder(l.procedimientoNombre || '');
-    const pacTxt   = cleanReminder(l.pacienteNombre || '');
-    const rolTxt   = cleanReminder(l.roleNombre || '');
-    const montoTxt = clp(l.monto || 0);
-
-    const estado = buildLineaEstado(l);
-
-    // fila (fondo + borde suave)
-    page.drawRectangle({
-      x: M,
-      y: y - rowH,
-      width: width - 2 * M,
-      height: rowH,
-      color: rgb(1, 1, 1),
-      borderColor: rgb(0.93, 0.95, 0.97),
-      borderWidth: 1
-    });
-
-    // textos
-    page.drawText(fechaTxt.slice(0, 18), { x: colX.fecha + 6,   y: y - 13, size: RFS, font, color: ink });
-    page.drawText(clinTxt.slice(0, 22),  { x: colX.clinica + 6, y: y - 13, size: RFS, font, color: ink });
-    page.drawText(tipoTxt.slice(0, 10),  { x: colX.tipo + 6,    y: y - 13, size: RFS, font, color: ink });
-
-    const procPac = `${procTxt} — ${pacTxt}`.trim();
-    page.drawText(procPac.slice(0, 40),  { x: colX.proc + 6,    y: y - 13, size: 7.4, font, color: ink });
-
-    page.drawText(rolTxt.slice(0, 16),   { x: colX.rol + 6,     y: y - 13, size: RFS, font, color: ink });
-
-    // monto alineado al borde derecho real
-    page.drawText(montoTxt, {
-      x: colX.montoR - 6 - fontBold.widthOfTextAtSize(montoTxt, RFS_B),
-      y: y - 13,
-      size: RFS_B,
-      font: fontBold,
-      color: ink
-    });
-
-    // badge mini (derecha) si no es OK
-    if (estado !== 'OK') {
-      const badge = (estado === 'ALERTA') ? 'ALERTA' : 'PEND';
-      const bcol  = (estado === 'ALERTA') ? rgb(0.62, 0.07, 0.22) : rgb(0.60, 0.32, 0.05);
-      page.drawText(badge, {
-        x: width - M - 44,
-        y: y - 13,
-        size: 7.4,
-        font: fontBold,
-        color: bcol
-      });
+    // si no queda espacio mínimo, igual seguimos pero cortamos
+    if(y2 < M + 160){
+      drawText(page2, '… (Hay más casos para este profesional; revisar export CSV si se requiere detalle completo)', M, y2, 9, false, TEXT_MUTED);
+      break;
     }
 
-    y -= rowH;
+    const rolName = (roleLabelById.get(rid) || rid || '').toString();
+
+    // Título rol
+    drawText(page2, `ROL: ${rolName.toUpperCase()}`, M, y2, 11, true, RENNAT_BLUE);
+    y2 -= 8;
+    drawHLine(page2, y2, M, W - M, 1, BORDER_SOFT);
+    y2 -= 16;
+
+    // Header tabla detalle
+    drawDetailHeader();
+
+    // Numeración reinicia por rol
+    let idx = 1;
+
+    for(const l of ls){
+      if(y2 < M + 160){
+        drawText(page2, '… (Se corta por espacio; revisar export CSV para detalle completo)', M, y2, 9, false, TEXT_MUTED);
+        y2 = M + 150;
+        break;
+      }
+
+      drawText(page2, String(idx++), dcol.n, y2, 10, true, TEXT_MAIN);
+      drawText(page2, clip(l.clinicaNombre || '', 26), dcol.clin, y2, 10, false, TEXT_MAIN);
+      drawText(page2, clip(l.procedimientoNombre || '', 20), dcol.cir, y2, 10, false, TEXT_MAIN);
+      drawText(page2, clip(l.pacienteNombre || '', 22), dcol.pac, y2, 10, false, TEXT_MAIN);
+      drawText(page2, clip((l.tipoPaciente || '').toString().toUpperCase(), 12), dcol.tp, y2, 9, false, TEXT_MUTED);
+
+      y2 -= rowH2;
+      // línea suave
+      drawHLine(page2, y2 + 4, M, W - M, 0.6, BORDER_SOFT);
+      y2 -= 2;
+    }
+
+    y2 -= 14; // espacio entre roles
   }
 
-  // ✅ cerrar PDF y devolver bytes
+  // Datos del emisor al final (simple + formal)
+  const emH = 78;
+  const emY = M + 20;
+
+  page2.drawRectangle({
+    x: M,
+    y: emY,
+    width: W - 2*M,
+    height: emH,
+    borderColor: BORDER_SOFT,
+    borderWidth: 1,
+    color: rgb(1,1,1)
+  });
+
+  drawText(page2, 'DATOS DEL EMISOR (CLÍNICA RENNAT)', M + 12, emY + emH - 18, 10.5, true, RENNAT_BLUE);
+  drawText(page2, 'Estos datos corresponden al emisor del servicio (Clínica Rennat).', M + 12, emY + emH - 36, 9.5, false, TEXT_MUTED);
+  drawText(page2, 'No corresponden a los datos del profesional.', M + 12, emY + emH - 52, 9.5, false, TEXT_MUTED);
+
+  // Guardar PDF
   const bytes = await pdfDoc.save();
   return bytes;
 }
+
 
 
 function downloadBytes(filename, bytes, mime='application/pdf'){
