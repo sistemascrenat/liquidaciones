@@ -155,7 +155,19 @@ async function generarPDFLiquidacionProfesional(agg){
 
   const clip = (s, maxChars) => String(s ?? '').slice(0, maxChars);
 
+  // ✅ Abreviar "CLINICA/CLÍNICA" -> "C."
+  const clinAbbrev = (name) => {
+    const s = String(name ?? '').trim();
+    if(!s) return '';
+    // normalizamos variantes comunes
+    return s
+      .replace(/^CL[IÍ]NICA\s+/i, 'C. ')
+      .replace(/^CLINICA\s+/i, 'C. ')
+      .replace(/^CL[IÍ]N\.?\s+/i, 'C. ');
+  };
+  
   const money = (n)=> clp(n || 0);
+
 
   // ===== Datos cabecera =====
   const mesTxt = `${monthNameEs(state.mesNum)} ${state.ano}`;
@@ -254,8 +266,8 @@ async function generarPDFLiquidacionProfesional(agg){
   // RUT Profesional | Nombre Profesional | # | Subtotal
   const col = {
     rut:   M,
-    nom:   M + 130,
-    num:   W - M - 130,
+    nom:   M + 115,
+    num:   W - M - 115,
     sub:   W - M
   };
 
@@ -359,15 +371,15 @@ async function generarPDFLiquidacionProfesional(agg){
   // Tabla detalle columnas: # | Clínica | Cirugía | Paciente | Tipo Paciente
   const dcol = {
     n:    M,
-    clin: M + 36,
-    cir:  M + 190,
-    pac:  M + 330,
-    tp:   W - M - 90
+    clin: M + 30,   // antes 36 (más junto)
+    cir:  M + 165,  // antes 190 (más junto)
+    pac:  M + 295,  // antes 330 (más espacio para TIPO al final)
+    tp:   W - M - 65 // antes -90 (TIPO más a la derecha, evita choque)
   };
 
   const drawDetailHeader = ()=>{
     drawText(page2, '#', dcol.n, y2, 9, true, TEXT_MUTED);
-    drawText(page2, 'CLÍNICA', dcol.clin, y2, 9, true, TEXT_MUTED);
+    drawText(page2, 'C.', dcol.clin, y2, 9, true, TEXT_MUTED);
     drawText(page2, 'CIRUGÍA', dcol.cir, y2, 9, true, TEXT_MUTED);
     drawText(page2, 'PACIENTE', dcol.pac, y2, 9, true, TEXT_MUTED);
     drawText(page2, 'TIPO', dcol.tp, y2, 9, true, TEXT_MUTED);
@@ -420,14 +432,12 @@ async function generarPDFLiquidacionProfesional(agg){
       }
 
       drawText(page2, String(idx++), dcol.n, y2, 10, true, TEXT_MAIN);
-      drawText(page2, clip(l.clinicaNombre || '', 26), dcol.clin, y2, 10, false, TEXT_MAIN);
+      drawText(page2, clip(clinAbbrev(l.clinicaNombre || '', 26), dcol.clin, y2, 10, false, TEXT_MAIN);
       drawText(page2, clip(l.procedimientoNombre || '', 20), dcol.cir, y2, 10, false, TEXT_MAIN);
       drawText(page2, clip(l.pacienteNombre || '', 22), dcol.pac, y2, 10, false, TEXT_MAIN);
       drawText(page2, clip((l.tipoPaciente || '').toString().toUpperCase(), 12), dcol.tp, y2, 9, false, TEXT_MUTED);
 
       y2 -= rowH2;
-      // línea suave
-      drawHLine(page2, y2 + 4, M, W - M, 0.6, BORDER_SOFT);
       y2 -= 2;
     }
 
