@@ -280,8 +280,8 @@ async function generarPDFLiquidacionProfesional(agg){
   // Tabla: RUT | PROFESIONAL | TIPO PACIENTE | # | SUBTOTAL
   const col = {
     rut:  M,
-    nom:  M + 110,
-    tipo: M + 330,
+    nom:  M + 85,
+    tipo: M + 300,
     num:  W - M - 120,
     sub:  W - M
   };
@@ -290,8 +290,8 @@ async function generarPDFLiquidacionProfesional(agg){
   const headerY = y;
   drawText(page1, 'RUT', col.rut, headerY, 9, true, TEXT_MUTED);
   drawText(page1, 'PROFESIONAL', col.nom, headerY, 9, true, TEXT_MUTED);
-  drawText(page1, 'TIPO PACIENTE', col.tipo, headerY, 9, true, TEXT_MUTED);
-  drawText(page1, '#', col.num + 10, headerY, 9, true, TEXT_MUTED);
+  drawText(page1, 'TIPO', col.tipo, headerY, 9, true, TEXT_MUTED);
+  drawText(page1, 'CANTIDAD', col.num + 10, headerY, 9, true, TEXT_MUTED);
   drawText(page1, 'SUBTOTAL', col.sub - measure('SUBTOTAL', 9, true), headerY, 9, true, TEXT_MUTED);
   
   y -= 10;
