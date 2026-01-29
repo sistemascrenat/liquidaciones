@@ -355,7 +355,7 @@ async function generarPDFLiquidacionProfesional(agg){
       y -= rowH;
     }
 
-    drawHLine(page1, y + 6, M, W - M, 0.8, BORDER_SOFT);
+    drawHLine(page1, y - (rowH / 2), M, W - M, 0.8, BORDER_SOFT);
   
     // Subtotal del rol
     y -= 2;
@@ -371,8 +371,10 @@ async function generarPDFLiquidacionProfesional(agg){
 
   
     y -= 10;
-    drawHLine(page1, y, M, W - M, 0.8, BORDER_SOFT);
-    y -= 12;
+    // Línea bajo SUBTOTAL, alineada visualmente
+    drawHLine(page1, y - (rowH / 2), M, W - M, 0.8, BORDER_SOFT);
+    y -= rowH;
+
   
     subtotalByRole.push({ rid, rolName, casos: roleCasos, sub: roleSubtotal });
   }
