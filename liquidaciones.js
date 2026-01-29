@@ -426,7 +426,7 @@ async function generarPDFLiquidacionProfesional(agg){
 
     for(const l of ls){
       if(y2 < M + 160){
-        drawText(page2, '… (Se corta por espacio; revisar export CSV para detalle completo)', M, y2, 9, false, TEXT_MUTED);
+        drawText(page2, '… (Se corta por espacio)', M, y2, 9, false, TEXT_MUTED);
         y2 = M + 150;
         break;
       }
@@ -448,7 +448,7 @@ async function generarPDFLiquidacionProfesional(agg){
   }
 
   // Datos del emisor al final (simple + formal)
-  const emH = 78;
+  const emH = 104;
   const emY = M + 20;
 
   page2.drawRectangle({
