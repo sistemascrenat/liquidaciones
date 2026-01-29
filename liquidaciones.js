@@ -335,17 +335,22 @@ async function generarPDFLiquidacionProfesional(agg){
   
       if (y < M + 140) break;
   
-      drawText(page1, rutRow, col.rut, y, 10, false, TEXT_MAIN);
-      drawText(page1, clip(nomRow, 34), col.nom, y, 10, false, TEXT_MAIN);
-  
-      // mostramos tipo “bonito”
-      const tpLabel = (tp === 'sin_tipo') ? 'SIN TIPO' : tp.toUpperCase();
-      drawText(page1, clip(tpLabel, 16), col.tipo, y, 10, false, TEXT_MAIN);
-  
-      drawText(page1, String(o.casos), col.num + 10, y, 10, true, TEXT_MAIN);
-  
+      // ✅ SOLO: TIPO | CANTIDAD | SUBTOTAL
+      const tpLabelRaw = (tp === 'sin_tipo') ? 'SIN TIPO' : tipoPacienteHumano(tp);
+      
+      // Particular_isapr (o similares) -> más humano
+      const tpLabel = (normalize(tpLabelRaw) === 'particular_isapr' || normalize(tp) === 'particular_isapr')
+        ? 'PARTICULAR O ISAPRE'
+        : tpLabelRaw;
+      
+      drawText(page1, clip(tpLabel, 22), col.tipo, y, 10, false, TEXT_MAIN);
+      
+      const cantTxt = String(o.casos);
+      drawText(page1, cantTxt, col.cant - measure(cantTxt, 10, true), y, 10, true, TEXT_MAIN);
+      
       const subTxt = money(o.subtotal);
       drawText(page1, subTxt, col.sub - measure(subTxt, 10, true), y, 10, true, TEXT_MAIN);
+
   
       y -= rowH;
     }
@@ -357,10 +362,13 @@ async function generarPDFLiquidacionProfesional(agg){
     if (y < M + 140) break;
   
     drawText(page1, 'SUBTOTAL', col.tipo, y, 10, true, TEXT_MUTED);
-    drawText(page1, String(roleCasos), col.num + 10, y, 10, true, TEXT_MAIN);
-  
+    
+    const roleCasosTxt = String(roleCasos);
+    drawText(page1, roleCasosTxt, col.cant - measure(roleCasosTxt, 10, true), y, 10, true, TEXT_MAIN);
+    
     const roleTxt = money(roleSubtotal);
     drawText(page1, roleTxt, col.sub - measure(roleTxt, 10, true), y, 10, true, TEXT_MAIN);
+
   
     y -= 10;
     drawHLine(page1, y, M, W - M, 0.8, BORDER_SOFT);
