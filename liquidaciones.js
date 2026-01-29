@@ -448,9 +448,9 @@ async function generarPDFLiquidacionProfesional(agg){
     color: rgb(1,1,1)
   });
 
-  drawText(page2, 'DATOS DEL EMISOR (CLÍNICA RENNAT)', M + 12, emY + emH - 18, 10.5, true, RENNAT_BLUE);
-  drawText(page2, 'Estos datos corresponden al emisor del servicio (Clínica Rennat).', M + 12, emY + emH - 36, 9.5, false, TEXT_MUTED);
-  drawText(page2, 'No corresponden a los datos del profesional.', M + 12, emY + emH - 52, 9.5, false, TEXT_MUTED);
+  drawText(page2, 'DATOS CLÍNICA RENNAT', M + 12, emY + emH - 18, 10.5, true, RENNAT_BLUE);
+  drawText(page2, 'RUT: 77.460.159-7  |  RAZÓN SOCIAL: SERVICIOS MÉDICOS GCS PROVIDENCIA SPA.	', M + 12, emY + emH - 36, 9.5, false, TEXT_MUTED);
+  drawText(page2, 'GIRO: ACTIVIDADES DE HOSPITALES Y CLÍNICAS PRIVADAS.  |  DIRECCIÓN: AV MANUEL MONTT 427. PISO 10. PROVIDENCIA.	', M + 12, emY + emH - 52, 9.5, false, TEXT_MUTED);
 
   // Guardar PDF
   const bytes = await pdfDoc.save();
