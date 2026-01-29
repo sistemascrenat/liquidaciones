@@ -432,7 +432,10 @@ async function generarPDFLiquidacionProfesional(agg){
       }
 
       drawText(page2, String(idx++), dcol.n, y2, 10, true, TEXT_MAIN);
-      drawText(page2, clip(clinAbbrev(l.clinicaNombre || '', 26), dcol.clin, y2, 10, false, TEXT_MAIN);
+      
+      // clínica: abreviamos "CLÍNICA" -> "C." y recortamos
+      drawText(page2, clip(clinAbbrev(l.clinicaNombre || ''), 22), dcol.clin, y2, 10, false, TEXT_MAIN);
+      
       drawText(page2, clip(l.procedimientoNombre || '', 20), dcol.cir, y2, 10, false, TEXT_MAIN);
       drawText(page2, clip(l.pacienteNombre || '', 22), dcol.pac, y2, 10, false, TEXT_MAIN);
       drawText(page2, clip((l.tipoPaciente || '').toString().toUpperCase(), 12), dcol.tp, y2, 9, false, TEXT_MUTED);
