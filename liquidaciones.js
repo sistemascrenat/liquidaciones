@@ -159,14 +159,29 @@ async function generarPDFLiquidacionProfesional(agg){
   const clinAbbrev = (name) => {
     const s = String(name ?? '').trim();
     if(!s) return '';
-    // normalizamos variantes comunes
     return s
       .replace(/^CL[IÍ]NICA\s+/i, 'C. ')
       .replace(/^CLINICA\s+/i, 'C. ')
       .replace(/^CL[IÍ]N\.?\s+/i, 'C. ');
   };
   
+  // ✅ Tipo paciente (humano) para mostrar en PDF
+  const tipoPacienteHumano = (tpRaw) => {
+    const tp = String(tpRaw ?? '').toLowerCase().trim();
+  
+    if(!tp || tp === 'sin_tipo') return 'SIN TIPO';
+    if(tp.includes('fona')) return 'FONASA';
+  
+    // equivalencias que quieres unificar
+    if(tp.includes('isap')) return 'ISAPRE';
+    if(tp.includes('part')) return 'PARTICULAR';
+  
+    // fallback: uppercase acotado
+    return tp.toUpperCase().slice(0, 14);
+  };
+  
   const money = (n)=> clp(n || 0);
+
 
 
   // ===== Datos cabecera =====
@@ -256,64 +271,106 @@ async function generarPDFLiquidacionProfesional(agg){
     ...[...groups.keys()].filter(id=>!roleOrderIds.includes(id)).sort()
   ];
 
-  // Resumen por rol
+  // Resumen por rol (DESGLOSE POR TIPO PACIENTE)
   drawText(page1, 'RESUMEN POR ROL', M, y, 11, true, RENNAT_BLUE);
   y -= 10;
   drawHLine(page1, y, M, W - M, 1, BORDER_SOFT);
   y -= 14;
-
-  // Tabla base (columnas)
-  // RUT Profesional | Nombre Profesional | # | Subtotal
+  
+  // Tabla: RUT | PROFESIONAL | TIPO PACIENTE | # | SUBTOTAL
   const col = {
-    rut:   M,
-    nom:   M + 115,
-    num:   W - M - 115,
-    sub:   W - M
+    rut:  M,
+    nom:  M + 110,
+    tipo: M + 330,
+    num:  W - M - 120,
+    sub:  W - M
   };
-
+  
   // Header tabla
   const headerY = y;
-  drawText(page1, 'RUT PROFESIONAL', col.rut, headerY, 9, true, TEXT_MUTED);
-  drawText(page1, 'NOMBRE PROFESIONAL', col.nom, headerY, 9, true, TEXT_MUTED);
-  drawText(page1, '#', col.num + 110, headerY, 9, true, TEXT_MUTED);
-  drawText(page1, 'SUBTOTAL', col.sub - measure('SUBTOTAL',9,true), headerY, 9, true, TEXT_MUTED);
+  drawText(page1, 'RUT', col.rut, headerY, 9, true, TEXT_MUTED);
+  drawText(page1, 'PROFESIONAL', col.nom, headerY, 9, true, TEXT_MUTED);
+  drawText(page1, 'TIPO PACIENTE', col.tipo, headerY, 9, true, TEXT_MUTED);
+  drawText(page1, '#', col.num + 10, headerY, 9, true, TEXT_MUTED);
+  drawText(page1, 'SUBTOTAL', col.sub - measure('SUBTOTAL', 9, true), headerY, 9, true, TEXT_MUTED);
+  
   y -= 10;
   drawHLine(page1, y, M, W - M, 1, BORDER_SOFT);
   y -= 14;
-
+  
   const rowH = 16;
-
+  
   const subtotalByRole = [];
-  for(const rid of roleIdsSorted){
+  
+  for (const rid of roleIdsSorted) {
     const ls = groups.get(rid) || [];
+    if (!ls.length) continue;
+  
     const rolName = roleLabelById.get(rid) || rid;
-
-    const casos = ls.length;
-    const sub = ls.reduce((a,b)=> a + (Number(b.monto||0)||0), 0);
-
-    subtotalByRole.push({ rid, rolName, casos, sub });
-
-    // Título rol
-    if(y < M + 120) break; // si se acaba espacio, paramos (no debería; si pasa lo afinamos)
+  
+    // Título del rol
+    if (y < M + 160) break;
     drawText(page1, String(rolName).toUpperCase(), M, y, 10, true, RENNAT_BLUE);
     y -= 12;
-
-    // Fila única (rut/nombre del profesional, cantidad, subtotal)
+  
+    // Desglose por tipoPaciente (FONASA / PARTICULAR / PARTICULAR_ISAPRE, etc.)
+    const byTipo = new Map(); // tipo -> { casos, subtotal }
+    for (const l of ls) {
+      const tp = (l.tipoPaciente || '').toString().toLowerCase().trim() || 'sin_tipo';
+      if (!byTipo.has(tp)) byTipo.set(tp, { casos: 0, subtotal: 0 });
+      const o = byTipo.get(tp);
+      o.casos += 1;
+      o.subtotal += (Number(l.monto || 0) || 0);
+    }
+  
+    const tiposSorted = [...byTipo.keys()].sort((a,b)=> a.localeCompare(b));
+  
+    let roleCasos = 0;
+    let roleSubtotal = 0;
+  
     const rutRow = rutTitular || '—';
     const nomRow = titular || '—';
-
-    drawText(page1, rutRow, col.rut, y, 10, false, TEXT_MAIN);
-    drawText(page1, clip(nomRow, 40), col.nom, y, 10, false, TEXT_MAIN);
-
-    drawText(page1, String(casos), col.num + 110, y, 10, true, TEXT_MAIN);
-
-    const subTxt = money(sub);
-    drawText(page1, subTxt, col.sub - measure(subTxt,10,true), y, 10, true, TEXT_MAIN);
-
-    y -= rowH;
-    drawHLine(page1, y + 6, M, W - M, 0.8, BORDER_SOFT);
-    y -= 8;
+  
+    for (const tp of tiposSorted) {
+      const o = byTipo.get(tp);
+  
+      roleCasos += o.casos;
+      roleSubtotal += o.subtotal;
+  
+      if (y < M + 140) break;
+  
+      drawText(page1, rutRow, col.rut, y, 10, false, TEXT_MAIN);
+      drawText(page1, clip(nomRow, 34), col.nom, y, 10, false, TEXT_MAIN);
+  
+      // mostramos tipo “bonito”
+      const tpLabel = (tp === 'sin_tipo') ? 'SIN TIPO' : tp.toUpperCase();
+      drawText(page1, clip(tpLabel, 16), col.tipo, y, 10, false, TEXT_MAIN);
+  
+      drawText(page1, String(o.casos), col.num + 10, y, 10, true, TEXT_MAIN);
+  
+      const subTxt = money(o.subtotal);
+      drawText(page1, subTxt, col.sub - measure(subTxt, 10, true), y, 10, true, TEXT_MAIN);
+  
+      y -= rowH;
+    }
+  
+    // Subtotal del rol
+    y -= 2;
+    if (y < M + 140) break;
+  
+    drawText(page1, 'SUBTOTAL', col.tipo, y, 10, true, TEXT_MUTED);
+    drawText(page1, String(roleCasos), col.num + 10, y, 10, true, TEXT_MAIN);
+  
+    const roleTxt = money(roleSubtotal);
+    drawText(page1, roleTxt, col.sub - measure(roleTxt, 10, true), y, 10, true, TEXT_MAIN);
+  
+    y -= 10;
+    drawHLine(page1, y, M, W - M, 0.8, BORDER_SOFT);
+    y -= 12;
+  
+    subtotalByRole.push({ rid, rolName, casos: roleCasos, sub: roleSubtotal });
   }
+
 
   // TOTAL GENERAL
   const totalGeneral = Number(agg?.total || 0) || subtotalByRole.reduce((a,b)=>a+b.sub,0);
