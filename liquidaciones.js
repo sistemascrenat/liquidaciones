@@ -551,7 +551,6 @@ async function loadProduccionMes(){
 }
 
 // ✅ Resolver tipoPaciente contra las keys reales del tarifario.
-// Caso clave: ISAPRE / PARTICULAR deben caer en "PARTICULAR / ISAPRE" (bucket único).
 function resolveTipoPacienteKey(pacientesObj, tipoPaciente){
   if(!pacientesObj || typeof pacientesObj !== 'object') return null;
 
@@ -560,26 +559,38 @@ function resolveTipoPacienteKey(pacientesObj, tipoPaciente){
   // 1) match directo
   if(pacientesObj[tp] !== undefined) return tp;
 
-  // 2) Candidatos equivalentes para el bucket combinado
-  const tpn = normalize(tp); // usa tu normalize() existente
+  const tpn = normalize(tp);
   const candidates = [];
 
-  // Si viene isapre o particular => debe mapear a "particular/isapre"
-  if(tpn === 'isapre' || tpn === 'particular'){
+  // ✅ Bucket "PARTICULAR / ISAPRE": aceptar equivalencias en ambos sentidos
+  // (porque tu tarifario a veces tiene "particular" y no el combinado)
+  const esBucketPartIsap =
+    tpn === 'isapre' ||
+    tpn === 'particular' ||
+    tpn === 'particular_isapre' ||
+    tpn === 'particularisapre' ||
+    tpn.includes('isapre') ||
+    (tpn.includes('particular') && tpn.includes('isap'));
+
+  if(esBucketPartIsap){
     candidates.push(
+      // combinado (tu canónico)
+      'particular_isapre',
       'particular/isapre',
       'particular / isapre',
       'PARTICULAR / ISAPRE',
-      'particular_isapre',
-      'particularisapre'
+      'particularisapre',
+
+      // ✅ equivalentes "legacy" que pueden existir como key real en el tarifario
+      'particular',
+      'isapre'
     );
   }
 
-  // Además: permitir que si ya viene "particular/isapre" (o parecido) también matchee
+  // Siempre incluir el valor original recibido
   candidates.push(tp);
 
   // 3) Match “loose” contra keys existentes (ignora espacios, slash, guiones, etc.)
-  // Reutiliza normKeyLoose() que YA la tienes más abajo (o la duplicamos aquí si prefieres).
   const candLoose = candidates.map(c => normKeyLoose(c));
   for(const k of Object.keys(pacientesObj)){
     const kLoose = normKeyLoose(k);
@@ -588,6 +599,7 @@ function resolveTipoPacienteKey(pacientesObj, tipoPaciente){
 
   return null;
 }
+
 
 /* =========================
    Tarifario: procedimientos.tarifas[clinicaId].pacientes[tipo].honorarios[roleId]
