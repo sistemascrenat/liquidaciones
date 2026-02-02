@@ -143,10 +143,6 @@ async function generarPDFLiquidacionProfesional(agg){
   const RENNAT_BLUE_SOFT  = rgb(0.18, 0.36, 0.45); // rol (azul apagado)
   const RENNAT_GREEN_SOFT = rgb(0.20, 0.50, 0.42); // subtotal rol (verde apagado)
 
-  // tonos apagados coherentes
-  const RENNAT_BLUE_SOFT  = rgb255(30, 74, 92);   // azul grisáceo
-  const RENNAT_GREEN_SOFT = rgb255(38, 120, 104); // verde apagado
-
   const M = 36;
 
   // ===== Helpers internos PDF (solo layout) =====
