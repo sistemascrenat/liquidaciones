@@ -194,72 +194,148 @@ async function generarPDFLiquidacionProfesional(agg){
   const empresaRut = (agg?.empresaRut || '').toString();
 
   // =========================
-  // PÁGINA 1 — Resumen por Rol
+  // PÁGINA 1 — Estilo “imagen 2”
+  // Logo arriba derecha + barra título azul + tablas con grid
   // =========================
   const page1 = pdfDoc.addPage([W, H]);
   let y = H - M;
 
-  // Logo (opcional) arriba izquierda
+  // ===== Helpers “tabla” (grid real) =====
+  const drawBox = (page, x, yTop, w, h, fill=null, stroke=BORDER_SOFT, strokeW=1) => {
+    page.drawRectangle({
+      x, y: yTop - h, width: w, height: h,
+      color: fill || undefined,
+      borderColor: stroke,
+      borderWidth: strokeW
+    });
+  };
+
+  const drawVLine = (page, x, yTop, h, thick=1, col=BORDER_SOFT) => {
+    page.drawLine({ start:{x, y:yTop}, end:{x, y:yTop - h}, thickness:thick, color:col });
+  };
+
+  const drawHLine2 = (page, x, y, w, thick=1, col=BORDER_SOFT) => {
+    page.drawLine({ start:{x, y}, end:{x:x + w, y}, thickness:thick, color:col });
+  };
+
+  // Texto “centrado verticalmente” dentro de una celda
+  const drawCellText = (page, text, x, yTop, cellH, size=10, bold=false, color=TEXT_MAIN, pad=6) => {
+    const t = String(text ?? '');
+    const yText = yTop - (cellH * 0.72); // ajuste visual (baseline)
+    page.drawText(t, { x: x + pad, y: yText, size, font: bold ? fontBold : font, color });
+  };
+
+  // Texto alineado a la derecha dentro de celda
+  const drawCellTextRight = (page, text, x, yTop, cellW, cellH, size=10, bold=false, color=TEXT_MAIN, pad=6) => {
+    const t = String(text ?? '');
+    const wTxt = (bold ? fontBold : font).widthOfTextAtSize(t, size);
+    const yText = yTop - (cellH * 0.72);
+    page.drawText(t, { x: x + cellW - pad - wTxt, y: yText, size, font: bold ? fontBold : font, color });
+  };
+
+  const wrapClip = (s, maxChars) => String(s ?? '').slice(0, maxChars);
+
+  // ===== Datos cabecera =====
+  const mesTxt = `${monthNameEs(state.mesNum)} ${state.ano}`;
+  const titular = (agg?.nombre || '').toString();
+  const rutTitular = (agg?.rut || '').toString();
+
+  const esJuridica = (agg?.tipoPersona || '').toLowerCase() === 'juridica';
+  const empresaNombre = (agg?.empresaNombre || '').toString();
+  const empresaRut = (agg?.empresaRut || '').toString();
+
+  const nombreMostrar = esJuridica ? (empresaNombre || titular || '—') : (titular || '—');
+  const rutMostrar = esJuridica ? (empresaRut || rutTitular || '—') : (rutTitular || '—');
+
+  // ===== Logo (arriba derecha) =====
   const logoBytes = await fetchAsArrayBuffer(PDF_ASSET_LOGO_URL);
   if (logoBytes) {
     try {
       const logo = await pdfDoc.embedPng(logoBytes);
-      const logoW = 115;
+      const logoW = 120;
       const logoH = (logo.height / logo.width) * logoW;
-      page1.drawImage(logo, { x: M, y: y - logoH, width: logoW, height: logoH });
+      page1.drawImage(logo, {
+        x: W - M - logoW,
+        y: H - M - logoH,
+        width: logoW,
+        height: logoH
+      });
     } catch(_e){}
   }
 
-  // Título centrado
-  const t1 = 'LIQUIDACIÓN DE HONORARIOS';
-  const t1Size = 16;
-  drawText(page1, t1, (W - measure(t1,t1Size,true))/2, y - 24, t1Size, true, RENNAT_BLUE);
+  // ===== Barra título azul (debajo del logo) =====
+  const barH = 28;
+  const barW = W - 2*M;
+  const barX = M;
 
-  // Línea verde bajo título
-  drawHLine(page1, y - 30, M, W - M, 1.2, RENNAT_GREEN);
+  // bajamos un poco desde el top para que no choque con logo
+  const barTop = H - M - 52;
 
-  // Mes/año (derecha)
-  const mesLabel = `Mes/Año: ${mesTxt}`;
-  drawText(page1, mesLabel, W - M - measure(mesLabel,10,false), y - 48, 10, false, TEXT_MUTED);
+  drawBox(page1, barX, barTop, barW, barH, RENNAT_BLUE, RENNAT_BLUE, 1);
 
-  y -= 78;
+  const title = 'Liquidación de Pago Producción - Participaciones Mensuales';
+  const titleSize = 12;
+  const titleW = measure(title, titleSize, true);
+  drawText(page1, title, barX + (barW - titleW)/2, barTop - 19, titleSize, true, rgb(1,1,1));
 
-  // Datos profesional / empresa (simple, formal)
-  const nombreMostrar = esJuridica ? (empresaNombre || titular || '—') : (titular || '—');
-  const rutMostrar = esJuridica ? (empresaRut || rutTitular || '—') : (rutTitular || '—');
+  y = barTop - barH - 14;
 
-  drawText(page1, 'DATOS DEL PROFESIONAL', M, y, 11, true, RENNAT_BLUE);
-  y -= 10;
-  drawHLine(page1, y, M, W - M, 1, BORDER_SOFT);
-  y -= 18;
+  // =========================
+  // TABLA: Datos del Profesional
+  // =========================
+  const boxW = W - 2*M;
+  const rowH = 22;
 
-  drawText(page1, 'Nombre:', M, y, 10, true, TEXT_MAIN);
-  drawText(page1, nombreMostrar, M + 70, y, 10, false, TEXT_MAIN);
-  y -= 16;
+  // 4 filas: Nro Liquidación (opcional si lo tienes), RUT Pago, Nombre, Profesión
+  // Como acá no tienes nroLiquidacion/ profesion, mantenemos “Mes/Año” y “Tipo Persona”.
+  // Puedes ajustar después si agregas campos reales.
+  const dataRows = [
+    ['Mes/Año', mesTxt],
+    ['RUT Pago', rutMostrar],
+    ['Nombre RUT de Pago', nombreMostrar],
+    ['Tipo', (agg?.tipoPersona || '—').toString().toUpperCase()]
+  ];
 
-  drawText(page1, 'Rut:', M, y, 10, true, TEXT_MAIN);
-  drawText(page1, rutMostrar, M + 70, y, 10, false, TEXT_MAIN);
-  y -= 16;
+  // altura tabla
+  const dataH = dataRows.length * rowH;
 
-  if(esJuridica){
-    // mostramos también “titular persona” en chico, si existe
-    if(titular){
-      drawText(page1, 'Profesional:', M, y, 9, false, TEXT_MUTED);
-      drawText(page1, `${titular}${rutTitular ? ' · '+rutTitular : ''}`, M + 70, y, 10, false, TEXT_MUTED);
-      y -= 14;
-    }
+  // caja exterior
+  drawBox(page1, M, y, boxW, dataH, rgb(1,1,1), BORDER_SOFT, 1);
+
+  // columnas
+  const c1 = Math.round(boxW * 0.45); // etiqueta
+  const c2 = boxW - c1;               // valor
+
+  // líneas verticales
+  drawVLine(page1, M + c1, y, dataH, 1, BORDER_SOFT);
+
+  // líneas horizontales y texto
+  for(let r=0; r<dataRows.length; r++){
+    const yRowTop = y - r*rowH;
+
+    if(r > 0) drawHLine2(page1, M, yRowTop, boxW, 1, BORDER_SOFT);
+
+    // etiqueta (izquierda)
+    drawCellText(page1, dataRows[r][0], M, yRowTop, rowH, 10, false, TEXT_MAIN, 8);
+
+    // valor (derecha) – destacado levemente
+    drawCellText(page1, wrapClip(dataRows[r][1], 50), M + c1, yRowTop, rowH, 10, true, TEXT_MAIN, 8);
   }
 
-  y -= 8;
+  y = y - dataH - 16;
+
+  // =========================
+  // TABLA: Resumen por Rol (estilo imagen 2)
+  // Encabezado azul + líneas marcadas
+  // =========================
 
   // Agrupar líneas por rol
   const linesAll = [...(agg?.lines || [])];
 
-  // Orden de roles: usa ROLE_SPEC si existe en state (mismo archivo) y luego otros
   const roleOrderIds = (Array.isArray(ROLE_SPEC) ? ROLE_SPEC.map(r=>r.roleId) : []);
   const roleLabelById = new Map(linesAll.map(l=>[l.roleId, l.roleNombre]));
 
-  const groups = new Map(); // roleId -> lines
+  const groups = new Map();
   for(const l of linesAll){
     const rid = l.roleId || 'sin_rol';
     if(!groups.has(rid)) groups.set(rid, []);
@@ -271,194 +347,154 @@ async function generarPDFLiquidacionProfesional(agg){
     ...[...groups.keys()].filter(id=>!roleOrderIds.includes(id)).sort()
   ];
 
-// ===============================
-// RESUMEN POR ROL (PÁGINA 1)
-// Formato “más humano” y más apretado (como tu imagen 2)
-// Columnas: TIPO | CANTIDAD | SUBTOTAL
-// ===============================
-drawText(page1, 'RESUMEN POR ROL', M, y, 11, true, RENNAT_BLUE);
-y -= 10;
-drawHLine(page1, y, M, W - M, 1, BORDER_SOFT);
-y -= 12;
+  // Construimos filas: [rolTitulo], [tipoPaciente, cant, subtotal], [SUBTOTAL rol...]
+  const resumenRows = [];
+  const subtotalByRole = [];
 
-// Columnas (más compactas)
-const col = {
-  tipo: M,
-  sub:  W - M,        // subtotal a la derecha
-  cant: W - M - 160   // cantidad a la derecha pero antes del subtotal
-};
+  for (const rid of roleIdsSorted) {
+    const ls = groups.get(rid) || [];
+    if (!ls.length) continue;
 
-// Header
-drawText(page1, 'TIPO', col.tipo, y, 9, true, TEXT_MUTED);
+    const rolName = (roleLabelById.get(rid) || rid || '').toString().toUpperCase();
 
-const hCant = 'CANTIDAD';
-drawText(page1, hCant, col.cant - measure(hCant, 9, true), y, 9, true, TEXT_MUTED);
+    // título del rol como “fila separadora”
+    resumenRows.push({ kind:'role', rol: rolName });
 
-const hSub = 'SUBTOTAL';
-drawText(page1, hSub, col.sub - measure(hSub, 9, true), y, 9, true, TEXT_MUTED);
+    // agrupar por tipoPaciente
+    const byTipo = new Map();
+    for (const l of ls) {
+      const tp = (l.tipoPaciente || '').toString().toLowerCase().trim() || 'sin_tipo';
+      if (!byTipo.has(tp)) byTipo.set(tp, { casos: 0, subtotal: 0 });
+      const o = byTipo.get(tp);
+      o.casos += 1;
+      o.subtotal += (Number(l.monto || 0) || 0);
+    }
 
-y -= 8;
-drawHLine(page1, y, M, W - M, 1, BORDER_SOFT);
-y -= 12;
+    const tiposSorted = [...byTipo.keys()].sort((a,b)=> a.localeCompare(b));
 
-// Alturas “más como imagen 2”
-const rowH = 13;          // filas más apretadas
-const gapAfterRole = 6;   // poco aire tras título del rol
-const gapAfterSubtotal = 10;
+    let roleCasos = 0;
+    let roleSubtotal = 0;
 
-const subtotalByRole = [];
+    for (const tp of tiposSorted) {
+      const o = byTipo.get(tp);
+      roleCasos += o.casos;
+      roleSubtotal += o.subtotal;
 
-for (const rid of roleIdsSorted) {
-  const ls = groups.get(rid) || [];
-  if (!ls.length) continue;
+      let tpLabel = tipoPacienteHumano(tp);
+      if (tpLabel === 'ISAPRE' || tpLabel === 'PARTICULAR') tpLabel = 'PARTICULAR O ISAPRE';
 
-  const rolName = roleLabelById.get(rid) || rid;
+      resumenRows.push({ kind:'row', tipo: tpLabel, cant: o.casos, sub: o.subtotal });
+    }
 
-  // si no queda espacio, cortar
-  if (y < M + 170) break;
+    resumenRows.push({ kind:'subtotal', tipo:'SUBTOTAL', cant: roleCasos, sub: roleSubtotal });
 
-  // Título del rol
-  drawText(page1, String(rolName).toUpperCase(), M, y, 10, true, RENNAT_BLUE);
-  y -= gapAfterRole;
-
-  // Agrupar por tipoPaciente
-  const byTipo = new Map(); // tipo -> { casos, subtotal }
-  for (const l of ls) {
-    const tp = (l.tipoPaciente || '').toString().toLowerCase().trim() || 'sin_tipo';
-    if (!byTipo.has(tp)) byTipo.set(tp, { casos: 0, subtotal: 0 });
-    const o = byTipo.get(tp);
-    o.casos += 1;
-    o.subtotal += (Number(l.monto || 0) || 0);
+    subtotalByRole.push({ rid, rolName, casos: roleCasos, sub: roleSubtotal });
   }
 
-  const tiposSorted = [...byTipo.keys()].sort((a,b)=> a.localeCompare(b));
+  // Medidas tabla resumen
+  const headH = 24;
+  const resRowH = 20;
 
-  let roleCasos = 0;
-  let roleSubtotal = 0;
+  // calculo altura dinámica
+  const resH = headH + resumenRows.length * resRowH;
 
-  for (const tp of tiposSorted) {
-    const o = byTipo.get(tp);
-    roleCasos += o.casos;
-    roleSubtotal += o.subtotal;
+  // si se pasa de página, acotamos (igual que antes)
+  const maxHAvailable = y - (M + 90);
+  const resHFinal = Math.min(resH, maxHAvailable);
 
-    if (y < M + 160) break;
+  // Marco tabla
+  drawBox(page1, M, y, boxW, resHFinal, rgb(1,1,1), BORDER_SOFT, 1);
 
-    // ✅ TIPO “humano”
-    // - FONASA -> FONASA
-    // - particular_isapre / isapre / particular -> "PARTICULAR O ISAPRE"
-    // - sin_tipo -> "SIN TIPO"
-    let tpLabel = tipoPacienteHumano(tp);
-    if (tpLabel === 'ISAPRE' || tpLabel === 'PARTICULAR') tpLabel = 'PARTICULAR O ISAPRE';
+  // Header azul
+  drawBox(page1, M, y, boxW, headH, RENNAT_BLUE, RENNAT_BLUE, 1);
+  drawCellText(page1, 'TIPO', M, y, headH, 10, true, rgb(1,1,1), 8);
 
-    drawText(page1, tpLabel, col.tipo, y, 10, false, TEXT_MAIN);
+  const colCantW = 110;
+  const colSubW  = 150;
+  const colTipoW = boxW - colCantW - colSubW;
 
-    // Cantidad alineada a la derecha
-    const cantTxt = String(o.casos);
-    drawText(page1, cantTxt, col.cant - measure(cantTxt, 10, true), y, 10, true, TEXT_MAIN);
+  // separadores verticales (toda la tabla)
+  drawVLine(page1, M + colTipoW, y, resHFinal, 1, BORDER_SOFT);
+  drawVLine(page1, M + colTipoW + colCantW, y, resHFinal, 1, BORDER_SOFT);
 
-    // Subtotal alineado a la derecha
-    const subTxt = money(o.subtotal);
-    drawText(page1, subTxt, col.sub - measure(subTxt, 10, true), y, 10, true, TEXT_MAIN);
+  drawCellTextRight(page1, 'CANTIDAD', M + colTipoW, y, colCantW, headH, 10, true, rgb(1,1,1), 8);
+  drawCellTextRight(page1, 'SUBTOTAL', M + colTipoW + colCantW, y, colSubW, headH, 10, true, rgb(1,1,1), 8);
 
-    y -= rowH;
+  // filas
+  let yCursor = y - headH;
+  for(let i=0; i<resumenRows.length; i++){
+    const r = resumenRows[i];
+    const yTop = yCursor - i*resRowH;
+
+    // si nos pasamos del espacio, cortamos
+    if((y - (headH + (i+1)*resRowH)) < (M + 90)) break;
+
+    // línea horizontal de fila
+    drawHLine2(page1, M, yTop, boxW, 1, BORDER_SOFT);
+
+    if(r.kind === 'role'){
+      // fila “título rol” (texto azul, sin valores)
+      drawCellText(page1, r.rol, M, yTop, resRowH, 10, true, RENNAT_BLUE, 8);
+    } else {
+      const tipoTxt = r.tipo || '';
+      drawCellText(page1, tipoTxt, M, yTop, resRowH, 10, r.kind==='subtotal', TEXT_MAIN, 8);
+
+      drawCellTextRight(page1, String(r.cant ?? ''), M + colTipoW, yTop, colCantW, resRowH, 10, true, TEXT_MAIN, 8);
+      drawCellTextRight(page1, money(r.sub ?? 0), M + colTipoW + colCantW, yTop, colSubW, resRowH, 10, true, TEXT_MAIN, 8);
+    }
   }
 
-  // ✅ Línea gris justo ANTES del subtotal (alineada al bloque)
-  drawHLine(page1, y + 6, M, W - M, 0.9, BORDER_SOFT);
-
-  // Subtotal del rol (más apretado)
-  if (y < M + 160) break;
-
-  drawText(page1, 'SUBTOTAL', col.tipo, y, 10, true, TEXT_MUTED);
-
-  const totCant = String(roleCasos);
-  drawText(page1, totCant, col.cant - measure(totCant, 10, true), y, 10, true, TEXT_MAIN);
-
-  const roleTxt = money(roleSubtotal);
-  drawText(page1, roleTxt, col.sub - measure(roleTxt, 10, true), y, 10, true, TEXT_MAIN);
-
-  y -= 8;
-  drawHLine(page1, y, M, W - M, 0.9, BORDER_SOFT);
-  y -= gapAfterSubtotal;
-
-  subtotalByRole.push({ rid, rolName, casos: roleCasos, sub: roleSubtotal });
-}
-
-
-
-  // TOTAL GENERAL
-  const totalGeneral = Number(agg?.total || 0) || subtotalByRole.reduce((a,b)=>a+b.sub,0);
-  y -= 10;
-  drawHLine(page1, y, M, W - M, 1.2, RENNAT_GREEN);
-  y -= 22;
-
-  drawText(page1, 'TOTAL GENERAL', M, y, 12, true, RENNAT_BLUE);
-  const totalTxt = money(totalGeneral);
-  drawText(page1, totalTxt, W - M - measure(totalTxt,14,true), y - 2, 14, true, TEXT_MAIN);
-  y -= 26;
-
-  // Caja advertencia si hay pendientes o alertas
-  const pendientesCount = Number(agg?.pendientesCount || 0) || 0;
-  const alertasCount = Number(agg?.alertasCount || 0) || 0;
-
-  if(pendientesCount > 0 || alertasCount > 0){
-    const msgParts = [];
-    if(alertasCount > 0) msgParts.push(`Alertas: ${alertasCount}`);
-    if(pendientesCount > 0) msgParts.push(`Pendientes: ${pendientesCount}`);
-    const msg = msgParts.join(' · ');
-
-    // caja simple (borde suave)
-    const boxH = 44;
-    page1.drawRectangle({
-      x: M,
-      y: M + 70,
-      width: W - 2*M,
-      height: boxH,
-      borderColor: BORDER_SOFT,
-      borderWidth: 1,
-      color: rgb(1,1,1)
-    });
-
-    drawText(page1, 'ATENCIÓN', M + 12, M + 70 + boxH - 18, 11, true, RENNAT_BLUE);
-    drawText(page1, msg, M + 12, M + 70 + boxH - 34, 10, false, TEXT_MAIN);
-    drawText(page1, 'Revisar pendientes/alertas en el detalle (página 2).', M + 12, M + 70 + 8, 9, false, TEXT_MUTED);
-  }
+  // bajamos cursor real (altura usada)
+  const usedRows = Math.min(resumenRows.length, Math.floor((resHFinal - headH)/resRowH));
+  y = y - (headH + usedRows*resRowH) - 16;
 
   // =========================
-  // PÁGINA 2 — Detalle de Casos
+  // TOTAL GENERAL (barra verde)
+  // =========================
+  const totalGeneral = Number(agg?.total || 0) || subtotalByRole.reduce((a,b)=>a+b.sub,0);
+
+  const totalBarH = 28;
+  drawBox(page1, M, y, boxW, totalBarH, RENNAT_GREEN, RENNAT_GREEN, 1);
+
+  drawCellText(page1, 'TOTAL GENERAL', M, y, totalBarH, 12, true, rgb(1,1,1), 10);
+  drawCellTextRight(page1, money(totalGeneral), M + (boxW - 200), y, 200, totalBarH, 13, true, rgb(1,1,1), 10);
+
+  y = y - totalBarH - 10;
+
+  // =========================
+  // PÁGINA 2 — Detalle con la misma lógica (tabla con header azul)
   // =========================
   const page2 = pdfDoc.addPage([W, H]);
   let y2 = H - M;
 
-  // Encabezado página 2 (simple)
-  const dTitle = 'DETALLE DE CASOS';
-  drawText(page2, dTitle, M, y2 - 22, 14, true, RENNAT_BLUE);
-  const sub2 = `${nombreMostrar} · ${mesTxt}`;
-  drawText(page2, sub2, M, y2 - 40, 10, false, TEXT_MUTED);
-  drawHLine(page2, y2 - 46, M, W - M, 1.2, RENNAT_GREEN);
+  // barra título azul (igual)
+  drawBox(page2, barX, y2, barW, barH, RENNAT_BLUE, RENNAT_BLUE, 1);
+  const t2 = 'Detalle de Procedimientos';
+  drawText(page2, t2, barX + (barW - measure(t2, 13, true))/2, y2 - 19, 13, true, rgb(1,1,1));
+  y2 -= (barH + 12);
 
-  y2 -= 70;
+  // subtítulo
+  drawText(page2, `${nombreMostrar} · ${mesTxt}`, M, y2, 10, false, TEXT_MUTED);
+  y2 -= 12;
 
-  // Tabla detalle columnas: # | Clínica | Cirugía | Paciente | Tipo Paciente
-  const dcol = {
-    n:    M,
-    clin: M + 30,   // antes 36 (más junto)
-    cir:  M + 165,  // antes 190 (más junto)
-    pac:  M + 295,  // antes 330 (más espacio para TIPO al final)
-    tp:   W - M - 65 // antes -90 (TIPO más a la derecha, evita choque)
-  };
+  // tabla detalle
+  const detHeadH = 24;
+  const detRowH  = 18;
 
-  const drawDetailHeader = ()=>{
-    drawText(page2, '#', dcol.n, y2, 9, true, TEXT_MUTED);
-    drawText(page2, 'C.', dcol.clin, y2, 9, true, TEXT_MUTED);
-    drawText(page2, 'CIRUGÍA', dcol.cir, y2, 9, true, TEXT_MUTED);
-    drawText(page2, 'PACIENTE', dcol.pac, y2, 9, true, TEXT_MUTED);
-    drawText(page2, 'TIPO', dcol.tp, y2, 9, true, TEXT_MUTED);
-    y2 -= 10;
-    drawHLine(page2, y2, M, W - M, 1, BORDER_SOFT);
-    y2 -= 12;
-  };
+  const detCols = [
+    { key:'fecha', label:'FECHA', w: 110 },
+    { key:'clin',  label:'CLÍNICA', w: 150 },
+    { key:'proc',  label:'PROCEDIMIENTO', w: 170 },
+    { key:'pac',   label:'PACIENTE', w: 150 },
+    { key:'tipo',  label:'TIPO', w: 90 },
+    { key:'monto', label:'MONTO', w: 110 }
+  ];
+  const detW = detCols.reduce((a,c)=>a+c.w,0);
 
+  // si detW < boxW, centramos dentro del ancho
+  const detX = M + Math.max(0, (boxW - detW)/2);
+
+  // construimos filas (1 fila por línea, ordenadas)
   const lineSort = (a,b)=>{
     const fa = normalize(a.fecha);
     const fb = normalize(b.fecha);
@@ -469,56 +505,60 @@ for (const rid of roleIdsSorted) {
     return normalize(a.pacienteNombre).localeCompare(normalize(b.pacienteNombre));
   };
 
-  const rowH2 = 14;
+  const allLinesSorted = [...(agg?.lines || [])].sort(lineSort);
 
-  for(const rid of roleIdsSorted){
-    const ls = [...(groups.get(rid) || [])].sort(lineSort);
-    if(!ls.length) continue;
+  // alto disponible
+  const maxRowsDet = Math.floor((y2 - (M + 90) - detHeadH) / detRowH);
+  const detRows = allLinesSorted.slice(0, Math.max(0, maxRowsDet));
 
-    // si no queda espacio mínimo, igual seguimos pero cortamos
-    if(y2 < M + 160){
-      drawText(page2, '… (Hay más casos para este profesional; revisar export CSV si se requiere detalle completo)', M, y2, 9, false, TEXT_MUTED);
-      break;
-    }
+  const detH = detHeadH + detRows.length * detRowH;
 
-    const rolName = (roleLabelById.get(rid) || rid || '').toString();
+  // marco
+  drawBox(page2, detX, y2, detW, detH, rgb(1,1,1), BORDER_SOFT, 1);
 
-    // Título rol
-    drawText(page2, `ROL: ${rolName.toUpperCase()}`, M, y2, 11, true, RENNAT_BLUE);
-    y2 -= 8;
-    drawHLine(page2, y2, M, W - M, 1, BORDER_SOFT);
-    y2 -= 16;
+  // header azul
+  drawBox(page2, detX, y2, detW, detHeadH, RENNAT_BLUE, RENNAT_BLUE, 1);
 
-    // Header tabla detalle
-    drawDetailHeader();
-
-    // Numeración reinicia por rol
-    let idx = 1;
-
-    for(const l of ls){
-      if(y2 < M + 160){
-        drawText(page2, '… (Se corta por espacio)', M, y2, 9, false, TEXT_MUTED);
-        y2 = M + 150;
-        break;
-      }
-
-      drawText(page2, String(idx++), dcol.n, y2, 10, true, TEXT_MAIN);
-      
-      // clínica: abreviamos "CLÍNICA" -> "C." y recortamos
-      drawText(page2, clip(clinAbbrev(l.clinicaNombre || ''), 22), dcol.clin, y2, 10, false, TEXT_MAIN);
-      
-      drawText(page2, clip(l.procedimientoNombre || '', 20), dcol.cir, y2, 10, false, TEXT_MAIN);
-      drawText(page2, clip(l.pacienteNombre || '', 22), dcol.pac, y2, 10, false, TEXT_MAIN);
-      drawText(page2, clip((l.tipoPaciente || '').toString().toUpperCase(), 12), dcol.tp, y2, 9, false, TEXT_MUTED);
-
-      y2 -= rowH2;
-      y2 -= 2;
-    }
-
-    y2 -= 14; // espacio entre roles
+  // vertical lines
+  let cx = detX;
+  for(let i=0;i<detCols.length;i++){
+    if(i>0) drawVLine(page2, cx, y2, detH, 1, BORDER_SOFT);
+    // header labels
+    drawCellText(page2, detCols[i].label, cx, y2, detHeadH, 9, true, rgb(1,1,1), 8);
+    cx += detCols[i].w;
   }
 
-  // Datos del emisor al final (simple + formal)
+  // filas
+  for(let r=0; r<detRows.length; r++){
+    const l = detRows[r];
+    const yTop = y2 - detHeadH - r*detRowH;
+
+    drawHLine2(page2, detX, yTop, detW, 1, BORDER_SOFT);
+
+    let xPos = detX;
+
+    const fechaTxt = `${l.fecha || ''}${l.hora ? ' ' + l.hora : ''}`;
+    drawCellText(page2, wrapClip(fechaTxt, 18), xPos, yTop, detRowH, 9, false, TEXT_MAIN, 8);
+    xPos += detCols[0].w;
+
+    drawCellText(page2, wrapClip(clinAbbrev(l.clinicaNombre || ''), 22), xPos, yTop, detRowH, 9, false, TEXT_MAIN, 8);
+    xPos += detCols[1].w;
+
+    drawCellText(page2, wrapClip(l.procedimientoNombre || '', 24), xPos, yTop, detRowH, 9, false, TEXT_MAIN, 8);
+    xPos += detCols[2].w;
+
+    drawCellText(page2, wrapClip(l.pacienteNombre || '', 20), xPos, yTop, detRowH, 9, false, TEXT_MAIN, 8);
+    xPos += detCols[3].w;
+
+    drawCellText(page2, wrapClip((l.tipoPaciente || '').toString().toUpperCase(), 12), xPos, yTop, detRowH, 9, false, TEXT_MUTED, 8);
+    xPos += detCols[4].w;
+
+    drawCellTextRight(page2, money(l.monto || 0), xPos, yTop, detCols[5].w, detRowH, 9, true, TEXT_MAIN, 8);
+  }
+
+  y2 = y2 - detH - 14;
+
+  // caja inferior: datos clínica (igual que tenías)
   const emH = 104;
   const emY = M + 20;
 
@@ -537,6 +577,12 @@ for (const rid of roleIdsSorted) {
   drawText(page2, 'RAZÓN SOCIAL: SERVICIOS MÉDICOS GCS PROVIDENCIA SPA.', M + 12, emY + emH - 52, 9.5, false, TEXT_MUTED);
   drawText(page2, 'GIRO: ACTIVIDADES DE HOSPITALES Y CLÍNICAS PRIVADAS.', M + 12, emY + emH - 68, 9.5, false, TEXT_MUTED);
   drawText(page2, 'DIRECCIÓN: AV MANUEL MONTT 427. PISO 10. PROVIDENCIA.', M + 12, emY + emH - 84, 9.5, false, TEXT_MUTED);
+
+  // Nota si cortamos filas por espacio
+  if(allLinesSorted.length > detRows.length){
+    drawText(page2, `* Se muestran ${detRows.length} de ${allLinesSorted.length} filas por espacio.`, M, emY + emH + 8, 9, false, TEXT_MUTED);
+  }
+
 
   // Guardar PDF
   const bytes = await pdfDoc.save();
