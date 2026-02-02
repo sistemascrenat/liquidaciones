@@ -131,14 +131,21 @@ async function generarPDFLiquidacionProfesional(agg){
   const W = 595.28;
   const H = 841.89;
 
-  // Paleta RENNAT (sobria)
-  const RENNAT_BLUE  = rgb(0, 39, 56);
-  const RENNAT_GREEN = rgb(0.12, 0.55, 0.45);
+  // ✅ Helper: RGB 0..255 -> 0..1 (pdf-lib)
+  const rgb255 = (r,g,b)=> rgb(r/255, g/255, b/255);
+  
+  // Paleta RENNAT (sobria) — valores correctos para pdf-lib
+  const RENNAT_BLUE  = rgb255(0, 39, 56);      // #002738 (azul oscuro del logo aprox)
+  const RENNAT_GREEN = rgb255(31, 140, 115);
   const TEXT_MAIN    = rgb(0.08, 0.09, 0.11);
   const TEXT_MUTED   = rgb(0.45, 0.48, 0.52);
   const BORDER_SOFT  = rgb(0.82, 0.84, 0.86);
   const RENNAT_BLUE_SOFT  = rgb(0.18, 0.36, 0.45); // rol (azul apagado)
   const RENNAT_GREEN_SOFT = rgb(0.20, 0.50, 0.42); // subtotal rol (verde apagado)
+
+  // tonos apagados coherentes
+  const RENNAT_BLUE_SOFT  = rgb255(30, 74, 92);   // azul grisáceo
+  const RENNAT_GREEN_SOFT = rgb255(38, 120, 104); // verde apagado
 
   const M = 36;
 
