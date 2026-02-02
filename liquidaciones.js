@@ -232,14 +232,32 @@ async function generarPDFLiquidacionProfesional(agg){
 
   // ===== Datos cabecera =====
   const mesTxt = `${monthNameEs(state.mesNum)} ${state.ano}`;
-  const titular = (agg?.nombre || '').toString();
-  const rutTitular = (agg?.rut || '').toString();
+  
+  // ✅ Profesional (persona natural)
+  const profNombre = (agg?.nombre || '').toString().trim();
+  const profRut    = (agg?.rut || '').toString().trim();
+  
+  // ✅ Empresa (solo si jurídica)
+  const tipoPersona = (agg?.tipoPersona || '').toString().toLowerCase().trim(); // 'juridica' | 'natural' | ''
+  const esJuridica  = (tipoPersona === 'juridica');
+  
+  const empresaNombre = (agg?.empresaNombre || '').toString().trim();
+  const empresaRut    = (agg?.empresaRut || '').toString().trim();
+  
+  // ✅ Lo que se muestra en la tabla superior
+  // - Jurídica: RUT pago = rutEmpresa ; Nombre RUT de pago = razón social
+  // - Natural : RUT pago = rut profesional ; Nombre RUT de pago = nombre profesional
+  const rutMostrar = esJuridica
+    ? (empresaRut || '—')
+    : (profRut || '—');
+  
+  const nombreMostrar = esJuridica
+    ? (empresaNombre || profNombre || '—') // si faltara razón social, cae al nombre del profesional como fallback
+    : (profNombre || '—');
+  
+  // ✅ Tipo visible
+  const tipoMostrar = esJuridica ? 'JURIDICA' : 'NATURAL';
 
-  const esJuridica = (agg?.tipoPersona || '').toLowerCase() === 'juridica';
-  const empresaNombre = (agg?.empresaNombre || '').toString();
-  const empresaRut = (agg?.empresaRut || '').toString();
-
-  const nombreMostrar = esJuridica ? (empresaNombre || titular || '—') : (titular || '—');
   const rutMostrar = esJuridica ? (empresaRut || rutTitular || '—') : (rutTitular || '—');
 
   // ===== Barra título (definimos primero porque el "gap" será barH) =====
@@ -316,7 +334,7 @@ async function generarPDFLiquidacionProfesional(agg){
     ['Mes/Año', mesTxt],
     ['RUT Pago', rutMostrar],
     ['Nombre RUT de Pago', nombreMostrar],
-    ['Tipo', (agg?.tipoPersona || '—').toString().toUpperCase()]
+    ['Tipo', tipoMostrar]
   ];
 
   // altura tabla
