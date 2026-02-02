@@ -136,6 +136,8 @@ async function generarPDFLiquidacionProfesional(agg){
   const TEXT_MAIN    = rgb(0.08, 0.09, 0.11);
   const TEXT_MUTED   = rgb(0.45, 0.48, 0.52);
   const BORDER_SOFT  = rgb(0.82, 0.84, 0.86);
+  const RENNAT_BLUE_SOFT  = rgb(0.18, 0.36, 0.45); // rol (azul apagado)
+  const RENNAT_GREEN_SOFT = rgb(0.20, 0.50, 0.42); // subtotal rol (verde apagado)
 
   const M = 36;
 
@@ -423,13 +425,62 @@ async function generarPDFLiquidacionProfesional(agg){
 
     if(r.kind === 'role'){
       // fila “título rol” (texto azul, sin valores)
-      drawCellText(page1, r.rol, M, yTop, resRowH, 10, true, RENNAT_BLUE, 8);
+      drawCellText(
+        page1,
+        r.rol,
+        M,
+        yTop,
+        resRowH,
+        10,
+        true,
+        RENNAT_BLUE_SOFT, // 👈 azul grisáceo
+        8
+      );
+
     } else {
       const tipoTxt = r.tipo || '';
-      drawCellText(page1, tipoTxt, M, yTop, resRowH, 10, r.kind==='subtotal', TEXT_MAIN, 8);
 
-      drawCellTextRight(page1, String(r.cant ?? ''), M + colTipoW, yTop, colCantW, resRowH, 10, true, TEXT_MAIN, 8);
-      drawCellTextRight(page1, money(r.sub ?? 0), M + colTipoW + colCantW, yTop, colSubW, resRowH, 10, true, TEXT_MAIN, 8);
+      const isSubtotal = r.kind === 'subtotal';
+      const subtotalColor = isSubtotal ? RENNAT_GREEN_SOFT : TEXT_MAIN;
+      
+      drawCellText(
+        page1,
+        tipoTxt,
+        M,
+        yTop,
+        resRowH,
+        10,
+        isSubtotal,
+        subtotalColor,
+        8
+      );
+      
+      drawCellTextRight(
+        page1,
+        String(r.cant ?? ''),
+        M + colTipoW,
+        yTop,
+        colCantW,
+        resRowH,
+        10,
+        true,
+        subtotalColor,
+        8
+      );
+      
+      drawCellTextRight(
+        page1,
+        money(r.sub ?? 0),
+        M + colTipoW + colCantW,
+        yTop,
+        colSubW,
+        resRowH,
+        10,
+        true,
+        subtotalColor,
+        8
+      );
+
     }
   }
 
