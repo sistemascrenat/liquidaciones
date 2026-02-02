@@ -541,7 +541,7 @@ async function generarPDFLiquidacionProfesional(agg){
   const detW = detCols.reduce((a,c)=>a+c.w,0);
 
   // si detW < boxW, centramos dentro del ancho
-  const detX = M + Math.max(0, (boxW - detW)/2);
+  const detX = M;
 
   // construimos filas (1 fila por línea, ordenadas)
   const lineSort = (a,b)=>{
