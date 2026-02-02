@@ -556,82 +556,153 @@ async function generarPDFLiquidacionProfesional(agg){
 
   const allLinesSorted = [...(agg?.lines || [])].sort(lineSort);
 
-  // alto disponible
-  const maxRowsDet = Math.floor((y2 - (M + 90) - detHeadH) / detRowH);
-  const detRows = allLinesSorted.slice(0, Math.max(0, maxRowsDet));
+  // =========================================================
+  // ✅ DETALLE PAGINADO (Página 2, 3, 4...) – sin cortar filas
+  // =========================================================
 
-  const detH = detHeadH + detRows.length * detRowH;
+  // helper: dibuja header de la tabla detalle en la página dada
+  function drawDetalleHeader(page, topY){
+    // marco del header
+    drawBox(page, detX, topY, detW, detHeadH, RENNAT_BLUE, RENNAT_BLUE, 1);
 
-  // marco
-  drawBox(page2, detX, y2, detW, detH, rgb(1,1,1), BORDER_SOFT, 1);
-
-  // header azul
-  drawBox(page2, detX, y2, detW, detHeadH, RENNAT_BLUE, RENNAT_BLUE, 1);
-
-  // vertical lines
-  let cx = detX;
-  for(let i=0;i<detCols.length;i++){
-    if(i>0) drawVLine(page2, cx, y2, detH, 1, BORDER_SOFT);
-    // header labels
-    drawCellText(page2, detCols[i].label, cx, y2, detHeadH, 9, true, rgb(1,1,1), 8);
-    cx += detCols[i].w;
+    // labels + líneas verticales
+    let cx = detX;
+    for(let i=0;i<detCols.length;i++){
+      if(i>0) drawVLine(page, cx, topY, detHeadH, 1, BORDER_SOFT);
+      drawCellText(page, detCols[i].label, cx, topY, detHeadH, 9, true, rgb(1,1,1), 8);
+      cx += detCols[i].w;
+    }
   }
 
-  // filas
-  for(let r=0; r<detRows.length; r++){
-    const l = detRows[r];
-    const yTop = y2 - detHeadH - r*detRowH;
-
-    drawHLine2(page2, detX, yTop, detW, 1, BORDER_SOFT);
+  // helper: dibuja 1 fila
+  function drawDetalleRow(page, row, topY){
+    // línea horizontal superior de la fila
+    drawHLine2(page, detX, topY, detW, 1, BORDER_SOFT);
 
     let xPos = detX;
 
-    const fechaTxt = `${l.fecha || ''}${l.hora ? ' ' + l.hora : ''}`;
-    drawCellText(page2, wrapClip(fechaTxt, 18), xPos, yTop, detRowH, 9, false, TEXT_MAIN, 8);
+    const fechaTxt = `${row.fecha || ''}${row.hora ? ' ' + row.hora : ''}`;
+    drawCellText(page, wrapClip(fechaTxt, 18), xPos, topY, detRowH, 9, false, TEXT_MAIN, 8);
     xPos += detCols[0].w;
 
-    drawCellText(page2, wrapClip(clinAbbrev(l.clinicaNombre || ''), 22), xPos, yTop, detRowH, 9, false, TEXT_MAIN, 8);
+    drawCellText(page, wrapClip(clinAbbrev(row.clinicaNombre || ''), 22), xPos, topY, detRowH, 9, false, TEXT_MAIN, 8);
     xPos += detCols[1].w;
 
-    drawCellText(page2, wrapClip(l.procedimientoNombre || '', 24), xPos, yTop, detRowH, 9, false, TEXT_MAIN, 8);
+    drawCellText(page, wrapClip(row.procedimientoNombre || '', 24), xPos, topY, detRowH, 9, false, TEXT_MAIN, 8);
     xPos += detCols[2].w;
 
-    drawCellText(page2, wrapClip(l.pacienteNombre || '', 20), xPos, yTop, detRowH, 9, false, TEXT_MAIN, 8);
+    drawCellText(page, wrapClip(row.pacienteNombre || '', 28), xPos, topY, detRowH, 9, false, TEXT_MAIN, 8);
     xPos += detCols[3].w;
 
-    drawCellText(page2, wrapClip((l.tipoPaciente || '').toString().toUpperCase(), 12), xPos, yTop, detRowH, 9, false, TEXT_MUTED, 8);
+    drawCellText(page, wrapClip((row.tipoPaciente || '').toString().toUpperCase(), 12), xPos, topY, detRowH, 9, false, TEXT_MUTED, 8);
     xPos += detCols[4].w;
 
-    drawCellTextRight(page2, money(l.monto || 0), xPos, yTop, detCols[5].w, detRowH, 9, true, TEXT_MAIN, 8);
+    drawCellTextRight(page, money(row.monto || 0), xPos, topY, detCols[5].w, detRowH, 9, true, TEXT_MAIN, 8);
   }
 
-  y2 = y2 - detH - 14;
+  // helper: dibuja bloque “DATOS CLÍNICA” en la página dada yY inferior
+  function drawClinicaBox(page){
+    const emH = 104;
+    const emY = M + 20;
 
-  // caja inferior: datos clínica (igual que tenías)
-  const emH = 104;
-  const emY = M + 20;
+    page.drawRectangle({
+      x: M,
+      y: emY,
+      width: W - 2*M,
+      height: emH,
+      borderColor: BORDER_SOFT,
+      borderWidth: 1,
+      color: rgb(1,1,1)
+    });
 
-  page2.drawRectangle({
-    x: M,
-    y: emY,
-    width: W - 2*M,
-    height: emH,
-    borderColor: BORDER_SOFT,
-    borderWidth: 1,
-    color: rgb(1,1,1)
-  });
+    drawText(page, 'DATOS CLÍNICA RENNAT', M + 12, emY + emH - 18, 10.5, true, RENNAT_BLUE);
+    drawText(page, 'RUT: 77.460.159-7', M + 12, emY + emH - 36, 9.5, false, TEXT_MUTED);
+    drawText(page, 'RAZÓN SOCIAL: SERVICIOS MÉDICOS GCS PROVIDENCIA SPA.', M + 12, emY + emH - 52, 9.5, false, TEXT_MUTED);
+    drawText(page, 'GIRO: ACTIVIDADES DE HOSPITALES Y CLÍNICAS PRIVADAS.', M + 12, emY + emH - 68, 9.5, false, TEXT_MUTED);
+    drawText(page, 'DIRECCIÓN: AV MANUEL MONTT 427. PISO 10. PROVIDENCIA.', M + 12, emY + emH - 84, 9.5, false, TEXT_MUTED);
 
-  drawText(page2, 'DATOS CLÍNICA RENNAT', M + 12, emY + emH - 18, 10.5, true, RENNAT_BLUE);
-  drawText(page2, 'RUT: 77.460.159-7', M + 12, emY + emH - 36, 9.5, false, TEXT_MUTED);
-  drawText(page2, 'RAZÓN SOCIAL: SERVICIOS MÉDICOS GCS PROVIDENCIA SPA.', M + 12, emY + emH - 52, 9.5, false, TEXT_MUTED);
-  drawText(page2, 'GIRO: ACTIVIDADES DE HOSPITALES Y CLÍNICAS PRIVADAS.', M + 12, emY + emH - 68, 9.5, false, TEXT_MUTED);
-  drawText(page2, 'DIRECCIÓN: AV MANUEL MONTT 427. PISO 10. PROVIDENCIA.', M + 12, emY + emH - 84, 9.5, false, TEXT_MUTED);
-
-  // Nota si cortamos filas por espacio
-  if(allLinesSorted.length > detRows.length){
-    drawText(page2, `* Se muestran ${detRows.length} de ${allLinesSorted.length} filas por espacio.`, M, emY + emH + 8, 9, false, TEXT_MUTED);
+    return { emY, emH };
   }
 
+  // filas ordenadas completas
+  const allLinesSorted = [...(agg?.lines || [])].sort(lineSort);
+
+  // reservamos siempre espacio para el bloque clínica al fondo
+  const { emY, emH } = drawClinicaBox(page2);
+
+  // área útil para la tabla (desde y2 hacia arriba, hasta justo encima del bloque clínica)
+  const bottomLimit = emY + emH + 16; // margen sobre la caja
+  let currentPage = page2;
+  let cursorTopY = y2; // top de la tabla en la página actual
+
+  // dibuja tabla paginada
+  let idx = 0;
+  while(idx < allLinesSorted.length){
+
+    // header en esta página
+    // (marco completo de tabla se va dibujando por bloques; al final cerramos con borde inferior)
+    drawDetalleHeader(currentPage, cursorTopY);
+
+    // cuántas filas caben en esta página
+    const availableH = cursorTopY - bottomLimit - detHeadH;
+    const canFit = Math.max(0, Math.floor(availableH / detRowH));
+
+    // si no cabe ni una, creamos nueva página (y dejamos la caja clínica para la última)
+    if(canFit <= 0){
+      currentPage = pdfDoc.addPage([W, H]);
+      cursorTopY = H - M;
+
+      // barra azul título en nuevas páginas también (más compacto)
+      drawBox(currentPage, barX, cursorTopY, barW, barH, RENNAT_BLUE, RENNAT_BLUE, 1);
+      drawText(currentPage, t2, barX + (barW - measure(t2, 13, true))/2, cursorTopY - 19, 13, true, rgb(1,1,1));
+      cursorTopY -= (barH + 12);
+
+      drawText(currentPage, `${nombreMostrar} · ${mesTxt}`, M, cursorTopY, 10, false, TEXT_MUTED);
+      cursorTopY -= 12;
+
+      // en páginas intermedias NO dibujamos la caja clínica todavía
+      continue;
+    }
+
+    const slice = allLinesSorted.slice(idx, idx + canFit);
+
+    // marco total del bloque (header + filas de este bloque)
+    const blockH = detHeadH + slice.length * detRowH;
+    drawBox(currentPage, detX, cursorTopY, detW, blockH, rgb(1,1,1), BORDER_SOFT, 1);
+
+    // líneas verticales a todo el bloque
+    let cx = detX;
+    for(let i=0;i<detCols.length;i++){
+      if(i>0) drawVLine(currentPage, cx, cursorTopY, blockH, 1, BORDER_SOFT);
+      cx += detCols[i].w;
+    }
+
+    // filas
+    for(let r=0; r<slice.length; r++){
+      const row = slice[r];
+      const rowTop = cursorTopY - detHeadH - r*detRowH;
+      drawDetalleRow(currentPage, row, rowTop);
+    }
+
+    // cerrar línea inferior del bloque
+    const yBottom = cursorTopY - blockH;
+    drawHLine2(currentPage, detX, yBottom, detW, 1, BORDER_SOFT);
+
+    idx += slice.length;
+
+    // ¿quedan más? -> nueva página
+    if(idx < allLinesSorted.length){
+      currentPage = pdfDoc.addPage([W, H]);
+      cursorTopY = H - M;
+
+      drawBox(currentPage, barX, cursorTopY, barW, barH, RENNAT_BLUE, RENNAT_BLUE, 1);
+      drawText(currentPage, t2, barX + (barW - measure(t2, 13, true))/2, cursorTopY - 19, 13, true, rgb(1,1,1));
+      cursorTopY -= (barH + 12);
+
+      drawText(currentPage, `${nombreMostrar} · ${mesTxt}`, M, cursorTopY, 10, false, TEXT_MUTED);
+      cursorTopY -= 12;
+    }
+  }
 
   // Guardar PDF
   const bytes = await pdfDoc.save();
