@@ -522,13 +522,22 @@ async function generarPDFLiquidacionProfesional(agg){
   const detRowH  = 18;
 
   const detCols = [
-    { key:'fecha', label:'FECHA', w: 110 },
-    { key:'clin',  label:'CLÍNICA', w: 150 },
-    { key:'proc',  label:'PROCEDIMIENTO', w: 170 },
-    { key:'pac',   label:'PACIENTE', w: 150 },
-    { key:'tipo',  label:'TIPO', w: 90 },
-    { key:'monto', label:'MONTO', w: 110 }
+    // ✅ más angosto: "01/12/2025 0800" cabe perfecto
+    { key:'fecha', label:'FECHA', w: 95 },
+  
+    // ✅ clínica más apretada
+    { key:'clin',  label:'CLÍNICA', w: 120 },
+  
+    // ✅ procedimiento más angosto (igual puede variar, pero no necesita tanto)
+    { key:'proc',  label:'PROCEDIMIENTO', w: 140 },
+  
+    // ✅ el ancho “ganado” se lo damos a PACIENTE
+    { key:'pac',   label:'PACIENTE', w: 210 },
+  
+    { key:'tipo',  label:'TIPO', w: 75 },
+    { key:'monto', label:'MONTO', w: 100 }
   ];
+
   const detW = detCols.reduce((a,c)=>a+c.w,0);
 
   // si detW < boxW, centramos dentro del ancho
