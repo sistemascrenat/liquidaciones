@@ -242,12 +242,22 @@ async function generarPDFLiquidacionProfesional(agg){
   const nombreMostrar = esJuridica ? (empresaNombre || titular || '—') : (titular || '—');
   const rutMostrar = esJuridica ? (empresaRut || rutTitular || '—') : (rutTitular || '—');
 
-  // ===== Logo (arriba derecha) =====
-  // ===== Logo (arriba derecha) =====
+  // ===== Barra título (definimos primero porque el "gap" será barH) =====
+  const barH = 28;
+  const barW = W - 2*M;
+  const barX = M;
+  
+  // ✅ Queremos que el espacio entre logo y barra sea del mismo porte que la barra
+  const gapLogoTitulo = barH;
+  
+  // ✅ Si no hay logo, usamos como "base" el top normal
+  let logoBottomY = H - M; // se recalcula si el logo existe
+  
+  
+  // ===== Logo (arriba izquierda) =====
   const logoBytes = await fetchAsArrayBuffer(PDF_ASSET_LOGO_URL);
   if (logoBytes) {
     try {
-      // ✅ Soporta PNG y JPG/JPEG automáticamente
       const urlLower = String(PDF_ASSET_LOGO_URL || '').toLowerCase();
       const isJpg = urlLower.endsWith('.jpg') || urlLower.endsWith('.jpeg');
   
@@ -258,29 +268,33 @@ async function generarPDFLiquidacionProfesional(agg){
       const logoW = 120;
       const logoH = (logo.height / logo.width) * logoW;
   
+      const logoX = M;
+      const logoY = H - M - logoH;  // bottom del logo
+  
       page1.drawImage(logo, {
-        x: M,
-        y: H - M - logoH,
+        x: logoX,
+        y: logoY,
         width: logoW,
         height: logoH
       });
+  
+      // ✅ Este es el borde inferior del logo (para calcular la barra)
+      logoBottomY = logoY;
+  
     } catch (e) {
       console.warn('No se pudo embebeder logo:', e);
     }
   } else {
     console.warn('No se pudo descargar logo (URL no accesible):', PDF_ASSET_LOGO_URL);
   }
-
-
-  // ===== Barra título azul (debajo del logo) =====
-  const barH = 28;
-  const barW = W - 2*M;
-  const barX = M;
-
-  // bajamos un poco desde el top para que no choque con logo
-  const barTop = H - M - 52;
-
+  
+  
+  // ===== Barra título azul (debajo del logo) con gap EXACTO =====
+  // ✅ Top de la barra = (borde inferior del logo) - gap
+  const barTop = logoBottomY - gapLogoTitulo;
+  
   drawBox(page1, barX, barTop, barW, barH, RENNAT_BLUE, RENNAT_BLUE, 1);
+
 
   const title = 'Liquidación de Pago Producción - Participaciones Mensuales';
   const titleSize = 12;
