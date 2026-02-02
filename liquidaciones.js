@@ -554,8 +554,6 @@ async function generarPDFLiquidacionProfesional(agg){
     return normalize(a.pacienteNombre).localeCompare(normalize(b.pacienteNombre));
   };
 
-  const allLinesSorted = [...(agg?.lines || [])].sort(lineSort);
-
   // =========================================================
   // ✅ DETALLE PAGINADO (Página 2, 3, 4...) – sin cortar filas
   // =========================================================
