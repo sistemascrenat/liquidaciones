@@ -239,20 +239,34 @@ async function generarPDFLiquidacionProfesional(agg){
   const rutMostrar = esJuridica ? (empresaRut || rutTitular || '—') : (rutTitular || '—');
 
   // ===== Logo (arriba derecha) =====
+  // ===== Logo (arriba derecha) =====
   const logoBytes = await fetchAsArrayBuffer(PDF_ASSET_LOGO_URL);
   if (logoBytes) {
     try {
-      const logo = await pdfDoc.embedPng(logoBytes);
+      // ✅ Soporta PNG y JPG/JPEG automáticamente
+      const urlLower = String(PDF_ASSET_LOGO_URL || '').toLowerCase();
+      const isJpg = urlLower.endsWith('.jpg') || urlLower.endsWith('.jpeg');
+  
+      const logo = isJpg
+        ? await pdfDoc.embedJpg(logoBytes)
+        : await pdfDoc.embedPng(logoBytes);
+  
       const logoW = 120;
       const logoH = (logo.height / logo.width) * logoW;
+  
       page1.drawImage(logo, {
         x: W - M - logoW,
         y: H - M - logoH,
         width: logoW,
         height: logoH
       });
-    } catch(_e){}
+    } catch (e) {
+      console.warn('No se pudo embebeder logo:', e);
+    }
+  } else {
+    console.warn('No se pudo descargar logo (URL no accesible):', PDF_ASSET_LOGO_URL);
   }
+
 
   // ===== Barra título azul (debajo del logo) =====
   const barH = 28;
