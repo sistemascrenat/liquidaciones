@@ -804,30 +804,30 @@ async function generarPDFLiquidacionProfesional(agg){
       // Dibujamos la caja clínica al final de la hoja (pero OJO: no aún; solo calculamos su espacio)
       // Para calcular espacio, usaremos dimensiones fijas de tu caja (emH=104; emY=M+20)
 
-      const { emH, emY } = CLINICA_BOX;
-      bottomLimit = emY + emH + boxGap;
+      // const { emH, emY } = CLINICA_BOX;
+      // bottomLimit = emY + emH + boxGap;
 
       // Recalcular con el bottomLimit de última página
-      availableH = cursorTopY - bottomLimit - detHeadH;
-      canFit = Math.max(0, Math.floor(availableH / detRowH));
+      // availableH = cursorTopY - bottomLimit - detHeadH;
+      // canFit = Math.max(0, Math.floor(availableH / detRowH));
 
       // Si por reservar la caja quedó 0 filas, forzamos nueva página
-      if (canFit <= 0) {
+      // if (canFit <= 0) {
 
-        currentPage = pdfDoc.addPage([W2, H2]);
-        cursorTopY = H2 - M;
+        // currentPage = pdfDoc.addPage([W2, H2]);
+        // cursorTopY = H2 - M;
         
         // Barra título en horizontal
-        drawBox(currentPage, barX2, cursorTopY, barW2, barH, RENNAT_BLUE, RENNAT_BLUE, 1);
-        drawText(currentPage, t2, barX2 + (barW2 - measure(t2, 13, true)) / 2, cursorTopY - 19, 13, true, rgb(1, 1, 1));
-        cursorTopY -= (barH + 12);
+        // drawBox(currentPage, barX2, cursorTopY, barW2, barH, RENNAT_BLUE, RENNAT_BLUE, 1);
+        // drawText(currentPage, t2, barX2 + (barW2 - measure(t2, 13, true)) / 2, cursorTopY - 19, 13, true, rgb(1, 1, 1));
+        // cursorTopY -= (barH + 12);
         
         // Subtítulo
-        drawText(currentPage, `${nombreMostrar} · ${mesTxt}`, M, cursorTopY, 10, false, TEXT_MUTED);
-        cursorTopY -= 12;
+        // drawText(currentPage, `${nombreMostrar} · ${mesTxt}`, M, cursorTopY, 10, false, TEXT_MUTED);
+        // cursorTopY -= 12;
 
 
-        continue;
+        // continue;
       }
     }
 
@@ -880,7 +880,7 @@ async function generarPDFLiquidacionProfesional(agg){
   }
   
   // ✅ fuera del while → última página real
-  drawClinicaBoxHorizontal(currentPage);
+  // drawClinicaBoxHorizontal(currentPage);
     
   // ✅ Cerrar generación PDF: guardar bytes y retornar
   const pdfBytes = await pdfDoc.save();
