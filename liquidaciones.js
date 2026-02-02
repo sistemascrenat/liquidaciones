@@ -103,6 +103,7 @@ async function fetchAsArrayBuffer(url){
     if(!res.ok) throw new Error('HTTP '+res.status);
     return await res.arrayBuffer();
   }catch(e){
+    console.warn('fetchAsArrayBuffer falló para:', url, e);
     return null;
   }
 }
