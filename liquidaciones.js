@@ -828,7 +828,7 @@ async function generarPDFLiquidacionProfesional(agg){
 
 
         // continue;
-      }
+      // }
     }
 
     // slice de filas para esta página
