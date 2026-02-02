@@ -218,6 +218,39 @@ async function generarPDFLiquidacionProfesional(agg){
     return emH;
   }
 
+    // =========================
+    // Caja DATOS CLÍNICA en horizontal (última página)
+    // =========================
+    const CLINICA_BOX = {
+      emH: 104,
+      emY: M + 20 // “desde abajo”: quedará a 20px sobre el margen inferior
+    };
+  
+    function drawClinicaBoxHorizontal(page){
+      const boxW = W2 - 2*M;
+      const { emH, emY } = CLINICA_BOX;
+  
+      page.drawRectangle({
+        x: M,
+        y: emY,
+        width: boxW,
+        height: emH,
+        borderColor: BORDER_SOFT,
+        borderWidth: 1,
+        color: rgb(1,1,1)
+      });
+  
+      // Título
+      drawText(page, 'DATOS CLÍNICA RENNAT', M + 12, emY + emH - 18, 10.5, true, RENNAT_BLUE);
+  
+      // Líneas
+      drawText(page, 'RUT: 77.460.159-7', M + 12, emY + emH - 36, 9.5, false, TEXT_MUTED);
+      drawText(page, 'RAZÓN SOCIAL: SERVICIOS MÉDICOS GCS PROVIDENCIA SPA.', M + 12, emY + emH - 52, 9.5, false, TEXT_MUTED);
+      drawText(page, 'GIRO: ACTIVIDADES DE HOSPITALES Y CLÍNICAS PRIVADAS.', M + 12, emY + emH - 68, 9.5, false, TEXT_MUTED);
+      drawText(page, 'DIRECCIÓN: AV MANUEL MONTT 427. PISO 10. PROVIDENCIA.', M + 12, emY + emH - 84, 9.5, false, TEXT_MUTED);
+    }
+
+
 
   // =========================
   // PÁGINA 1 — Estilo “imagen 2”
@@ -599,27 +632,19 @@ async function generarPDFLiquidacionProfesional(agg){
   const barX2 = M;
   const barW2 = W2 - 2*M;
   
+  const T_DETALLE = 'Detalle de Procedimientos';
+
+  // Barra título azul
   drawBox(page2, barX2, y2, barW2, barH, RENNAT_BLUE, RENNAT_BLUE, 1);
-  const t2 = 'Detalle de Procedimientos';
-  drawText(page2, t2, barX2 + (barW2 - measure(t2, 13, true))/2, y2 - 19, 13, true, rgb(1,1,1));
+  drawText(page2, T_DETALLE, barX2 + (barW2 - measure(T_DETALLE, 13, true))/2, y2 - 19, 13, true, rgb(1,1,1));
   y2 -= (barH + 12);
-  
-  // subtítulo
+
+  // Subtítulo
   drawText(page2, `${nombreMostrar} · ${mesTxt}`, M, y2, 10, false, TEXT_MUTED);
   y2 -= 12;
 
-  const t2 = 'Detalle de Procedimientos';
-  drawText(page2, t2, barX + (barW - measure(t2, 13, true))/2, y2 - 19, 13, true, rgb(1,1,1));
-  y2 -= (barH + 12);
-
-  // subtítulo
-  drawText(page2, `${nombreMostrar} · ${mesTxt}`, M, y2, 10, false, TEXT_MUTED);
-  y2 -= 12;
 
   // tabla detalle
-  const detHeadH = 24;
-  const detRowH  = 18;
-
   const detHeadH = 24;
   const detRowH  = 18;
   
@@ -750,7 +775,16 @@ async function generarPDFLiquidacionProfesional(agg){
       
       // Barra título en horizontal
       drawBox(currentPage, barX2, cursorTopY, barW2, barH, RENNAT_BLUE, RENNAT_BLUE, 1);
-      drawText(currentPage, t2, barX2 + (barW2 - measure(t2, 13, true)) / 2, cursorTopY - 19, 13, true, rgb(1, 1, 1));
+      drawText(
+        currentPage,
+        T_DETALLE,
+        barX2 + (barW2 - measure(T_DETALLE, 13, true)) / 2,
+        cursorTopY - 19,
+        13,
+        true,
+        rgb(1, 1, 1)
+      );
+
       cursorTopY -= (barH + 12);
       
       // Subtítulo
@@ -826,23 +860,28 @@ async function generarPDFLiquidacionProfesional(agg){
 
     // avanzamos índice
     idx += slice.length;
-    
-    // si quedan más -> nueva página
 
-    currentPage = pdfDoc.addPage([W2, H2]);
-    cursorTopY = H2 - M;
-    
-    // Barra título en horizontal
-    drawBox(currentPage, barX2, cursorTopY, barW2, barH, RENNAT_BLUE, RENNAT_BLUE, 1);
-    drawText(currentPage, t2, barX2 + (barW2 - measure(t2, 13, true)) / 2, cursorTopY - 19, 13, true, rgb(1, 1, 1));
-    cursorTopY -= (barH + 12);
-    
-    // Subtítulo
-    drawText(currentPage, `${nombreMostrar} · ${mesTxt}`, M, cursorTopY, 10, false, TEXT_MUTED);
-    cursorTopY -= 12;
+    // ✅ solo crear nueva página si AÚN quedan filas
+    if (idx < allLinesSorted.length) {
+      currentPage = pdfDoc.addPage([W2, H2]);
+      cursorTopY = H2 - M;
 
+      // Barra título
+      drawBox(currentPage, barX2, cursorTopY, barW2, barH, RENNAT_BLUE, RENNAT_BLUE, 1);
+      drawText(currentPage, T_DETALLE, barX2 + (barW2 - measure(T_DETALLE, 13, true)) / 2, cursorTopY - 19, 13, true, rgb(1, 1, 1));
+      cursorTopY -= (barH + 12);
+
+      // Subtítulo
+      drawText(currentPage, `${nombreMostrar} · ${mesTxt}`, M, cursorTopY, 10, false, TEXT_MUTED);
+      cursorTopY -= 12;
+    }
+
+  // termina el while completamente
   }
   
+  // ✅ fuera del while → última página real
+  drawClinicaBoxHorizontal(currentPage);
+    
   // ✅ Cerrar generación PDF: guardar bytes y retornar
   const pdfBytes = await pdfDoc.save();
   return pdfBytes;
