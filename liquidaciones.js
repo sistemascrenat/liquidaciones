@@ -759,7 +759,11 @@ async function generarPDFLiquidacionProfesional(agg){
     drawText(currentPage, `${nombreMostrar} · ${mesTxt}`, M, cursorTopY, 10, false, TEXT_MUTED);
     cursorTopY -= 12;
   }
-
+  
+  // ✅ Cerrar generación PDF: guardar bytes y retornar
+  const pdfBytes = await pdfDoc.save();
+  return pdfBytes;
+} // ✅ FIN generarPDFLiquidacionProfesional
 
 
 
