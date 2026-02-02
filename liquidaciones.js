@@ -95,7 +95,7 @@ function download(filename, text, mime='text/plain'){
 ========================= */
 
 // Ajusta esto si quieres un logo (opcional). Si no existe, simplemente no lo dibuja.
-const PDF_ASSET_LOGO_URL = 'logoCRazul.jpeg'; // pon tu ruta real o déjalo así si lo subirás
+const PDF_ASSET_LOGO_URL = './logoCRazul.jpeg'; // pon tu ruta real o déjalo así si lo subirás
 
 async function fetchAsArrayBuffer(url){
   try{
