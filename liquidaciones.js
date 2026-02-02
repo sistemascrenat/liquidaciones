@@ -599,9 +599,9 @@ async function generarPDFLiquidacionProfesional(agg){
   }
 
   // helper: dibuja bloque “DATOS CLÍNICA” en la página dada yY inferior
+
   function drawClinicaBox(page){
-    const emH = 104;
-    const emY = M + 20;
+    const { emH, emY } = CLINICA_BOX;
 
     page.drawRectangle({
       x: M,
@@ -622,63 +622,116 @@ async function generarPDFLiquidacionProfesional(agg){
     return { emY, emH };
   }
 
+  // ✅ Constantes para la caja clínica (usar en 2 lugares: cálculo + dibujo)
+  const CLINICA_BOX = {
+    emH: 104,
+    emY: M + 20
+  };
+
+
   // filas ordenadas completas
   const allLinesSorted = [...(agg?.lines || [])].sort(lineSort);
 
-  // reservamos siempre espacio para el bloque clínica al fondo
-  const { emY, emH } = drawClinicaBox(page2);
+  // ✅ IMPORTANTE: la caja “DATOS CLÍNICA RENNAT” debe quedar SIEMPRE en la ÚLTIMA página
+  // Por eso NO la dibujamos aún. La dibujaremos al final, en la última página real.
 
-  // área útil para la tabla (desde y2 hacia arriba, hasta justo encima del bloque clínica)
-  const bottomLimit = emY + emH + 16; // margen sobre la caja
+  // Límite inferior por defecto (páginas intermedias): podemos usar casi toda la hoja
+  const bottomLimitDefault = M + 20;
+
+  // En la última página reservaremos espacio para la caja, pero ese límite lo calcularemos al final.
+  const boxGap = 16; // margen sobre la caja
+
   let currentPage = page2;
   let cursorTopY = y2; // top de la tabla en la página actual
 
+
   // dibuja tabla paginada
   let idx = 0;
-  while(idx < allLinesSorted.length){
 
-    // header en esta página
-    // (marco completo de tabla se va dibujando por bloques; al final cerramos con borde inferior)
+  while (idx < allLinesSorted.length) {
+
+    // ¿Estamos en la última página? -> lo sabremos si todo lo que queda cabe acá.
+    // Primero asumimos límite “intermedio” y calculamos cuántas filas caben.
+    // Luego, si con ese cálculo cabe TODO lo que falta, entonces esta es la última página
+    // y cambiamos el bottomLimit para reservar espacio para la caja clínica.
+
+    // 1) Con límite default (página intermedia)
+    let bottomLimit = bottomLimitDefault;
+
+    // Header en esta página
     drawDetalleHeader(currentPage, cursorTopY);
 
-    // cuántas filas caben en esta página
-    const availableH = cursorTopY - bottomLimit - detHeadH;
-    const canFit = Math.max(0, Math.floor(availableH / detRowH));
+    // ¿Cuántas filas caben con límite default?
+    let availableH = cursorTopY - bottomLimit - detHeadH;
+    let canFit = Math.max(0, Math.floor(availableH / detRowH));
 
-    // si no cabe ni una, creamos nueva página (y dejamos la caja clínica para la última)
-    if(canFit <= 0){
+    // Si no cabe ni una fila -> crear página nueva
+    if (canFit <= 0) {
       currentPage = pdfDoc.addPage([W, H]);
       cursorTopY = H - M;
 
-      // barra azul título en nuevas páginas también (más compacto)
       drawBox(currentPage, barX, cursorTopY, barW, barH, RENNAT_BLUE, RENNAT_BLUE, 1);
-      drawText(currentPage, t2, barX + (barW - measure(t2, 13, true))/2, cursorTopY - 19, 13, true, rgb(1,1,1));
+      drawText(currentPage, t2, barX + (barW - measure(t2, 13, true)) / 2, cursorTopY - 19, 13, true, rgb(1, 1, 1));
       cursorTopY -= (barH + 12);
 
       drawText(currentPage, `${nombreMostrar} · ${mesTxt}`, M, cursorTopY, 10, false, TEXT_MUTED);
       cursorTopY -= 12;
 
-      // en páginas intermedias NO dibujamos la caja clínica todavía
       continue;
     }
 
-    const slice = allLinesSorted.slice(idx, idx + canFit);
+    // ¿Cuántas filas quedan en total?
+    const remaining = allLinesSorted.length - idx;
 
-    // marco total del bloque (header + filas de este bloque)
+    // ✅ Si con el límite default cabe TODO lo que falta, entonces ESTA es la última página:
+    // reservamos espacio para la caja “DATOS CLÍNICA” y recalculamos canFit.
+    if (canFit >= remaining) {
+      // Dibujamos la caja clínica al final de la hoja (pero OJO: no aún; solo calculamos su espacio)
+      // Para calcular espacio, usaremos dimensiones fijas de tu caja (emH=104; emY=M+20)
+
+      const { emH, emY } = CLINICA_BOX;
+      bottomLimit = emY + emH + boxGap;
+
+      // Recalcular con el bottomLimit de última página
+      availableH = cursorTopY - bottomLimit - detHeadH;
+      canFit = Math.max(0, Math.floor(availableH / detRowH));
+
+      // Si por reservar la caja quedó 0 filas, forzamos nueva página
+      if (canFit <= 0) {
+        currentPage = pdfDoc.addPage([W, H]);
+        cursorTopY = H - M;
+
+        drawBox(currentPage, barX, cursorTopY, barW, barH, RENNAT_BLUE, RENNAT_BLUE, 1);
+        drawText(currentPage, t2, barX + (barW - measure(t2, 13, true)) / 2, cursorTopY - 19, 13, true, rgb(1, 1, 1));
+        cursorTopY -= (barH + 12);
+
+        drawText(currentPage, `${nombreMostrar} · ${mesTxt}`, M, cursorTopY, 10, false, TEXT_MUTED);
+        cursorTopY -= 12;
+
+        continue;
+      }
+    }
+
+    // slice de filas para esta página
+    const slice = allLinesSorted.slice(idx, idx + Math.min(canFit, remaining));
+
+    // alto del bloque (header + filas)
     const blockH = detHeadH + slice.length * detRowH;
-    drawBox(currentPage, detX, cursorTopY, detW, blockH, rgb(1,1,1), BORDER_SOFT, 1);
+
+    // marco total del bloque
+    drawBox(currentPage, detX, cursorTopY, detW, blockH, rgb(1, 1, 1), BORDER_SOFT, 1);
 
     // líneas verticales a todo el bloque
     let cx = detX;
-    for(let i=0;i<detCols.length;i++){
-      if(i>0) drawVLine(currentPage, cx, cursorTopY, blockH, 1, BORDER_SOFT);
+    for (let i = 0; i < detCols.length; i++) {
+      if (i > 0) drawVLine(currentPage, cx, cursorTopY, blockH, 1, BORDER_SOFT);
       cx += detCols[i].w;
     }
 
     // filas
-    for(let r=0; r<slice.length; r++){
+    for (let r = 0; r < slice.length; r++) {
       const row = slice[r];
-      const rowTop = cursorTopY - detHeadH - r*detRowH;
+      const rowTop = cursorTopY - detHeadH - r * detRowH;
       drawDetalleRow(currentPage, row, rowTop);
     }
 
@@ -686,26 +739,27 @@ async function generarPDFLiquidacionProfesional(agg){
     const yBottom = cursorTopY - blockH;
     drawHLine2(currentPage, detX, yBottom, detW, 1, BORDER_SOFT);
 
+    // avanzamos índice
     idx += slice.length;
 
-    // ¿quedan más? -> nueva página
-    if(idx < allLinesSorted.length){
-      currentPage = pdfDoc.addPage([W, H]);
-      cursorTopY = H - M;
-
-      drawBox(currentPage, barX, cursorTopY, barW, barH, RENNAT_BLUE, RENNAT_BLUE, 1);
-      drawText(currentPage, t2, barX + (barW - measure(t2, 13, true))/2, cursorTopY - 19, 13, true, rgb(1,1,1));
-      cursorTopY -= (barH + 12);
-
-      drawText(currentPage, `${nombreMostrar} · ${mesTxt}`, M, cursorTopY, 10, false, TEXT_MUTED);
-      cursorTopY -= 12;
+    // si ya terminamos todas las filas, ESTA es la última página real -> dibujamos la caja clínica aquí
+    if (idx >= allLinesSorted.length) {
+      drawClinicaBox(currentPage);
+      break;
     }
+
+    // si quedan más -> nueva página
+    currentPage = pdfDoc.addPage([W, H]);
+    cursorTopY = H - M;
+
+    drawBox(currentPage, barX, cursorTopY, barW, barH, RENNAT_BLUE, RENNAT_BLUE, 1);
+    drawText(currentPage, t2, barX + (barW - measure(t2, 13, true)) / 2, cursorTopY - 19, 13, true, rgb(1, 1, 1));
+    cursorTopY -= (barH + 12);
+
+    drawText(currentPage, `${nombreMostrar} · ${mesTxt}`, M, cursorTopY, 10, false, TEXT_MUTED);
+    cursorTopY -= 12;
   }
 
-  // Guardar PDF
-  const bytes = await pdfDoc.save();
-  return bytes;
-}
 
 
 
