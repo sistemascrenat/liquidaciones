@@ -132,7 +132,7 @@ async function generarPDFLiquidacionProfesional(agg){
   const H = 841.89;
 
   // Paleta RENNAT (sobria)
-  const RENNAT_BLUE  = rgb(0.05, 0.20, 0.28);
+  const RENNAT_BLUE  = rgb(0, 39, 56);
   const RENNAT_GREEN = rgb(0.12, 0.55, 0.45);
   const TEXT_MAIN    = rgb(0.08, 0.09, 0.11);
   const TEXT_MUTED   = rgb(0.45, 0.48, 0.52);
