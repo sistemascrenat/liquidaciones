@@ -334,7 +334,7 @@ async function generarPDFLiquidacionProfesional(agg){
     ['Mes/Año', mesTxt],
     ['RUT Pago', rutMostrar],
     ['Nombre RUT de Pago', nombreMostrar],
-    ['Tipo', tipoMostrar]
+    ['Tipo', String(tipoMostrar).toUpperCase()]
   ];
 
   // altura tabla
