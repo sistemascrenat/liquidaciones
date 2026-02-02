@@ -331,9 +331,9 @@ async function generarPDFLiquidacionProfesional(agg){
   // Como acá no tienes nroLiquidacion/ profesion, mantenemos “Mes/Año” y “Tipo Persona”.
   // Puedes ajustar después si agregas campos reales.
   const dataRows = [
-    ['Mes/Año', mesTxt],
-    ['RUT Pago', rutMostrar],
-    ['Nombre RUT de Pago', nombreMostrar],
+    ['Mes/Año', String(mesTxt).toUpperCase()],
+    ['RUT Pago', String(rutMostrar).toUpperCase()],
+    ['Nombre RUT de Pago', String(nombreMostrar).toUpperCase()],
     ['Tipo', String(tipoMostrar).toUpperCase()]
   ];
 
