@@ -182,17 +182,6 @@ async function generarPDFLiquidacionProfesional(agg){
   
   const money = (n)=> clp(n || 0);
 
-
-
-  // ===== Datos cabecera =====
-  const mesTxt = `${monthNameEs(state.mesNum)} ${state.ano}`;
-  const titular = (agg?.nombre || '').toString();
-  const rutTitular = (agg?.rut || '').toString();
-
-  const esJuridica = (agg?.tipoPersona || '').toLowerCase() === 'juridica';
-  const empresaNombre = (agg?.empresaNombre || '').toString();
-  const empresaRut = (agg?.empresaRut || '').toString();
-
   // =========================
   // PÁGINA 1 — Estilo “imagen 2”
   // Logo arriba derecha + barra título azul + tablas con grid
