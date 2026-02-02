@@ -258,8 +258,6 @@ async function generarPDFLiquidacionProfesional(agg){
   // ✅ Tipo visible
   const tipoMostrar = esJuridica ? 'JURIDICA' : 'NATURAL';
 
-  const rutMostrar = esJuridica ? (empresaRut || rutTitular || '—') : (rutTitular || '—');
-
   // ===== Barra título (definimos primero porque el "gap" será barH) =====
   const barH = 28;
   const barW = W - 2*M;
