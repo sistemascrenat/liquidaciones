@@ -189,6 +189,37 @@ async function generarPDFLiquidacionProfesional(agg){
   const money = (n)=> clp(n || 0);
 
   // =========================
+  // Caja DATOS CLÍNICA (para Página 1)
+  // =========================
+  function drawClinicaBoxPage1(page, topY){
+    const boxW = W - 2*M;
+    const emH = 104;
+  
+    // Marco
+    page.drawRectangle({
+      x: M,
+      y: topY - emH,
+      width: boxW,
+      height: emH,
+      borderColor: BORDER_SOFT,
+      borderWidth: 1,
+      color: rgb(1,1,1)
+    });
+  
+    // Título
+    drawText(page, 'DATOS CLÍNICA RENNAT', M + 12, topY - 18, 10.5, true, RENNAT_BLUE);
+  
+    // Líneas
+    drawText(page, 'RUT: 77.460.159-7', M + 12, topY - 36, 9.5, false, TEXT_MUTED);
+    drawText(page, 'RAZÓN SOCIAL: SERVICIOS MÉDICOS GCS PROVIDENCIA SPA.', M + 12, topY - 52, 9.5, false, TEXT_MUTED);
+    drawText(page, 'GIRO: ACTIVIDADES DE HOSPITALES Y CLÍNICAS PRIVADAS.', M + 12, topY - 68, 9.5, false, TEXT_MUTED);
+    drawText(page, 'DIRECCIÓN: AV MANUEL MONTT 427. PISO 10. PROVIDENCIA.', M + 12, topY - 84, 9.5, false, TEXT_MUTED);
+  
+    return emH;
+  }
+
+
+  // =========================
   // PÁGINA 1 — Estilo “imagen 2”
   // Logo arriba derecha + barra título azul + tablas con grid
   // =========================
@@ -549,14 +580,34 @@ async function generarPDFLiquidacionProfesional(agg){
 
   y = y - totalBarH - 10;
 
+  // ✅ Caja DATOS CLÍNICA en Página 1
+  const clinH = drawClinicaBoxPage1(page1, y);
+  y = y - clinH - 12;
+
   // =========================
   // PÁGINA 2 — Detalle con la misma lógica (tabla con header azul)
   // =========================
-  const page2 = pdfDoc.addPage([W, H]);
-  let y2 = H - M;
+  // A4 horizontal (detalle)
+  const W2 = 841.89;
+  const H2 = 595.28;
+  
+  const page2 = pdfDoc.addPage([W2, H2]);
+  let y2 = H2 - M;
 
   // barra título azul (igual)
-  drawBox(page2, barX, y2, barW, barH, RENNAT_BLUE, RENNAT_BLUE, 1);
+  // barra título azul (en horizontal: recalculamos ancho)
+  const barX2 = M;
+  const barW2 = W2 - 2*M;
+  
+  drawBox(page2, barX2, y2, barW2, barH, RENNAT_BLUE, RENNAT_BLUE, 1);
+  const t2 = 'Detalle de Procedimientos';
+  drawText(page2, t2, barX2 + (barW2 - measure(t2, 13, true))/2, y2 - 19, 13, true, rgb(1,1,1));
+  y2 -= (barH + 12);
+  
+  // subtítulo
+  drawText(page2, `${nombreMostrar} · ${mesTxt}`, M, y2, 10, false, TEXT_MUTED);
+  y2 -= 12;
+
   const t2 = 'Detalle de Procedimientos';
   drawText(page2, t2, barX + (barW - measure(t2, 13, true))/2, y2 - 19, 13, true, rgb(1,1,1));
   y2 -= (barH + 12);
@@ -569,27 +620,35 @@ async function generarPDFLiquidacionProfesional(agg){
   const detHeadH = 24;
   const detRowH  = 18;
 
-  const detCols = [
-    // ✅ más angosto: "01/12/2025 0800" cabe perfecto
-    { key:'fecha', label:'FECHA', w: 95 },
+  const detHeadH = 24;
+  const detRowH  = 18;
   
-    // ✅ clínica más apretada
-    { key:'clin',  label:'CLÍNICA', w: 120 },
-  
-    // ✅ procedimiento más angosto (igual puede variar, pero no necesita tanto)
-    { key:'proc',  label:'PROCEDIMIENTO', w: 140 },
-  
-    // ✅ el ancho “ganado” se lo damos a PACIENTE
-    { key:'pac',   label:'PACIENTE', w: 210 },
-  
-    { key:'tipo',  label:'TIPO', w: 75 },
-    { key:'monto', label:'MONTO', w: 100 }
-  ];
-
-  const detW = detCols.reduce((a,c)=>a+c.w,0);
-
-  // si detW < boxW, centramos dentro del ancho
+  // ✅ En horizontal: ancho total útil
   const detX = M;
+  const detW = W2 - 2*M;
+  
+  // Columnas base (proporciones)
+  let detCols = [
+    { key:'fecha', label:'FECHA',         w: 110 },
+    { key:'clin',  label:'CLÍNICA',       w: 160 },
+    { key:'proc',  label:'PROCEDIMIENTO', w: 190 },
+    { key:'pac',   label:'PACIENTE',      w: 290 }, // 👈 gana espacio
+    { key:'tipo',  label:'TIPO',          w: 90  },
+    { key:'monto', label:'MONTO',         w: 120 }
+  ];
+  
+  // ✅ Auto-ajuste exacto: para que sumen detW y SIEMPRE cierre el borde derecho
+  {
+    const sum = detCols.reduce((a,c)=>a + c.w, 0);
+    const k = detW / sum;
+    detCols = detCols.map(c => ({ ...c, w: Math.round(c.w * k) }));
+  
+    // ajuste fino por redondeo (dejar exacto)
+    const sum2 = detCols.reduce((a,c)=>a + c.w, 0);
+    const diff = detW - sum2;
+    detCols[detCols.length - 1].w += diff; // corrige en MONTO
+  }
+
 
   // construimos filas (1 fila por línea, ordenadas)
   const lineSort = (a,b)=>{
@@ -608,9 +667,9 @@ async function generarPDFLiquidacionProfesional(agg){
 
   // helper: dibuja header de la tabla detalle en la página dada
   function drawDetalleHeader(page, topY){
-    // marco del header
-    drawBox(page, detX, topY, detW, detHeadH, RENNAT_BLUE, RENNAT_BLUE, 1);
-
+    // ✅ Header VERDE RENNAT
+    drawBox(page, detX, topY, detW, detHeadH, RENNAT_GREEN, RENNAT_GREEN, 1);
+  
     // labels + líneas verticales
     let cx = detX;
     for(let i=0;i<detCols.length;i++){
@@ -619,6 +678,7 @@ async function generarPDFLiquidacionProfesional(agg){
       cx += detCols[i].w;
     }
   }
+
 
   // helper: dibuja 1 fila
   function drawDetalleRow(page, row, topY){
@@ -645,37 +705,6 @@ async function generarPDFLiquidacionProfesional(agg){
 
     drawCellTextRight(page, money(row.monto || 0), xPos, topY, detCols[5].w, detRowH, 9, true, TEXT_MAIN, 8);
   }
-
-  // helper: dibuja bloque “DATOS CLÍNICA” en la página dada yY inferior
-
-  function drawClinicaBox(page){
-    const { emH, emY } = CLINICA_BOX;
-
-    page.drawRectangle({
-      x: M,
-      y: emY,
-      width: W - 2*M,
-      height: emH,
-      borderColor: BORDER_SOFT,
-      borderWidth: 1,
-      color: rgb(1,1,1)
-    });
-
-    drawText(page, 'DATOS CLÍNICA RENNAT', M + 12, emY + emH - 18, 10.5, true, RENNAT_BLUE);
-    drawText(page, 'RUT: 77.460.159-7', M + 12, emY + emH - 36, 9.5, false, TEXT_MUTED);
-    drawText(page, 'RAZÓN SOCIAL: SERVICIOS MÉDICOS GCS PROVIDENCIA SPA.', M + 12, emY + emH - 52, 9.5, false, TEXT_MUTED);
-    drawText(page, 'GIRO: ACTIVIDADES DE HOSPITALES Y CLÍNICAS PRIVADAS.', M + 12, emY + emH - 68, 9.5, false, TEXT_MUTED);
-    drawText(page, 'DIRECCIÓN: AV MANUEL MONTT 427. PISO 10. PROVIDENCIA.', M + 12, emY + emH - 84, 9.5, false, TEXT_MUTED);
-
-    return { emY, emH };
-  }
-
-  // ✅ Constantes para la caja clínica (usar en 2 lugares: cálculo + dibujo)
-  const CLINICA_BOX = {
-    emH: 104,
-    emY: M + 20
-  };
-
 
   // filas ordenadas completas
   const allLinesSorted = [...(agg?.lines || [])].sort(lineSort);
@@ -715,15 +744,19 @@ async function generarPDFLiquidacionProfesional(agg){
 
     // Si no cabe ni una fila -> crear página nueva
     if (canFit <= 0) {
-      currentPage = pdfDoc.addPage([W, H]);
-      cursorTopY = H - M;
 
-      drawBox(currentPage, barX, cursorTopY, barW, barH, RENNAT_BLUE, RENNAT_BLUE, 1);
-      drawText(currentPage, t2, barX + (barW - measure(t2, 13, true)) / 2, cursorTopY - 19, 13, true, rgb(1, 1, 1));
+      currentPage = pdfDoc.addPage([W2, H2]);
+      cursorTopY = H2 - M;
+      
+      // Barra título en horizontal
+      drawBox(currentPage, barX2, cursorTopY, barW2, barH, RENNAT_BLUE, RENNAT_BLUE, 1);
+      drawText(currentPage, t2, barX2 + (barW2 - measure(t2, 13, true)) / 2, cursorTopY - 19, 13, true, rgb(1, 1, 1));
       cursorTopY -= (barH + 12);
-
+      
+      // Subtítulo
       drawText(currentPage, `${nombreMostrar} · ${mesTxt}`, M, cursorTopY, 10, false, TEXT_MUTED);
       cursorTopY -= 12;
+
 
       continue;
     }
@@ -746,15 +779,19 @@ async function generarPDFLiquidacionProfesional(agg){
 
       // Si por reservar la caja quedó 0 filas, forzamos nueva página
       if (canFit <= 0) {
-        currentPage = pdfDoc.addPage([W, H]);
-        cursorTopY = H - M;
 
-        drawBox(currentPage, barX, cursorTopY, barW, barH, RENNAT_BLUE, RENNAT_BLUE, 1);
-        drawText(currentPage, t2, barX + (barW - measure(t2, 13, true)) / 2, cursorTopY - 19, 13, true, rgb(1, 1, 1));
+        currentPage = pdfDoc.addPage([W2, H2]);
+        cursorTopY = H2 - M;
+        
+        // Barra título en horizontal
+        drawBox(currentPage, barX2, cursorTopY, barW2, barH, RENNAT_BLUE, RENNAT_BLUE, 1);
+        drawText(currentPage, t2, barX2 + (barW2 - measure(t2, 13, true)) / 2, cursorTopY - 19, 13, true, rgb(1, 1, 1));
         cursorTopY -= (barH + 12);
-
+        
+        // Subtítulo
         drawText(currentPage, `${nombreMostrar} · ${mesTxt}`, M, cursorTopY, 10, false, TEXT_MUTED);
         cursorTopY -= 12;
+
 
         continue;
       }
@@ -789,23 +826,21 @@ async function generarPDFLiquidacionProfesional(agg){
 
     // avanzamos índice
     idx += slice.length;
-
-    // si ya terminamos todas las filas, ESTA es la última página real -> dibujamos la caja clínica aquí
-    if (idx >= allLinesSorted.length) {
-      drawClinicaBox(currentPage);
-      break;
-    }
-
+    
     // si quedan más -> nueva página
-    currentPage = pdfDoc.addPage([W, H]);
-    cursorTopY = H - M;
 
-    drawBox(currentPage, barX, cursorTopY, barW, barH, RENNAT_BLUE, RENNAT_BLUE, 1);
-    drawText(currentPage, t2, barX + (barW - measure(t2, 13, true)) / 2, cursorTopY - 19, 13, true, rgb(1, 1, 1));
+    currentPage = pdfDoc.addPage([W2, H2]);
+    cursorTopY = H2 - M;
+    
+    // Barra título en horizontal
+    drawBox(currentPage, barX2, cursorTopY, barW2, barH, RENNAT_BLUE, RENNAT_BLUE, 1);
+    drawText(currentPage, t2, barX2 + (barW2 - measure(t2, 13, true)) / 2, cursorTopY - 19, 13, true, rgb(1, 1, 1));
     cursorTopY -= (barH + 12);
-
+    
+    // Subtítulo
     drawText(currentPage, `${nombreMostrar} · ${mesTxt}`, M, cursorTopY, 10, false, TEXT_MUTED);
     cursorTopY -= 12;
+
   }
   
   // ✅ Cerrar generación PDF: guardar bytes y retornar
