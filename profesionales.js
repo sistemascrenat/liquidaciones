@@ -570,7 +570,7 @@ async function saveProfesional(){
   const descuentoRazon = cleanReminder($('descuentoRazon').value);
 
   // ✅ BONOS (lo que te faltaba)
-  const tieneBonoUI = !!$('tieneBono')?.checked;
+  const tieneBonoUI = !!($('tieneBono')?.checked);
   const isCir = isCirujanoByRolPrincipalId(rolPrincipalId);
 
   // Validaciones base
