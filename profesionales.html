@@ -165,8 +165,31 @@
 
         <hr style="border:none;border-top:1px solid rgba(0,0,0,.08);margin:14px 0;"/>
         
+        <!-- ✅ DESCUENTO -->
+        <div class="grid" style="grid-template-columns: 1fr 1fr; gap:12px;">
+          <div>
+            <label style="display:flex;align-items:center;gap:8px;">
+              <input type="checkbox" id="tieneDescuento" style="width:auto;margin:0;">
+              Tiene descuento
+            </label>
+          </div>
+        
+          <div>
+            <label>Descuento UF</label>
+            <input id="descuentoUF" type="number" step="0.01" min="0" value="0"/>
+          </div>
+        
+          <div style="grid-column:1/-1;">
+            <label>Razón del descuento</label>
+            <input id="descuentoRazon" placeholder="Ej: Convenio / Promoción / Ajuste especial"/>
+          </div>
+        </div>
+        
+        <hr style="border:none;border-top:1px solid rgba(0,0,0,.08);margin:14px 0;"/>
+                
         <!-- ✅ BONO (solo Cirujano; el JS lo habilita/oculta según rolPrincipal) -->
         <div class="grid" style="grid-template-columns: 1fr 1fr; gap:12px;">
+
           <div>
             <label style="display:flex;align-items:center;gap:8px;">
               <input type="checkbox" id="tieneBono" style="width:auto;margin:0;">
