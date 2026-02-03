@@ -119,6 +119,7 @@
 
           <div class="right">
             <button class="btn soft" id="btnRecalcular">🔄 Recalcular</button>
+            <button class="btn" id="btnUF">⚙️ UF del mes</button>
             <button class="btn" id="btnCSVResumen">⬇️ CSV Resumen</button>
             <button class="btn" id="btnCSVDetalle">⬇️ CSV Detalle</button>
           </div>
@@ -196,6 +197,38 @@
       </div>
     </div>
   </div>
+
+  <!-- MODAL UF -->
+  <div id="ufBackdrop" class="modalBackdrop" style="display:none;">
+    <div class="modalCard" role="dialog" aria-modal="true" aria-labelledby="ufTitle" style="max-width:520px;">
+      <div class="modalHead">
+        <div>
+          <div class="h1" id="ufTitle" style="margin:0;font-size:18px;">UF del mes</div>
+          <div class="muted" id="ufSub" style="font-size:12px;margin-top:2px;"></div>
+        </div>
+        <button class="iconBtn" id="btnUfClose" type="button" aria-label="Cerrar" title="Cerrar">✖️</button>
+      </div>
+  
+      <div class="modalBody">
+        <div class="grid" style="grid-template-columns:1fr;">
+          <div>
+            <label>Valor UF (CLP)</label>
+            <input id="ufValor" placeholder="Ej: 37000" />
+            <div class="muted" style="font-size:12px;margin-top:6px;">
+              Se guarda en <b>config/uf/{YYYYMM}</b> para que el PDF sea estable y auditable.
+            </div>
+          </div>
+        </div>
+      </div>
+  
+      <div class="modalFoot">
+        <button class="btn" id="btnUfCancelar" type="button">Cancelar</button>
+        <span style="flex:1"></span>
+        <button class="btn primary" id="btnUfGuardar" type="button">Guardar</button>
+      </div>
+    </div>
+  </div>
+
 
   <!-- Sidebar loader -->
   <script type="module" src="layout.js"></script>
