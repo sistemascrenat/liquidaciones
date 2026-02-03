@@ -569,6 +569,11 @@ async function saveProfesional(){
   const descuentoUF = Number($('descuentoUF').value ?? 0) || 0;
   const descuentoRazon = cleanReminder($('descuentoRazon').value);
 
+  // ✅ BONOS (lo que te faltaba)
+  const tieneBonoUI = !!$('tieneBono')?.checked;
+  const isCir = isCirujanoByRolPrincipalId(rolPrincipalId);
+
+  // Validaciones base
   if(!rut){
     toast('Falta RUT');
     $('rut').focus();
@@ -623,13 +628,24 @@ async function saveProfesional(){
     rolPrincipalId: rolPrincipalId || null,
     rolesSecundariosIds: uniq(rolesSecundariosIds),
 
+    // ✅ DESCUENTO
     tieneDescuento,
     descuentoUF,
     descuentoRazon: descuentoRazon || null,
 
+    // ✅ BONO (regla: solo cirujano)
+    // - si es cirujano: respeta checkbox
+    // - si NO es cirujano: fuerza false (se ignora aunque exista guardado)
+    tieneBono: isCir ? tieneBonoUI : false,
+
     actualizadoEl: serverTimestamp(),
     actualizadoPor: state.user?.email || ''
   };
+
+  // ✅ Si deja de ser cirujano, limpiamos override de bonos (para “ignorar”)
+  if(!isCir){
+    payload.bonosTramosOverride = [];
+  }
 
   const isEdit = !!state.editRutId;
   if(!isEdit){
@@ -804,7 +820,8 @@ function exportCSV(){
     'correoPersonal','correoEmpresa',
     'telefono','telefonoEmpresa',
     'rolPrincipalId','rolesSecundariosIds',
-    'tieneDescuento','descuentoUF','descuentoRazon'
+    'tieneDescuento','descuentoUF','descuentoRazon',
+    'tieneBono'
   ];
 
   const items = state.all.map(p=>({
@@ -822,7 +839,8 @@ function exportCSV(){
     rolesSecundariosIds: (p.rolesSecundariosIds || []).join('|'),
     tieneDescuento: p.tieneDescuento ? 'true' : 'false',
     descuentoUF: (Number(p.descuentoUF ?? 0) || 0).toString(),
-    descuentoRazon: p.descuentoRazon || ''
+    descuentoRazon: p.descuentoRazon || '',
+    tieneBono: p.tieneBono ? 'true' : 'false'
   }));
 
   const csv = toCSV(headers, items);
@@ -831,10 +849,10 @@ function exportCSV(){
 }
 
 function plantillaCSV(){
-  const csv = `tipoPersona,estado,nombreProfesional,razonSocial,rut,rutEmpresa,correoPersonal,correoEmpresa,telefono,telefonoEmpresa,rolPrincipalId,rolesSecundariosIds,tieneDescuento,descuentoUF,descuentoRazon
-natural,activo,Juan Pérez,,14.123.456-1,,juanperez@gmail.com,,+56988775599,,r_cirujano,r_asistente_cirujano|r_cirujano,false,0,
-juridica,activo,Andrea González,González SPA,17.321.765-4,77.998.233-1,andrea@correo.com,gonzalezspa@empresa.cl,+56988997755,+56222223333,r_cirujano,r_asistente_cirujano,false,0,
-`;
+  const csv = `tipoPersona,estado,nombreProfesional,razonSocial,rut,rutEmpresa,correoPersonal,correoEmpresa,telefono,telefonoEmpresa,rolPrincipalId,rolesSecundariosIds,tieneDescuento,descuentoUF,descuentoRazon,tieneBono
+  natural,activo,Juan Pérez,,14.123.456-1,,juanperez@gmail.com,,+56988775599,,r_cirujano,r_asistente_cirujano|r_cirujano,false,0,,true
+  juridica,activo,Andrea González,González SPA,17.321.765-4,77.998.233-1,andrea@correo.com,gonzalezspa@empresa.cl,+56988997755,+56222223333,r_cirujano,r_asistente_cirujano,false,0,,true
+  `;
   download('plantilla_profesionales.csv', csv, 'text/csv');
   toast('Plantilla descargada');
 }
@@ -865,7 +883,8 @@ async function importCSV(file){
     rolesSecundariosIds: idx('rolessecundariosids'),
     tieneDescuento: idx('tienedescuento'),
     descuentoUF: idx('descuentouf'),
-    descuentoRazon: idx('descuentorazon')
+    descuentoRazon: idx('descuentorazon'),
+    tieneBono: idx('tienebono')
   };
 
   if(I.rut < 0 || I.nombreProfesional < 0){
@@ -890,33 +909,55 @@ async function importCSV(file){
     const payload = {
       tipoPersona,
       estado: (cleanReminder(I.estado>=0 ? row[I.estado] : 'activo') || 'activo').toLowerCase(),
-
+    
       rut,
       rutId,
-
+    
       nombreProfesional,
       razonSocial: isJ ? (cleanReminder(I.razonSocial>=0 ? row[I.razonSocial] : '') || null) : null,
       rutEmpresa: isJ ? (cleanReminder(I.rutEmpresa>=0 ? row[I.rutEmpresa] : '') || null) : null,
-
+    
       correoPersonal: (cleanReminder(I.correoPersonal>=0 ? row[I.correoPersonal] : '') || null),
       correoEmpresa: isJ ? (cleanReminder(I.correoEmpresa>=0 ? row[I.correoEmpresa] : '') || null) : null,
-
+    
       telefono: (cleanReminder(I.telefono>=0 ? row[I.telefono] : '') || null),
       telefonoEmpresa: isJ ? (cleanReminder(I.telefonoEmpresa>=0 ? row[I.telefonoEmpresa] : '') || null) : null,
-
+    
       rolPrincipalId: (cleanReminder(I.rolPrincipalId>=0 ? row[I.rolPrincipalId] : '') || null),
       rolesSecundariosIds: uniq(
         (cleanReminder(I.rolesSecundariosIds>=0 ? row[I.rolesSecundariosIds] : '') || '')
           .split('|').map(x=>cleanReminder(x)).filter(Boolean)
       ),
-
+    
       tieneDescuento: String(cleanReminder(I.tieneDescuento>=0 ? row[I.tieneDescuento] : 'false') || 'false').toLowerCase() === 'true',
       descuentoUF: Number(cleanReminder(I.descuentoUF>=0 ? row[I.descuentoUF] : '0') || 0) || 0,
       descuentoRazon: (cleanReminder(I.descuentoRazon>=0 ? row[I.descuentoRazon] : '') || null),
-
+    
+      // ✅ BONO: solo cirujano (default true si viene vacío)
+      tieneBono: (() => {
+        const rolPri = cleanReminder(I.rolPrincipalId>=0 ? row[I.rolPrincipalId] : '') || '';
+        const isCir = isCirujanoByRolPrincipalId(rolPri);
+    
+        const tieneBonoCsv = String(cleanReminder(I.tieneBono>=0 ? row[I.tieneBono] : '') || '').toLowerCase();
+    
+        if(!isCir) return false;
+        if(!tieneBonoCsv) return true;          // vacío + cirujano => default true
+        return (tieneBonoCsv === 'true');       // si viene algo, respeta true/false
+      })(),
+    
+      // ✅ Si NO es cirujano, limpiamos override
+      bonosTramosOverride: (() => {
+        const rolPri = cleanReminder(I.rolPrincipalId>=0 ? row[I.rolPrincipalId] : '') || '';
+        const isCir = isCirujanoByRolPrincipalId(rolPri);
+        return isCir ? undefined : [];
+      })(),
+    
       actualizadoEl: serverTimestamp(),
       actualizadoPor: state.user?.email || ''
     };
+    
+    // ⚠️ Limpieza: si bonosTramosOverride quedó undefined, lo removemos del payload
+    if(payload.bonosTramosOverride === undefined) delete payload.bonosTramosOverride;
 
     await setDoc(doc(db,'profesionales',rutId), payload, { merge:true });
     upserts++;
@@ -1129,7 +1170,53 @@ requireAuth({
       if(e.target === $('modalBackdrop')) closeModal();
     });
 
-    $('tipoPersona').addEventListener('change', applyTipoPersonaUI);
+    $('tipoPersona').addEventListener('change', ()=>{
+      applyTipoPersonaUI();
+      applyBonoUI();
+    });
+
+    // ✅ Bono UI reacciona al cambio de rol principal
+    $('rolPrincipal').addEventListener('change', ()=>{
+      applyBonoUI();
+    });
+
+    // ✅ Abrir modal administrar bonos
+    const btnBonos = $('btnBonos');
+    if(btnBonos){
+      btnBonos.addEventListener('click', ()=>{
+        const rutId = state.editRutId;
+        if(!rutId){
+          toast('Guarda el profesional primero para administrar bonos');
+          return;
+        }
+    
+        // ✅ Usa el rol ACTUAL del formulario (no el cache viejo)
+        const rolPrincipalIdNow = cleanReminder($('rolPrincipal').value);
+        if(!isCirujanoByRolPrincipalId(rolPrincipalIdNow)){
+          toast('Bono solo aplica a Médico Cirujano');
+          return;
+        }
+    
+        // tomamos el doc actual desde state.all solo para nombre/rut y tramos override
+        const p = state.all.find(x=>x.rutId===rutId);
+        if(!p){
+          toast('No encontré el profesional en la lista (recarga la página)');
+          return;
+        }
+        
+        // ✅ “pLive” respeta el rol actual del formulario (sin guardar aún)
+        const pLive = {
+          ...p,
+          rolPrincipalId: rolPrincipalIdNow,
+          tieneBono: !!$('tieneBono')?.checked
+        };
+        
+        openBonosModalForProfesional(pLive);
+
+      });
+    }
+
+
 
     // Search (coma=AND)
     $('buscador').addEventListener('input', (e)=>{
@@ -1156,6 +1243,7 @@ requireAuth({
 
     // Load
     await loadRoles();
+    await loadBonosGlobal();
     await loadAll();
   }
 });
