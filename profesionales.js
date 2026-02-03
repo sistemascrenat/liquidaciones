@@ -526,11 +526,12 @@ function setForm(p){
   $('descuentoUF').value = String(Number(p.descuentoUF ?? 0) || 0);
   $('descuentoRazon').value = p.descuentoRazon || '';
 
-  // ✅ BONOS
-  if($('tieneBono')){
-    $('tieneBono').checked = !!p.tieneBono;
+  // ✅ BONOS (blindado)
+  const elTieneBono = $('tieneBono');
+  if(elTieneBono){
+    elTieneBono.checked = !!p.tieneBono;
   }
-
+  
   applyTipoPersonaUI();
   applyBonoUI();
 }
