@@ -8,7 +8,8 @@ import { loadSidebar } from './layout.js';
 await loadSidebar({ active: 'liquidaciones' });
 
 import {
-  collection, collectionGroup, getDocs, query, where
+  collection, collectionGroup, getDocs, query, where,
+  doc, getDoc, setDoc, serverTimestamp
 } from 'https://www.gstatic.com/firebasejs/11.7.3/firebase-firestore.js';
 
 import {
@@ -44,6 +45,26 @@ function escapeHtml(s=''){
     .replaceAll('"','&quot;')
     .replaceAll("'","&#039;");
 }
+
+function yyyymm(ano, mesNum){
+  return `${String(ano)}${String(mesNum).padStart(2,'0')}`;
+}
+
+function pickTramo(tramos, n){
+  const x = Number(n || 0) || 0;
+  if(!Array.isArray(tramos)) return null;
+
+  for(const t of tramos){
+    const min = Number(t?.min ?? 0) || 0;
+    const max = (t?.max === null || t?.max === undefined || t?.max === '') ? null : (Number(t.max) || 0);
+
+    if(x >= min && (max === null ? true : x <= max)){
+      return { min, max, montoCLP: Number(t?.montoCLP ?? 0) || 0 };
+    }
+  }
+  return null;
+}
+
 function asNumberLoose(v){
   const s = (v ?? '').toString().replace(/[^\d]/g,'');
   return Number(s || 0) || 0;
@@ -601,17 +622,86 @@ async function generarPDFLiquidacionProfesional(agg){
   y = y - (headH + usedRows*resRowH) - 16;
 
   // =========================
-  // TOTAL GENERAL (barra verde)
+  // ✅ TOTAL + AJUSTES + TOTAL A PAGAR
   // =========================
-  const totalGeneral = Number(agg?.total || 0) || subtotalByRole.reduce((a,b)=>a+b.sub,0);
-
+  const totalProcedimientos = Number(agg?.ajustes?.totalProcedimientos ?? agg?.total ?? 0) || 0;
+  
+  const descuentoUF  = Number(agg?.ajustes?.descuentoUF || 0) || 0;
+  const descuentoCLP = Number(agg?.ajustes?.descuentoCLP || 0) || 0;
+  
+  const cirugiasComoPrincipal = Number(agg?.ajustes?.cirugiasComoPrincipal || 0) || 0;
+  const bonoCLP = Number(agg?.ajustes?.bonoCLP || 0) || 0;
+  
+  const ufValor = Number(agg?.ajustes?.ufValorCLP || 0) || 0;
+  const totalAPagar = Number(agg?.ajustes?.totalAPagar ?? (totalProcedimientos - descuentoCLP + bonoCLP)) || 0;
+  
+  // 1) TOTAL PROCEDIMIENTOS
   const totalBarH = 28;
   drawBox(page1, M, y, boxW, totalBarH, RENNAT_GREEN, RENNAT_GREEN, 1);
-
-  drawCellText(page1, 'TOTAL GENERAL', M, y, totalBarH, 12, true, rgb(1,1,1), 10);
-  drawCellTextRight(page1, money(totalGeneral), M + (boxW - 200), y, 200, totalBarH, 13, true, rgb(1,1,1), 10);
-
+  drawCellText(page1, 'TOTAL PROCEDIMIENTOS', M, y, totalBarH, 12, true, rgb(1,1,1), 10);
+  drawCellTextRight(page1, money(totalProcedimientos), M + (boxW - 200), y, 200, totalBarH, 13, true, rgb(1,1,1), 10);
   y = y - totalBarH - 10;
+  
+  // 2) AJUSTES (solo si hay algo que mostrar)
+  const ajustesRows = [];
+  if(descuentoUF > 0 && descuentoCLP > 0 && ufValor > 0){
+    ajustesRows.push({
+      item: `DESCUENTO (${descuentoUF} UF · UF ${money(ufValor)})`,
+      cant: 1,
+      sub: -descuentoCLP
+    });
+  }
+  if(bonoCLP > 0){
+    ajustesRows.push({
+      item: `BONO CIRUJANO (${cirugiasComoPrincipal} cirugías)`,
+      cant: 1,
+      sub: bonoCLP
+    });
+  }
+  
+  if(ajustesRows.length){
+    const headH2 = 22;
+    const rowH2  = 20;
+    const tH = headH2 + ajustesRows.length * rowH2;
+  
+    drawBox(page1, M, y, boxW, tH, rgb(1,1,1), BORDER_SOFT, 1);
+  
+    drawBox(page1, M, y, boxW, headH2, RENNAT_BLUE, RENNAT_BLUE, 1);
+    drawCellText(page1, 'AJUSTES', M, y, headH2, 10, true, rgb(1,1,1), 8);
+  
+    const cCant = 110;
+    const cSub  = 150;
+    const cItem = boxW - cCant - cSub;
+  
+    drawVLine(page1, M + cItem, y, tH, 1, BORDER_SOFT);
+    drawVLine(page1, M + cItem + cCant, y, tH, 1, BORDER_SOFT);
+  
+    drawCellTextRight(page1, 'CANTIDAD', M + cItem, y, cCant, headH2, 9, true, rgb(1,1,1), 8);
+    drawCellTextRight(page1, 'SUBTOTAL', M + cItem + cCant, y, cSub, headH2, 9, true, rgb(1,1,1), 8);
+  
+    for(let i=0;i<ajustesRows.length;i++){
+      const r = ajustesRows[i];
+      const yTop = y - headH2 - i*rowH2;
+  
+      drawHLine2(page1, M, yTop, boxW, 1, BORDER_SOFT);
+  
+      drawCellText(page1, wrapClip(r.item, 60), M, yTop, rowH2, 9, true, TEXT_MAIN, 8);
+      drawCellTextRight(page1, String(r.cant), M + cItem, yTop, cCant, rowH2, 9, true, TEXT_MAIN, 8);
+      drawCellTextRight(page1, money(r.sub), M + cItem + cCant, yTop, cSub, rowH2, 9, true, TEXT_MAIN, 8);
+    }
+  
+    drawHLine2(page1, M, y - tH, boxW, 1, BORDER_SOFT);
+  
+    y = y - tH - 10;
+  }
+  
+  // 3) TOTAL A PAGAR
+  drawBox(page1, M, y, boxW, totalBarH, RENNAT_GREEN, RENNAT_GREEN, 1);
+  drawCellText(page1, 'TOTAL A PAGAR', M, y, totalBarH, 12, true, rgb(1,1,1), 10);
+  drawCellTextRight(page1, money(totalAPagar), M + (boxW - 200), y, 200, totalBarH, 13, true, rgb(1,1,1), 10);
+  
+  y = y - totalBarH - 10;
+
 
   // ✅ Caja DATOS CLÍNICA en Página 1
   const clinH = drawClinicaBoxPage1(page1, y);
@@ -926,18 +1016,22 @@ const state = {
   clinicasByName: new Map(),      // normalize(nombre) -> C001
 
   // Catálogo profesionales (TU esquema real):
-  // docId = rutId (sin guiones, sin ceros) normalmente
-  // campos: nombreProfesional, razonSocial, rut, rutEmpresa, tipoPersona, estado...
   profesionalesByName: new Map(), // normalize(nombreProfesional) -> profDoc
   profesionalesById: new Map(),   // rutId string -> profDoc
 
   procedimientosByName: new Map(), // normalize(nombre) -> procDoc
   procedimientosById: new Map(),   // id -> procDoc
 
+  // ✅ NUEVO: Config UF y bonos
+  ufDocId: '',             // YYYYMM
+  ufValorCLP: 0,           // UF CLP del mes
+  bonosTramosGlobal: [],   // config/bonos.tramos
+
   prodRows: [],              // docs items del mes
   liquidResumen: [],
   lastDetailExportLines: []
 };
+
 
 /* =========================
    Firestore refs
@@ -999,17 +1093,23 @@ async function loadProfesionales(){
     const doc = {
       id: String(rutId || d.id),
       rutId: String(rutId || d.id),
-
+    
       // Siempre persona (titular)
       nombreProfesional: toUpperSafe(nombreProfesional || ''),
       rut: rutPersonal,
-
+    
       // Empresa (si aplica)
       razonSocial: toUpperSafe(razonSocial || ''),
       rutEmpresa: rutEmpresa,
-
+    
       tipoPersona: tipoPersona || '',
-      estado
+      estado,
+    
+      // ✅ NUEVO: Liquidaciones (UF/bono/descuento)
+      rolPrincipal: cleanReminder(x.rolPrincipal) || '', // ej: "r_cirujano"
+      tieneBono: !!x.tieneBono, // solo relevante si rolPrincipal = r_cirujano
+      bonosTramosOverride: Array.isArray(x.bonosTramosOverride) ? x.bonosTramosOverride : null,
+      descuentoUF: Number(x.descuentoUF || 0) || 0 // si 0 => no mostrar
     };
 
     byId.set(String(doc.id), doc);
@@ -1046,6 +1146,52 @@ async function loadProcedimientos(){
 
   state.procedimientosByName = byName;
   state.procedimientosById = byId;
+}
+
+/* =========================
+   Config UF + Bonos
+========================= */
+async function loadBonosConfig(){
+  try{
+    const ref = doc(db, 'config', 'bonos');
+    const snap = await getDoc(ref);
+    const x = snap.exists() ? (snap.data() || {}) : {};
+    state.bonosTramosGlobal = Array.isArray(x.tramos) ? x.tramos : [];
+  }catch(e){
+    console.warn('No se pudo leer config/bonos', e);
+    state.bonosTramosGlobal = [];
+  }
+}
+
+async function loadUFDelMes(){
+  const id = yyyymm(state.ano, state.mesNum);
+  state.ufDocId = id;
+
+  try{
+    const ref = doc(db, 'config', 'uf', id);
+    const snap = await getDoc(ref);
+    const x = snap.exists() ? (snap.data() || {}) : {};
+    state.ufValorCLP = Number(x.ufValorCLP || 0) || 0;
+  }catch(e){
+    console.warn('No se pudo leer config/uf/'+id, e);
+    state.ufValorCLP = 0;
+  }
+}
+
+async function saveUFDelMes(nuevoValorCLP){
+  const id = yyyymm(state.ano, state.mesNum);
+  state.ufDocId = id;
+
+  const ref = doc(db, 'config', 'uf', id);
+  const payload = {
+    ufValorCLP: Number(nuevoValorCLP || 0) || 0,
+    fecha: `${state.ano}-${String(state.mesNum).padStart(2,'0')}-01`,
+    actualizadoEl: serverTimestamp(),
+    actualizadoPor: state.user?.email || ''
+  };
+
+  await setDoc(ref, payload, { merge:true });
+  state.ufValorCLP = payload.ufValorCLP;
 }
 
 /* =========================
@@ -1237,6 +1383,8 @@ function buildLiquidaciones(){
     const procRealId = procDoc?.id || procId || '';
 
     const procedimientoExists = !!procDoc;
+    const procedimientoTipo = (procDoc?.tipo || '').toLowerCase().trim(); // "cirugia" | ...
+
 
     // Tipo paciente
     const pacienteTipo = tipoPacienteNorm(
@@ -1315,6 +1463,7 @@ function buildLiquidaciones(){
         procedimientoId: procRealId,
         procedimientoNombre: procLabel,
         procedimientoExists,
+        procedimientoTipo,
 
         tipoPaciente: pacienteTipo,
         pacienteNombre,
@@ -1362,25 +1511,45 @@ function buildLiquidaciones(){
       : `DESCONOCIDO:${normalize(ln.profesionalNombre)}`;
 
     if(!map.has(key)){
+
       map.set(key, {
         key,
-
+      
         // Datos de UI:
         nombre: ln.profesionalNombre,
         rut: ln.profesionalRut || '',
         tipoPersona: ln.tipoPersona || '',
-
+      
         empresaNombre: ln.empresaNombre || '',
         empresaRut: ln.empresaRut || '',
-
+      
+        // ✅ NUEVO: flags profesionales (para bono/descuento)
+        rolPrincipal: '',
+        tieneBono: false,
+        bonosTramosOverride: null,
+        descuentoUF: 0,
+      
+        // ✅ NUEVO: ajustes calculados (se setean al final)
+        ajustes: {
+          ufValorCLP: 0,
+          descuentoUF: 0,
+          descuentoCLP: 0,
+          cirugiasComoPrincipal: 0,
+          bonoCLP: 0,
+          bonoTramo: null,
+          totalProcedimientos: 0,
+          totalAPagar: 0
+        },
+      
         casos: 0,
         total: 0,
-
+      
         alertasCount: 0,
         pendientesCount: 0,
-
+      
         lines: []
       });
+
     }
 
     const agg = map.get(key);
@@ -1396,6 +1565,18 @@ function buildLiquidaciones(){
     if(!agg.empresaNombre && ln.empresaNombre) agg.empresaNombre = ln.empresaNombre;
     if(!agg.empresaRut && ln.empresaRut) agg.empresaRut = ln.empresaRut;
 
+    // ✅ Traer flags del profesional desde catálogo (si existe)
+    if(ln.profesionalId && state.profesionalesById.has(String(ln.profesionalId))){
+      const pd = state.profesionalesById.get(String(ln.profesionalId));
+      if(pd){
+        if(!agg.rolPrincipal && pd.rolPrincipal) agg.rolPrincipal = pd.rolPrincipal;
+        if(agg.tieneBono === false && pd.tieneBono === true) agg.tieneBono = true;
+        if(!agg.bonosTramosOverride && pd.bonosTramosOverride) agg.bonosTramosOverride = pd.bonosTramosOverride;
+        if(!agg.descuentoUF && pd.descuentoUF) agg.descuentoUF = pd.descuentoUF;
+      }
+    }
+
+
     agg.lines.push(ln);
   }
 
@@ -1403,8 +1584,51 @@ function buildLiquidaciones(){
     let status = 'ok';
     if(x.alertasCount > 0) status = 'alerta';
     else if(x.pendientesCount > 0) status = 'pendiente';
+  
+    // =========================
+    // ✅ AJUSTES (Descuento UF + Bono)
+    // =========================
+    const totalProcedimientos = Number(x.total || 0) || 0;
+  
+    // DESCUENTO (si descuentoUF > 0 y ufValorCLP > 0)
+    const uf = Number(state.ufValorCLP || 0) || 0;
+    const descuentoUF = Number(x.descuentoUF || 0) || 0;
+    const descuentoCLP = (descuentoUF > 0 && uf > 0) ? Math.round(descuentoUF * uf) : 0;
+  
+    // BONO (solo si es cirujano principal + tieneBono)
+    const cirugiasComoPrincipal = (x.rolPrincipal === 'r_cirujano')
+      ? (x.lines || []).filter(l => l.roleId === 'r_cirujano' && (l.procedimientoTipo === 'cirugia')).length
+      : 0;
+  
+    let bonoCLP = 0;
+    let bonoTramo = null;
+  
+    const aplicaBono = (x.rolPrincipal === 'r_cirujano') && (x.tieneBono === true) && (cirugiasComoPrincipal > 0);
+    if(aplicaBono){
+      const tramos = Array.isArray(x.bonosTramosOverride) ? x.bonosTramosOverride : state.bonosTramosGlobal;
+      const tramo = pickTramo(tramos, cirugiasComoPrincipal);
+      if(tramo && (Number(tramo.montoCLP || 0) > 0)){
+        bonoCLP = Number(tramo.montoCLP || 0) || 0;
+        bonoTramo = tramo;
+      }
+    }
+  
+    const totalAPagar = Math.max(0, totalProcedimientos - descuentoCLP + bonoCLP);
+  
+    x.ajustes = {
+      ufValorCLP: uf,
+      descuentoUF,
+      descuentoCLP,
+      cirugiasComoPrincipal,
+      bonoCLP,
+      bonoTramo,
+      totalProcedimientos,
+      totalAPagar
+    };
+  
     return { ...x, status };
   });
+
 
   // ORDEN: ALERTA arriba, luego PENDIENTE, luego OK (dentro por TOTAL desc)
   const prio = (st)=> st === 'alerta' ? 0 : (st === 'pendiente' ? 1 : 2);
@@ -1841,6 +2065,10 @@ async function recalc(){
     $('btnRecalcular').disabled = true;
 
     await loadProduccionMes();
+
+    // ✅ Cargar UF del mes seleccionado (config/uf/YYYYMM)
+    await loadUFDelMes();
+
     buildLiquidaciones();
     paint();
 
@@ -1851,6 +2079,7 @@ async function recalc(){
     $('btnRecalcular').disabled = false;
   }
 }
+
 
 /* =========================
    Main Auth
@@ -1875,6 +2104,34 @@ requireAuth({
     $('btnRecalcular').addEventListener('click', recalc);
     $('btnCSVResumen').addEventListener('click', exportResumenCSV);
     $('btnCSVDetalle').addEventListener('click', exportDetalleCSV);
+
+    // ✅ UF del mes (si existe el botón/modal en HTML)
+    $('btnUF')?.addEventListener('click', ()=>{
+      $('ufBackdrop').style.display = 'grid';
+      $('ufSub').textContent = `Mes: ${monthNameEs(state.mesNum)} ${state.ano} · Doc: config/uf/${yyyymm(state.ano, state.mesNum)}`;
+      $('ufValor').value = state.ufValorCLP ? String(state.ufValorCLP) : '';
+    });
+    
+    $('btnUfClose')?.addEventListener('click', ()=> $('ufBackdrop').style.display = 'none');
+    $('btnUfCancelar')?.addEventListener('click', ()=> $('ufBackdrop').style.display = 'none');
+    $('ufBackdrop')?.addEventListener('click', (e)=>{
+      if(e.target === $('ufBackdrop')) $('ufBackdrop').style.display = 'none';
+    });
+    
+    $('btnUfGuardar')?.addEventListener('click', async ()=>{
+      try{
+        const v = asNumberLoose($('ufValor').value);
+        if(!v || v < 1000){ toast('UF inválida (ej: 37000)'); return; }
+        await saveUFDelMes(v);
+        toast('UF guardada');
+        $('ufBackdrop').style.display = 'none';
+        await recalc();
+      }catch(e){
+        console.error(e);
+        toast('No se pudo guardar UF (ver consola)');
+      }
+    });
+
 
     $('btnClose').addEventListener('click', closeDetalle);
     $('btnCerrar2').addEventListener('click', closeDetalle);
@@ -1905,8 +2162,10 @@ requireAuth({
       loadRoles(),
       loadClinicas(),
       loadProfesionales(),
-      loadProcedimientos()
+      loadProcedimientos(),
+      loadBonosConfig()
     ]);
+
 
     await recalc();
   }
