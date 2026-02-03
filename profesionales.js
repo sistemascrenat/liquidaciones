@@ -1210,7 +1210,7 @@ requireAuth({
         const pLive = {
           ...p,
           rolPrincipalId: rolPrincipalIdNow,
-          tieneBono: !!$('tieneBono')?.checked
+          tieneBono: !!($('tieneBono')?.checked)
         };
         
         openBonosModalForProfesional(pLive);
