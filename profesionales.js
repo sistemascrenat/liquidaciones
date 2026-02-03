@@ -13,7 +13,7 @@ import { loadSidebar } from './layout.js';
 
 
 import {
-  collection, getDocs, setDoc, deleteDoc,
+  collection, getDocs, getDoc, setDoc, deleteDoc,
   doc, serverTimestamp
 } from 'https://www.gstatic.com/firebasejs/11.7.3/firebase-firestore.js';
 
@@ -25,7 +25,11 @@ const state = {
   all: [],
   editRutId: null,
   q: '',                 // ahora guardamos el texto crudo, no normalizado
-  rolesCatalog: []       // [{id, nombre}]
+  rolesCatalog: [],      // [{id, nombre}]
+
+  // ✅ BONOS
+  bonosGlobal: null,     // { tramos: [{min, max, montoCLP}] }
+  _bonosEditingRutId: null // profesional actualmente en “Administrar bonos”
 };
 
 const $ = (id)=> document.getElementById(id);
@@ -64,6 +68,9 @@ function rutToId(rut){
 const colProfesionales = collection(db, 'profesionales');
 const colRoles = collection(db, 'roles');
 
+// ✅ Tabla global de bonos (manda como default)
+const docBonosConfig = doc(db, 'config', 'bonos');
+
 /* =========================
    Modal
 ========================= */
@@ -83,6 +90,7 @@ function openModal(mode, p=null){
   }
 
   applyTipoPersonaUI();
+  applyBonoUI();
   $('nombreProfesional').focus();
 }
 
@@ -102,6 +110,39 @@ function applyTipoPersonaUI(){
     el.disabled = !isJ;
     el.style.opacity = isJ ? '1' : '.55';
     if(!isJ) el.value = '';
+  }
+}
+
+function applyBonoUI(){
+  const rolPrincipalId = cleanReminder($('rolPrincipal').value);
+  const isCir = isCirujanoByRolPrincipalId(rolPrincipalId);
+
+  const cb = $('tieneBono');
+  const btn = $('btnBonos');
+
+  if(!cb || !btn) return;
+
+  if(isCir){
+    cb.disabled = false;
+    cb.style.opacity = '1';
+
+    // ✅ default true SOLO si es cirujano y no existe valor explícito en edición
+    // Si estamos creando, viene sin datos => true.
+    // Si estamos editando y el doc no tiene campo => true (lo resolverá normalizeProfesionalDoc)
+    if(state.editRutId === null){
+      cb.checked = true;
+    }
+
+    btn.disabled = false;
+    btn.style.display = 'inline-flex';
+  }else{
+    // ✅ Si deja de ser cirujano: se fuerza false (aunque quede guardado, se ignora)
+    cb.checked = false;
+    cb.disabled = true;
+    cb.style.opacity = '.55';
+
+    btn.disabled = true;
+    btn.style.display = 'none';
   }
 }
 
@@ -168,6 +209,35 @@ function roleNameById(id){
 }
 
 /* =========================
+   BONOS — reglas
+========================= */
+
+// ⚠️ Ajuste si tu rol ID real no es este.
+// En tu plantilla usas r_cirujano, así que asumo ese.
+const ROLE_CIRUJANO_ID = 'r_cirujano';
+
+// Escala por defecto (la que pediste)
+function bonosDefaultTramos(){
+  return [
+    { min: 11, max: 15, montoCLP: 1000000 },
+    { min: 16, max: 20, montoCLP: 1500000 },
+    { min: 21, max: 30, montoCLP: 3000000 },
+    { min: 31, max: null, montoCLP: 6000000 } // null = sin tope
+  ];
+}
+
+function isCirujanoByRolPrincipalId(rolPrincipalId){
+  return (rolPrincipalId || '') === ROLE_CIRUJANO_ID;
+}
+
+// ✅ “manda”: Global como default, salvo override del profesional
+function getBonosTramosEffective(p){
+  return (p?.bonosTramosOverride?.length ? p.bonosTramosOverride :
+    (state.bonosGlobal?.tramos?.length ? state.bonosGlobal.tramos : bonosDefaultTramos())
+  );
+}
+
+/* =========================
    Loaders
 ========================= */
 async function loadRoles(){
@@ -184,12 +254,36 @@ async function loadRoles(){
   paintRolesUI();
 }
 
+async function loadBonosGlobal(){
+  const snap = await getDoc(docBonosConfig);
+  if(!snap.exists()){
+    // si no existe config global, se asume la default (sin escribir aún)
+    state.bonosGlobal = { tramos: bonosDefaultTramos() };
+    return;
+  }
+  const x = snap.data() || {};
+  const tramos = Array.isArray(x.tramos) ? x.tramos : [];
+  state.bonosGlobal = { tramos: tramos.length ? tramos : bonosDefaultTramos() };
+}
+
 function normalizeProfesionalDoc(id, x){
   const tipoPersona = (cleanReminder(x.tipoPersona) || '').toLowerCase() || 'natural';
   const isJ = (tipoPersona === 'juridica');
 
   const rut = cleanReminder(x.rut);
   const rutId = cleanReminder(x.rutId) || id || rutToId(rut);
+
+  const rolPrincipalId = cleanReminder(x.rolPrincipalId) || '';
+  const isCir = isCirujanoByRolPrincipalId(rolPrincipalId);
+
+  // ✅ “default si no existe valor explícito”
+  // - si es cirujano y no existe el campo: true
+  // - si NO es cirujano: false (forzado/ignorado aunque exista guardado)
+  const rawTieneBono = (x.tieneBono === undefined || x.tieneBono === null)
+    ? (isCir ? true : false)
+    : !!x.tieneBono;
+
+  const tieneBono = isCir ? rawTieneBono : false;
 
   return {
     rutId,
@@ -217,14 +311,19 @@ function normalizeProfesionalDoc(id, x){
     giro: cleanReminder(x.giro) || '',
 
     // roles
-    rolPrincipalId: cleanReminder(x.rolPrincipalId) || '',
+    rolPrincipalId,
     rolesSecundariosIds: Array.isArray(x.rolesSecundariosIds) ? x.rolesSecundariosIds.filter(Boolean) : [],
 
     // descuentos
     tieneDescuento: !!x.tieneDescuento,
     descuentoUF: Number(x.descuentoUF ?? 0) || 0,
-    descuentoRazon: (x.descuentoRazon ?? '') ? cleanReminder(x.descuentoRazon) : ''
+    descuentoRazon: (x.descuentoRazon ?? '') ? cleanReminder(x.descuentoRazon) : '',
+
+    // ✅ BONOS
+    tieneBono,
+    bonosTramosOverride: Array.isArray(x.bonosTramosOverride) ? x.bonosTramosOverride : []
   };
+
 }
 
 async function loadAll(){
@@ -393,6 +492,10 @@ function clearForm(){
   $('tieneDescuento').checked = false;
   $('descuentoUF').value = '0';
   $('descuentoRazon').value = '';
+
+  // ✅ BONOS
+  if($('tieneBono')) $('tieneBono').checked = false; // luego applyBonoUI lo deja true si cirujano
+
 }
 
 function setForm(p){
@@ -423,8 +526,15 @@ function setForm(p){
   $('descuentoUF').value = String(Number(p.descuentoUF ?? 0) || 0);
   $('descuentoRazon').value = p.descuentoRazon || '';
 
+  // ✅ BONOS
+  if($('tieneBono')){
+    $('tieneBono').checked = !!p.tieneBono;
+  }
+
   applyTipoPersonaUI();
+  applyBonoUI();
 }
+
 
 /* =========================
    Save / Delete
@@ -815,6 +925,186 @@ async function importCSV(file){
   toast(`Import listo: ${upserts} guardados / ${skipped} omitidos`);
   await loadAll();
 }
+
+/* =========================
+   BONOS — Modal administrar
+========================= */
+
+// Crea el modal una sola vez (DOM)
+function ensureBonosModalDOM(){
+  if(document.getElementById('bonosBackdrop')) return;
+
+  const div = document.createElement('div');
+  div.id = 'bonosBackdrop';
+  div.className = 'modalBackdrop';
+  div.style.display = 'none';
+  div.innerHTML = `
+    <div class="modalCard" style="max-width:760px;">
+      <div class="modalHead">
+        <div>
+          <div class="modalTitle">Administrar bonos</div>
+          <div class="modalSub" id="bonosSub">Escala por tramo de cirugías</div>
+        </div>
+        <button class="iconBtn" type="button" id="btnBonosClose" title="Cerrar">✖️</button>
+      </div>
+
+      <div class="modalBody">
+        <div class="mini muted" style="margin-bottom:10px;">
+          Regla: aplica solo a <b>Médico Cirujano</b>. Global manda como default, salvo override del profesional.
+        </div>
+
+        <table class="table" style="width:100%;">
+          <thead>
+            <tr>
+              <th>Desde</th>
+              <th>Hasta</th>
+              <th>Monto (CLP)</th>
+            </tr>
+          </thead>
+          <tbody id="bonosTbody"></tbody>
+        </table>
+
+        <div class="mini muted" style="margin-top:10px;">
+          Nota: “Hasta” vacío significa “sin tope” (31+).
+        </div>
+      </div>
+
+      <div class="modalFoot">
+        <button class="btn" type="button" id="btnBonosCancelar">Cancelar</button>
+        <div style="flex:1;"></div>
+        <button class="btn" type="button" id="btnBonosGuardar">Guardar</button>
+        <button class="btn primary" type="button" id="btnBonosGuardarTodos">Guardar para todos</button>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(div);
+
+  // wire close
+  const close = ()=> closeBonosModal();
+  document.getElementById('btnBonosClose').addEventListener('click', close);
+  document.getElementById('btnBonosCancelar').addEventListener('click', close);
+  div.addEventListener('click', (e)=>{ if(e.target === div) close(); });
+
+  document.getElementById('btnBonosGuardar').addEventListener('click', saveBonosOnlyThis);
+  document.getElementById('btnBonosGuardarTodos').addEventListener('click', saveBonosForAll);
+}
+
+function paintBonosTable(tramos){
+  const tb = document.getElementById('bonosTbody');
+  tb.innerHTML = '';
+
+  (tramos || []).forEach((t, i)=>{
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td><input class="inp" data-k="min" data-i="${i}" value="${Number(t.min ?? 0) || 0}"></td>
+      <td><input class="inp" data-k="max" data-i="${i}" value="${t.max===null || t.max===undefined ? '' : (Number(t.max)||'')}"></td>
+      <td><input class="inp" data-k="montoCLP" data-i="${i}" value="${Number(t.montoCLP ?? 0) || 0}"></td>
+    `;
+    tb.appendChild(tr);
+  });
+}
+
+function readBonosTable(){
+  const tb = document.getElementById('bonosTbody');
+  const inputs = tb.querySelectorAll('input[data-k][data-i]');
+  const map = new Map(); // i -> obj
+
+  inputs.forEach(inp=>{
+    const i = Number(inp.getAttribute('data-i'));
+    const k = inp.getAttribute('data-k');
+    if(!map.has(i)) map.set(i, {});
+    map.get(i)[k] = inp.value;
+  });
+
+  const tramos = [];
+  [...map.keys()].sort((a,b)=>a-b).forEach(i=>{
+    const o = map.get(i) || {};
+    const min = Number(o.min ?? 0) || 0;
+    const maxRaw = (o.max ?? '').toString().trim();
+    const max = maxRaw ? (Number(maxRaw) || null) : null;
+    const montoCLP = Number(o.montoCLP ?? 0) || 0;
+
+    if(min <= 0 || montoCLP <= 0) return; // omitimos filas inválidas
+    tramos.push({ min, max, montoCLP });
+  });
+
+  // Orden por min asc
+  tramos.sort((a,b)=> (a.min||0) - (b.min||0));
+  return tramos.length ? tramos : bonosDefaultTramos();
+}
+
+function openBonosModalForProfesional(p){
+  ensureBonosModalDOM();
+
+  // Solo cirujano
+  if(!isCirujanoByRolPrincipalId(p?.rolPrincipalId)){
+    toast('Bono solo aplica a Médico Cirujano');
+    return;
+  }
+
+  state._bonosEditingRutId = p.rutId;
+
+  const main = (p?.tipoPersona === 'juridica' && p?.razonSocial) ? p.razonSocial : (p?.nombreProfesional || '');
+  document.getElementById('bonosSub').textContent = `Profesional: ${main} · ${p?.rut || ''}`;
+
+  // Cargar tramos efectivos (override si existe; si no, global; si no, default)
+  const tramos = getBonosTramosEffective(p);
+  paintBonosTable(tramos);
+
+  document.getElementById('bonosBackdrop').style.display = 'grid';
+}
+
+function closeBonosModal(){
+  const el = document.getElementById('bonosBackdrop');
+  if(el) el.style.display = 'none';
+  state._bonosEditingRutId = null;
+}
+
+async function saveBonosOnlyThis(){
+  const rutId = state._bonosEditingRutId;
+  if(!rutId) return;
+
+  const p = state.all.find(x=>x.rutId===rutId);
+  if(!p) return;
+
+  // si deja de ser cirujano, no permite
+  if(!isCirujanoByRolPrincipalId(p.rolPrincipalId)){
+    toast('No aplica: no es Médico Cirujano');
+    closeBonosModal();
+    return;
+  }
+
+  const tramos = readBonosTable();
+
+  await setDoc(doc(db,'profesionales',rutId), {
+    bonosTramosOverride: tramos,
+    actualizadoEl: serverTimestamp(),
+    actualizadoPor: state.user?.email || ''
+  }, { merge:true });
+
+  toast('Bonos guardados para este profesional');
+  closeBonosModal();
+  await loadAll();
+}
+
+async function saveBonosForAll(){
+  const tramos = readBonosTable();
+
+  await setDoc(docBonosConfig, {
+    tramos,
+    actualizadoEl: serverTimestamp(),
+    actualizadoPor: state.user?.email || ''
+  }, { merge:true });
+
+  // actualiza cache local
+  state.bonosGlobal = { tramos };
+
+  toast('Bonos guardados para TODOS (global)');
+  closeBonosModal();
+  await loadAll();
+}
+
 
 /* =========================
    Boot
