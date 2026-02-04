@@ -2277,6 +2277,16 @@ requireAuth({
       loadBonosConfig()
     ]);
 
+    // 🔎 DEBUG PROFESIONALES (temporal)
+    // Prueba matching por ID/RUT en varios formatos:
+    console.log('DBG profesionalesById size =', state.profesionalesById.size);
+    
+    // Cambia estos 3 por un RUT real que te esté fallando:
+    console.log('TEST byId "14145305" =>', state.profesionalesById.get('14145305'));
+    console.log('TEST byId "14.145.305-K" =>', state.profesionalesById.get('14.145.305-K'));
+    console.log('TEST byId "14145305K" =>', state.profesionalesById.get('14145305K'));
+
+
 
     await recalc();
   }
