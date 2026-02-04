@@ -430,29 +430,18 @@ async function generarPDFLiquidacionProfesional(agg){
   const boxW = W - 2*M;
   const rowH = 22;
 
-  // 4 filas: Nro Liquidación (opcional si lo tienes), RUT Pago, Nombre, Profesión
-  // Como acá no tienes nroLiquidacion/ profesion, mantenemos “Mes/Año” y “Tipo Persona”.
-  // Puedes ajustar después si agregas campos reales.
-  // ✅ Siempre mostramos titular (persona) aunque el pago sea a empresa
-  const dataRows = [
-    ['Mes/Año', String(mesTxt).toUpperCase()],
-    ['Profesional', String(profNombre || '—').toUpperCase()],
-    ['RUT Profesional', String(profRut || '—').toUpperCase()]
-    ['Tipo de Persona', String(tipoMostrar).toUpperCase()]
-  ];
+  const dataRows = [];
   
-  // ✅ Si es jurídica, mostramos también empresa (en la misma tabla)
-  if (esJuridica) {
-    dataRows.push(
-      ['Empresa', String(empresaNombre || '—').toUpperCase()],
-      ['RUT Empresa', String(empresaRut || '—').toUpperCase()]
-    );
+  dataRows.push(['Mes/Año', String(mesTxt).toUpperCase()]);
+  dataRows.push(['Profesional', String(profNombre || '—').toUpperCase()]);
+  dataRows.push(['RUT Profesional', String(profRut || '—').toUpperCase()]);
+  
+  if(esJuridica){
+    dataRows.push(['Empresa', String(empresaNombre || '—').toUpperCase()]);
+    dataRows.push(['RUT Empresa', String(empresaRut || '—').toUpperCase()]);
   }
   
-  // ✅ Y mantenemos el bloque de “pago”
-  dataRows.push(
-   
-  );
+  dataRows.push(['Tipo', String(tipoMostrar).toUpperCase()]);
 
 
   // altura tabla
@@ -471,15 +460,18 @@ async function generarPDFLiquidacionProfesional(agg){
   // líneas horizontales y texto
   for(let r=0; r<dataRows.length; r++){
     const yRowTop = y - r*rowH;
-
+  
     if(r > 0) drawHLine2(page1, M, yRowTop, boxW, 1, BORDER_SOFT);
-
-    // etiqueta (izquierda)
-    drawCellText(page1, dataRows[r][0], M, yRowTop, rowH, 10, false, TEXT_MAIN, 8);
-
-    // valor (derecha) – destacado levemente
-    drawCellText(page1, wrapClip(dataRows[r][1], 50), M + c1, yRowTop, rowH, 10, true, TEXT_MAIN, 8);
+  
+    // ✅ Blindado: si por cualquier razón viene undefined, no rompe
+    const row = Array.isArray(dataRows[r]) ? dataRows[r] : ['',''];
+    const label = row[0] ?? '';
+    const value = row[1] ?? '';
+  
+    drawCellText(page1, label, M, yRowTop, rowH, 10, false, TEXT_MAIN, 8);
+    drawCellText(page1, wrapClip(value, 50), M + c1, yRowTop, rowH, 10, true, TEXT_MAIN, 8);
   }
+
 
   y = y - dataH - 16;
 
@@ -765,7 +757,7 @@ async function generarPDFLiquidacionProfesional(agg){
   y2 -= (barH + 12);
 
   // Subtítulo
-  drawText(page2, `${nombreMostrar} · ${mesTxt}`, M, y2, 10, false, TEXT_MUTED);
+  drawText(page2, `${profNombre || '—'} · ${mesTxt}`, M, y2, 10, false, TEXT_MUTED);
   y2 -= 12;
 
 
