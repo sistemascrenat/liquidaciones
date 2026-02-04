@@ -1053,8 +1053,17 @@ function resolveOneItem(n){
     // 2) match inteligente (exacto / apellido / parcial con ranking)
     const candidates = findProfesionalesCandidates(nameCsv);
     
-    if(candidates.length === 1){
-      resolved[r.out] = candidates[0].id;
+    /*
+      ✅ REGLA NUEVA (ANTI-CRUCE):
+      - Auto-asignar SOLO si el match es EXACTO por nombre completo normalizado
+        y además es ÚNICO.
+      - Cualquier match parcial (apellido / tokens / ranking) => queda pendiente.
+    */
+    const norm = normalizeProName(nameCsv);
+    const exactList = state.catalogs.profByNorm.get(norm) || [];
+    
+    if(exactList.length === 1){
+      resolved[r.out] = exactList[0].id;
       resolved[r.ok] = true;
     } else {
       const pendKey = profKey(r.role, nameCsv);
@@ -1063,11 +1072,10 @@ function resolveOneItem(n){
         resolved[r.out] = null;
         resolved[`_pend_${r.field}`] = true;
       } else {
-        // si hay 2+ candidatos, queda pendiente para que el usuario elija
+        // ✅ si NO hay match exacto único => pendiente para que el usuario elija
         resolved[r.ok] = false;
       }
     }
-
   }
 
 
@@ -1423,10 +1431,10 @@ function paintResolverModal(){
         </div>
       
         <div style="display:flex; gap:8px; justify-content:flex-end;">
-          <button class="btn" data-pend-cir="${escapeHtml(item.key)}" type="button">Dejar pendiente</button>
-          <button class="btn primary" data-save-cir="${escapeHtml(item.key)}" type="button">Guardar</button>
+          <button class="btn" data-pend-prof="${escapeHtml(item.key)}" type="button">Dejar pendiente</button>
+          <button class="btn soft" data-create-prof="${escapeHtml(item.key)}" type="button">+ Crear</button>
+          <button class="btn primary" data-save-prof="${escapeHtml(item.key)}" type="button">Guardar</button>
         </div>
-
       `;
 
 
@@ -1584,6 +1592,32 @@ function paintResolverModal(){
           recomputePending();
           paintResolverModal();
         });
+
+         // Pedimos RUT (docId) + nombre
+          const rut = clean(prompt('RUT del profesional (sin puntos ni guion, ej: 12345678K):', '') || '');
+          if(!rut){ toast('Cancelado'); return; }
+        
+          const nombre = clean(prompt('Nombre del profesional (ej: Paula Paoletto):', item.csvName || '') || '');
+          if(!nombre){ toast('Falta nombre'); return; }
+        
+          // Guardar en /profesionales/{RUT}
+          await setDoc(doc(db, 'profesionales', rut), {
+            nombreProfesional: nombre,     // ✅ tu campo real
+            estado: 'activo',
+            creadoEl: serverTimestamp(),
+            creadoPor: state.user?.email || '',
+            actualizadoEl: serverTimestamp(),
+            actualizadoPor: state.user?.email || ''
+          }, { merge:true });
+        
+          // Asociar mapping para ESTE key rol||nombreCsv -> rut
+          await persistMapping(docMapProf, item.key, rut);
+        
+          toast('✅ Profesional creado y asociado');
+          await refreshAfterMapping();
+          paintResolverModal();
+        });
+  
 
         row.querySelector(`[data-save-prof="${CSS.escape(item.key)}"]`).addEventListener('click', async ()=>{
           const sel = row.querySelector(`select[data-assoc-prof="${CSS.escape(item.key)}"]`);
@@ -2842,15 +2876,19 @@ async function saveOneItemPatch(it, patch){
     const refItem = doc(db, 'produccion', YYYY, 'meses', MM, 'pacientes', pacienteId, 'items', timeId);
 
     // guarda “texto” + ids recalculados + pendientes
-    await updateDoc(refItem, {
+    await setDoc(refItem, {
+      // ✅ guardar raw y normalizado para que al recargar NO vuelva lo anterior
+      raw: it.raw,
+      normalizado: it.normalizado,
+    
       clinica: n.clinica ?? null,
       cirugia: n.cirugia ?? null,
       tipoPaciente: n.tipoPaciente ?? null,
       profesionales: n.profesionales || {},
-
+    
       clinicaId: it.resolved?.clinicaId ?? null,
       cirugiaId: it.resolved?.cirugiaId ?? null,
-
+    
       profesionalesId: {
         cirujanoId: it.resolved?.cirujanoId ?? null,
         anestesistaId: it.resolved?.anestesistaId ?? null,
@@ -2858,6 +2896,24 @@ async function saveOneItemPatch(it, patch){
         ayudante2Id: it.resolved?.ayudante2Id ?? null,
         arsenaleraId: it.resolved?.arsenaleraId ?? null
       },
+    
+      pendientes: {
+        clinica: !!it.resolved?._pendClin || (it.resolved?.clinicaOk === false),
+        cirugia: !!it.resolved?._pendCir || (it.resolved?.cirugiaOk === false),
+        profesionales: {
+          cirujano: !!it.resolved?._pend_cirujano || (it.resolved?.cirujanoOk === false),
+          anestesista: !!it.resolved?._pend_anestesista || (it.resolved?.anestesistaOk === false),
+          ayudante1: !!it.resolved?._pend_ayudante1 || (it.resolved?.ayudante1Ok === false),
+          ayudante2: !!it.resolved?._pend_ayudante2 || (it.resolved?.ayudante2Ok === false),
+          arsenalera: !!it.resolved?._pend_arsenalera || (it.resolved?.arsenaleraOk === false)
+        },
+        tipoPaciente: !clean(n.tipoPaciente || '')
+      },
+    
+      actualizadoEl: serverTimestamp(),
+      actualizadoPor: state.user?.email || ''
+    }, { merge:true });
+
 
       pendientes: {
         clinica: !!it.resolved?._pendClin || (it.resolved?.clinicaOk === false),
