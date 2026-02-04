@@ -2105,18 +2105,22 @@ requireAuth({
     $('btnCSVResumen').addEventListener('click', exportResumenCSV);
     $('btnCSVDetalle').addEventListener('click', exportDetalleCSV);
 
-    // ✅ UF del mes (si existe el botón/modal en HTML)
     $('btnUF')?.addEventListener('click', ()=>{
       $('ufBackdrop').style.display = 'grid';
       $('ufSub').textContent = `Mes: ${monthNameEs(state.mesNum)} ${state.ano} · Doc: config/uf/${yyyymm(state.ano, state.mesNum)}`;
       $('ufValor').value = state.ufValorCLP ? String(state.ufValorCLP) : '';
     });
     
-    $('btnUfClose')?.addEventListener('click', ()=> $('ufBackdrop').style.display = 'none');
-    $('btnUfCancelar')?.addEventListener('click', ()=> $('ufBackdrop').style.display = 'none');
+    function closeUF(){
+      $('ufBackdrop').style.display = 'none';
+    }
+    
+    $('btnUfClose')?.addEventListener('click', closeUF);
+    $('btnUfCancelar')?.addEventListener('click', closeUF);
     $('ufBackdrop')?.addEventListener('click', (e)=>{
-      if(e.target === $('ufBackdrop')) $('ufBackdrop').style.display = 'none';
+      if(e.target === $('ufBackdrop')) closeUF();
     });
+
     
     $('btnUfGuardar')?.addEventListener('click', async ()=>{
       try{
