@@ -291,8 +291,8 @@ function normalizeProfesionalDoc(id, x){
     estado: (cleanReminder(x.estado) || 'activo').toLowerCase(),
 
     // persona/empresa
-    nombreProfesional: cleanReminder(x.nombreProfesional) || '',
-    razonSocial: isJ ? (cleanReminder(x.razonSocial) || '') : '',
+    nombreProfesional: toUpperSafe(cleanReminder(x.nombreProfesional) || ''),
+    razonSocial: isJ ? toUpperSafe(cleanReminder(x.razonSocial) || '') : '',
 
     // RUTs
     rut: rut || '',
@@ -341,20 +341,19 @@ async function loadAll(){
       if (b.estado === 'activo') return 1;
     }
   
-    // 2️⃣ Nombre visible (empresa o persona)
-    const nameA = normalize(
-      a.tipoPersona === 'juridica' && a.razonSocial
-        ? a.razonSocial
-        : a.nombreProfesional
-    );
-  
-    const nameB = normalize(
-      b.tipoPersona === 'juridica' && b.razonSocial
-        ? b.razonSocial
-        : b.nombreProfesional
-    );
-  
-    return nameA.localeCompare(nameB);
+    // 2️⃣ Orden A→Z por NOMBRE DEL PROFESIONAL (siempre)
+    // (aunque sea persona jurídica, ordena por el contacto/profesional)
+    const nameA = normalize(a.nombreProfesional || '');
+    const nameB = normalize(b.nombreProfesional || '');
+    
+    const cmp = nameA.localeCompare(nameB);
+    if(cmp !== 0) return cmp;
+    
+    // 3️⃣ Desempate: por razón social (si existe), para orden consistente
+    const rsA = normalize(a.razonSocial || '');
+    const rsB = normalize(b.razonSocial || '');
+    return rsA.localeCompare(rsB);
+
   });
 
 
@@ -544,8 +543,8 @@ async function saveProfesional(){
   const tipoPersona = ($('tipoPersona').value || 'natural').toLowerCase();
   const isJ = (tipoPersona === 'juridica');
 
-  const nombreProfesional = cleanReminder($('nombreProfesional').value);
-  const razonSocial = cleanReminder($('razonSocial').value);
+  const nombreProfesional = toUpperSafe(cleanReminder($('nombreProfesional').value));
+  const razonSocial = toUpperSafe(cleanReminder($('razonSocial').value));
 
   const rut = cleanReminder($('rut').value);
   const rutEmpresa = cleanReminder($('rutEmpresa').value);
