@@ -74,8 +74,8 @@ function pickTramo(tramos, n){
     const max = (t?.max === null || t?.max === undefined || t?.max === '') ? null : (Number(t.max) || 0);
 
     // ✅ Soporta distintos nombres de campo (por si tu doc config/bonos no usa "montoCLP")
-    const monto =
-      Number(t?.montoCLP ?? t?.monto ?? t?.bonoCLP ?? t?.bono ?? 0) || 0;
+    const montoRaw = (t?.montoCLP ?? t?.monto ?? t?.bonoCLP ?? t?.bono ?? 0);
+    const monto = asNumberLoose(montoRaw); // ✅ soporta "1.050.000" / "$1.050.000" etc.
 
     if(x >= min && (max === null ? true : x <= max)){
       return { min, max, montoCLP: monto };
@@ -1704,7 +1704,7 @@ function buildLiquidaciones(){
     const aplicaBono =
       (x.rolPrincipal === 'r_cirujano') &&
       (cirugiasComoPrincipal > 0) &&
-      (x.tieneBono === true || x.tieneBono === undefined || x.tieneBono === null);
+      (x.tieneBono !== false); 
 
     if(aplicaBono){
       const tramos = Array.isArray(x.bonosTramosOverride) ? x.bonosTramosOverride : state.bonosTramosGlobal;
