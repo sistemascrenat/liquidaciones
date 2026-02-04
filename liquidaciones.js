@@ -417,7 +417,7 @@ async function generarPDFLiquidacionProfesional(agg){
   drawBox(page1, barX, barTop, barW, barH, RENNAT_BLUE, RENNAT_BLUE, 1);
 
 
-  const title = 'Liquidación de Pago Producción - Participaciones Mensuales';
+  const title = 'LIQUIDACIÓN DE PAGO - PARTICIPACIONES MENSUALES';
   const titleSize = 12;
   const titleW = measure(title, titleSize, true);
   drawText(page1, title, barX + (barW - titleW)/2, barTop - 19, titleSize, true, rgb(1,1,1));
@@ -432,16 +432,16 @@ async function generarPDFLiquidacionProfesional(agg){
 
   const dataRows = [];
   
-  dataRows.push(['Mes/Año', String(mesTxt).toUpperCase()]);
-  dataRows.push(['Profesional', String(profNombre || '—').toUpperCase()]);
-  dataRows.push(['RUT Profesional', String(profRut || '—').toUpperCase()]);
+  dataRows.push(['MES/AÑO', String(mesTxt).toUpperCase()]);
+  dataRows.push(['PEOFESIONAL', String(profNombre || '—').toUpperCase()]);
+  dataRows.push(['RUT', String(profRut || '—').toUpperCase()]);
   
   if(esJuridica){
-    dataRows.push(['Empresa', String(empresaNombre || '—').toUpperCase()]);
-    dataRows.push(['RUT Empresa', String(empresaRut || '—').toUpperCase()]);
+    dataRows.push(['EMPRESA', String(empresaNombre || '—').toUpperCase()]);
+    dataRows.push(['RUT EMPRESA', String(empresaRut || '—').toUpperCase()]);
   }
   
-  dataRows.push(['Tipo', String(tipoMostrar).toUpperCase()]);
+  dataRows.push(['TIPO DE PERSONA', String(tipoMostrar).toUpperCase()]);
 
 
   // altura tabla
@@ -710,7 +710,11 @@ async function generarPDFLiquidacionProfesional(agg){
   
     // arma texto: "Tramo 1 (10 al 15)" (si max viene null -> "desde X")
     const tramoTxt = tramo
-      ? `Tramo ${tramoIdx || ''} (${tramo.min} al ${tramo.max ?? 'más'})`.replace('Tramo  ', 'Tramo ')
+      ? (
+          (tramo.max === null || tramo.max === undefined || tramo.max === '')
+            ? `Tramo ${tramoIdx || ''} (${tramo.min} a más cirugías)`
+            : `Tramo ${tramoIdx || ''} (${tramo.min} a ${tramo.max} cirugías)`
+        ).replace('Tramo  ', 'Tramo ')
       : (tramoIdx ? `Tramo ${tramoIdx}` : '');
   
     ajustesRows.push({
