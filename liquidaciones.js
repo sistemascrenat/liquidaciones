@@ -936,13 +936,15 @@ async function generarPDFLiquidacionProfesional(agg){
   
   // Columnas base (proporciones)
   let detCols = [
+    { key:'n',     label:'#',             w: 44  }, 
     { key:'fecha', label:'FECHA',         w: 110 },
     { key:'clin',  label:'CLÍNICA',       w: 160 },
     { key:'proc',  label:'PROCEDIMIENTO', w: 190 },
-    { key:'pac',   label:'PACIENTE',      w: 290 }, // 👈 gana espacio
-    { key:'tipo',  label:'TIPO',          w: 90  },
+    { key:'pac',   label:'PACIENTE',      w: 260 }, 
+    { key:'tipo',  label:'TIPO',          w: 110 }, 
     { key:'monto', label:'MONTO',         w: 120 }
   ];
+
   
   // ✅ Auto-ajuste exacto: para que sumen detW y SIEMPRE cierre el borde derecho
   {
@@ -986,31 +988,48 @@ async function generarPDFLiquidacionProfesional(agg){
     }
   }
 
-
   // helper: dibuja 1 fila
-  function drawDetalleRow(page, row, topY){
+  function drawDetalleRow(page, row, topY, rowNumber){
     // línea horizontal superior de la fila
     drawHLine2(page, detX, topY, detW, 1, BORDER_SOFT);
-
+  
     let xPos = detX;
-
+  
+    // ✅ 0) # (enumerador)
+    drawCellTextRight(page, String(rowNumber), xPos, topY, detCols[0].w, detRowH, 9, true, TEXT_MUTED, 8);
+    xPos += detCols[0].w;
+  
+    // ✅ 1) FECHA
     const fechaTxt = `${row.fecha || ''}${row.hora ? ' ' + row.hora : ''}`;
     drawCellText(page, wrapClip(fechaTxt, 18), xPos, topY, detRowH, 9, false, TEXT_MAIN, 8);
-    xPos += detCols[0].w;
-
-    drawCellText(page, wrapClip(clinAbbrev(row.clinicaNombre || ''), 22), xPos, topY, detRowH, 9, false, TEXT_MAIN, 8);
     xPos += detCols[1].w;
-
-    drawCellText(page, wrapClip(row.procedimientoNombre || '', 24), xPos, topY, detRowH, 9, false, TEXT_MAIN, 8);
+  
+    // ✅ 2) CLÍNICA
+    drawCellText(page, wrapClip(clinAbbrev(row.clinicaNombre || ''), 22), xPos, topY, detRowH, 9, false, TEXT_MAIN, 8);
     xPos += detCols[2].w;
-
-    drawCellText(page, wrapClip(row.pacienteNombre || '', 28), xPos, topY, detRowH, 9, false, TEXT_MAIN, 8);
+  
+    // ✅ 3) PROCEDIMIENTO
+    drawCellText(page, wrapClip(row.procedimientoNombre || '', 24), xPos, topY, detRowH, 9, false, TEXT_MAIN, 8);
     xPos += detCols[3].w;
-
-    drawCellText(page, wrapClip((row.tipoPaciente || '').toString().toUpperCase(), 12), xPos, topY, detRowH, 9, false, TEXT_MUTED, 8);
+  
+    // ✅ 4) PACIENTE
+    drawCellText(page, wrapClip(row.pacienteNombre || '', 28), xPos, topY, detRowH, 9, false, TEXT_MAIN, 8);
     xPos += detCols[4].w;
-
-    drawCellTextRight(page, money(row.monto || 0), xPos, topY, detCols[5].w, detRowH, 9, true, TEXT_MAIN, 8);
+  
+    // ✅ 5) TIPO (regla especial + font size condicional)
+    let tipoTxt = (row.tipoPaciente || '').toString().toLowerCase().trim();
+    let tipoShow = tipoTxt.toUpperCase();
+  
+    if (tipoTxt === 'particular_isapre' || (tipoTxt.includes('particular') && tipoTxt.includes('isap'))) {
+      tipoShow = 'PARTICULAR O ISAPRE';
+    }
+  
+    const tipoFontSize = (tipoShow === 'PARTICULAR O ISAPRE') ? 7.6 : 9;
+    drawCellText(page, tipoShow, xPos, topY, detRowH, tipoFontSize, false, TEXT_MUTED, 8);
+    xPos += detCols[5].w;
+  
+    // ✅ 6) MONTO
+    drawCellTextRight(page, money(row.monto || 0), xPos, topY, detCols[6].w, detRowH, 9, true, TEXT_MAIN, 8);
   }
 
   // filas ordenadas completas
@@ -1027,6 +1046,8 @@ async function generarPDFLiquidacionProfesional(agg){
 
   let currentPage = page2;
   let cursorTopY = y2; // top de la tabla en la página actual
+  let rowNumber = 1; // ✅ numeración continua en todo el detalle (todas las páginas)
+
 
 
   // dibuja tabla paginada
@@ -1130,11 +1151,15 @@ async function generarPDFLiquidacionProfesional(agg){
     }
 
     // filas
+    // ✅ contador global de fila (persiste entre páginas)
+    let rowNumber = 1; // <-- ponlo ARRIBA del while (ver bloque siguiente)
+    
     for (let r = 0; r < slice.length; r++) {
       const row = slice[r];
       const rowTop = cursorTopY - detHeadH - r * detRowH;
-      drawDetalleRow(currentPage, row, rowTop);
+      drawDetalleRow(currentPage, row, rowTop, rowNumber++);
     }
+
 
     // cerrar línea inferior del bloque
     const yBottom = cursorTopY - blockH;
