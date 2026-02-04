@@ -1081,17 +1081,24 @@ async function loadProfesionales(){
   snap.forEach(d=>{
     const x = d.data() || {};
 
-    // TU ESQUEMA REAL
-    const rutId = cleanReminder(x.rutId) || d.id; // docId suele ser rutId
+    // TU ESQUEMA REAL (según tu Firestore)
+    // ✅ docId = RUT
+    const rutId = cleanReminder(x.rutId) || d.id;
+    
+    // Campos visibles en tu doc
     const nombreProfesional = cleanReminder(x.nombreProfesional) || '';
     const razonSocial = cleanReminder(x.razonSocial) || '';
-    const rutPersonal = cleanReminder(x.rut) || '';
     const rutEmpresa = cleanReminder(x.rutEmpresa) || '';
-    const tipoPersona = (cleanReminder(x.tipoPersona) || '').toLowerCase(); // natural | juridica
     const estado = (cleanReminder(x.estado) || 'activo').toLowerCase();
-
-    // ✅ Normaliza rolPrincipal aunque venga como "cirujano", "CIRUJANO", etc.
-    const rolPrincipalRaw = cleanReminder(x.rolPrincipal) || '';
+    
+    // ✅ Si no guardas "rut" como campo, usa el docId (rutId) como RUT personal
+    const rutPersonal = cleanReminder(x.rut) || String(rutId || '');
+    
+    // ✅ Tipo persona: si viene explícito, úsalo; si no, infiere jurídica si hay razón social
+    const tipoPersona = (cleanReminder(x.tipoPersona) || (razonSocial ? 'juridica' : 'natural')).toLowerCase();
+    
+    // ✅ TU FIRESTORE: rolPrincipalId (no rolPrincipal)
+    const rolPrincipalRaw = cleanReminder(x.rolPrincipalId || x.rolPrincipal) || '';
     const rolPrincipalNorm = normalize(rolPrincipalRaw);
     
     const rolPrincipal =
@@ -1102,33 +1109,33 @@ async function loadProfesionales(){
       rolPrincipalNorm === 'r_ayudante_2' || rolPrincipalNorm === 'ayudante2' || rolPrincipalNorm === 'ayudante 2' ? 'r_ayudante_2' :
       (rolPrincipalRaw || '');
     
-    // ✅ Asegurar boolean real
+    // ✅ tieneBono: si existe el campo, respétalo
+    // (si NO existe, quedará false y no aparecerá bono)
     const tieneBono =
       x.tieneBono === true ||
       String(x.tieneBono || '').toLowerCase().trim() === 'true' ||
       String(x.tieneBono || '').trim() === '1';
     
+    // Ahora el doc
     const doc = {
       id: String(rutId || d.id),
       rutId: String(rutId || d.id),
     
-      // Siempre persona (titular)
       nombreProfesional: toUpperSafe(nombreProfesional || ''),
       rut: rutPersonal,
     
-      // Empresa (si aplica)
       razonSocial: toUpperSafe(razonSocial || ''),
       rutEmpresa: rutEmpresa,
     
       tipoPersona: tipoPersona || '',
       estado,
     
-      // ✅ NUEVO: Liquidaciones (UF/bono/descuento)
       rolPrincipal,
       tieneBono,
       bonosTramosOverride: Array.isArray(x.bonosTramosOverride) ? x.bonosTramosOverride : null,
       descuentoUF: Number(x.descuentoUF || 0) || 0
     };
+
 
 
     byId.set(String(doc.id), doc);
