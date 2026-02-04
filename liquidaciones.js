@@ -827,7 +827,7 @@ async function generarPDFLiquidacionProfesional(agg){
       const fechaPagoTxt = (day) => `${day} DE ${MES_TXT} ${ANO_TXT}`;
   
       // armado asunto (sin mencionar bono si no aplica)
-      const asuntoPart = bono > 0 ? 'PARTICULAR + BONO' : 'PARTICULAR';
+      const asuntoPart = bono > 0 ? 'PARTICULAR O ISAPRE + BONO' : 'PARTICULAR O ISAPRE';
       const asuntoFona = 'FONASA';
   
       // medidas tabla
@@ -1151,10 +1151,7 @@ async function generarPDFLiquidacionProfesional(agg){
       cx += detCols[i].w;
     }
 
-    // filas
-    // ✅ contador global de fila (persiste entre páginas)
-    let rowNumber = 1; // <-- ponlo ARRIBA del while (ver bloque siguiente)
-    
+    // filas  
     for (let r = 0; r < slice.length; r++) {
       const row = slice[r];
       const rowTop = cursorTopY - detHeadH - r * detRowH;
