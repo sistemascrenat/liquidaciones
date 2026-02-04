@@ -679,9 +679,21 @@ async function generarPDFLiquidacionProfesional(agg){
     });
   }
   if(bonoCLP > 0){
+  
+    // ✅ info de tramo calculada en buildLiquidaciones()
+    const tramoIdx = Number(agg?.ajustes?.bonoTramoIndex || 0) || 0;
+    const tramo = agg?.ajustes?.bonoTramo || null;
+  
+    // arma texto: "Tramo 1 (10 al 15)" (si max viene null -> "desde X")
+    const tramoTxt = tramo
+      ? `Tramo ${tramoIdx || ''} (${tramo.min} al ${tramo.max ?? 'más'})`.replace('Tramo  ', 'Tramo ')
+      : (tramoIdx ? `Tramo ${tramoIdx}` : '');
+  
     ajustesRows.push({
-      item: `BONO CIRUJANO (${cirugiasComoPrincipal} cirugías)`,
-      cant: 1,
+      item: `BONO CIRUJANO ${tramoTxt}`.trim(),
+      // ✅ en CANTIDAD debe ir la cantidad de cirugías (ej 13)
+      cant: Number(cirugiasComoPrincipal || 0) || 0,
+      // ✅ subtotal se mantiene como monto del bono
       sub: bonoCLP
     });
   }
@@ -877,9 +889,6 @@ async function generarPDFLiquidacionProfesional(agg){
     // 1) Con límite default (página intermedia)
     let bottomLimit = bottomLimitDefault;
 
-    // Header en esta página
-    drawDetalleHeader(currentPage, cursorTopY);
-
     // ¿Cuántas filas caben con límite default?
     let availableH = cursorTopY - bottomLimit - detHeadH;
     let canFit = Math.max(0, Math.floor(availableH / detRowH));
@@ -956,6 +965,9 @@ async function generarPDFLiquidacionProfesional(agg){
 
     // marco total del bloque
     drawBox(currentPage, detX, cursorTopY, detW, blockH, rgb(1, 1, 1), BORDER_SOFT, 1);
+
+    // ✅ AHORA sí dibuja el header (queda arriba, visible)
+    drawDetalleHeader(currentPage, cursorTopY);  
 
     // líneas verticales a todo el bloque
     let cx = detX;
@@ -1721,15 +1733,33 @@ function buildLiquidaciones(){
       (cirugiasComoPrincipal > 0) &&
       (x.tieneBono !== false); 
 
+    let bonoTramoIndex = 0;
+    
     if(aplicaBono){
       const tramos = Array.isArray(x.bonosTramosOverride) ? x.bonosTramosOverride : state.bonosTramosGlobal;
       const tramo = pickTramo(tramos, cirugiasComoPrincipal);
+    
       if(tramo && (Number(tramo.montoCLP || 0) > 0)){
         bonoCLP = Number(tramo.montoCLP || 0) || 0;
         bonoTramo = tramo;
+    
+        // ✅ detectar índice del tramo (1-based) para mostrar "Tramo 1"
+        const idx = tramos.findIndex(t=>{
+          const min = Number(t?.min ?? 0) || 0;
+          const max = (t?.max === null || t?.max === undefined || t?.max === '') ? null : (Number(t.max) || 0);
+    
+          const montoRaw = (t?.montoCLP ?? t?.monto ?? t?.bonoCLP ?? t?.bono ?? 0);
+          const monto = asNumberLoose(montoRaw);
+    
+          return (min === tramo.min) &&
+                 ((max ?? null) === (tramo.max ?? null)) &&
+                 (monto === (Number(tramo.montoCLP || 0) || 0));
+        });
+    
+        bonoTramoIndex = (idx >= 0) ? (idx + 1) : 0;
       }
     }
-  
+
     const totalAPagar = Math.max(0, totalProcedimientos - descuentoCLP + bonoCLP);
   
     x.ajustes = {
@@ -1739,9 +1769,11 @@ function buildLiquidaciones(){
       cirugiasComoPrincipal,
       bonoCLP,
       bonoTramo,
+      bonoTramoIndex, // ✅ NUEVO
       totalProcedimientos,
       totalAPagar
     };
+
   
     return { ...x, status };
   });
@@ -1852,7 +1884,7 @@ function paint(){
       </td>
       <td>${escapeHtml((agg.tipoPersona || '—').toUpperCase())}</td>
       <td class="mono">${agg.casos}</td>
-      <td><b>${clp(agg.total)}</b></td>
+      <td><b>${clp(agg?.ajustes?.totalAPagar ?? agg.total)}</b></td>
       <td>${statusPill}</td>
       <td>
         <div class="actionsMini">
@@ -1904,7 +1936,7 @@ function openDetalle(agg){
     (agg.rut ? ` · RUT: ${agg.rut}` : '') +
     extraEmpresa;
 
-  $('modalPillTotal').textContent = `TOTAL: ${clp(agg.total)}`;
+  $('modalPillTotal').textContent = `TOTAL: ${clp(agg?.ajustes?.totalAPagar ?? agg.total)}`;
   $('modalPillPendientes').textContent =
     agg.alertasCount > 0
       ? `Alertas: ${agg.alertasCount} · Pendientes: ${agg.pendientesCount}`
