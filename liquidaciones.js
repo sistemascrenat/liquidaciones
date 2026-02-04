@@ -73,12 +73,17 @@ function pickTramo(tramos, n){
     const min = Number(t?.min ?? 0) || 0;
     const max = (t?.max === null || t?.max === undefined || t?.max === '') ? null : (Number(t.max) || 0);
 
+    // ✅ Soporta distintos nombres de campo (por si tu doc config/bonos no usa "montoCLP")
+    const monto =
+      Number(t?.montoCLP ?? t?.monto ?? t?.bonoCLP ?? t?.bono ?? 0) || 0;
+
     if(x >= min && (max === null ? true : x <= max)){
-      return { min, max, montoCLP: Number(t?.montoCLP ?? 0) || 0 };
+      return { min, max, montoCLP: monto };
     }
   }
   return null;
 }
+
 
 function asNumberLoose(v){
   const s = (v ?? '').toString().replace(/[^\d]/g,'');
@@ -2291,17 +2296,6 @@ requireAuth({
       loadProcedimientos(),
       loadBonosConfig()
     ]);
-
-    // 🔎 DEBUG PROFESIONALES (temporal)
-    // Prueba matching por ID/RUT en varios formatos:
-    console.log('DBG profesionalesById size =', state.profesionalesById.size);
-    
-    // Cambia estos 3 por un RUT real que te esté fallando:
-    console.log('TEST byId "14145305" =>', state.profesionalesById.get('14145305'));
-    console.log('TEST byId "14.145.305-K" =>', state.profesionalesById.get('14.145.305-K'));
-    console.log('TEST byId "14145305K" =>', state.profesionalesById.get('14145305K'));
-
-
 
     await recalc();
   }
