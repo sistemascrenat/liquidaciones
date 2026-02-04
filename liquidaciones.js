@@ -1090,6 +1090,24 @@ async function loadProfesionales(){
     const tipoPersona = (cleanReminder(x.tipoPersona) || '').toLowerCase(); // natural | juridica
     const estado = (cleanReminder(x.estado) || 'activo').toLowerCase();
 
+    // ✅ Normaliza rolPrincipal aunque venga como "cirujano", "CIRUJANO", etc.
+    const rolPrincipalRaw = cleanReminder(x.rolPrincipal) || '';
+    const rolPrincipalNorm = normalize(rolPrincipalRaw);
+    
+    const rolPrincipal =
+      rolPrincipalNorm === 'r_cirujano' || rolPrincipalNorm === 'cirujano' ? 'r_cirujano' :
+      rolPrincipalNorm === 'r_anestesista' || rolPrincipalNorm === 'anestesista' ? 'r_anestesista' :
+      rolPrincipalNorm === 'r_arsenalera' || rolPrincipalNorm === 'arsenalera' ? 'r_arsenalera' :
+      rolPrincipalNorm === 'r_ayudante_1' || rolPrincipalNorm === 'ayudante1' || rolPrincipalNorm === 'ayudante 1' ? 'r_ayudante_1' :
+      rolPrincipalNorm === 'r_ayudante_2' || rolPrincipalNorm === 'ayudante2' || rolPrincipalNorm === 'ayudante 2' ? 'r_ayudante_2' :
+      (rolPrincipalRaw || '');
+    
+    // ✅ Asegurar boolean real
+    const tieneBono =
+      x.tieneBono === true ||
+      String(x.tieneBono || '').toLowerCase().trim() === 'true' ||
+      String(x.tieneBono || '').trim() === '1';
+    
     const doc = {
       id: String(rutId || d.id),
       rutId: String(rutId || d.id),
@@ -1106,30 +1124,12 @@ async function loadProfesionales(){
       estado,
     
       // ✅ NUEVO: Liquidaciones (UF/bono/descuento)
-      // ✅ Normaliza rolPrincipal aunque venga como "cirujano", "CIRUJANO", etc.
-      const rolPrincipalRaw = cleanReminder(x.rolPrincipal) || '';
-      const rolPrincipalNorm = normalize(rolPrincipalRaw);
-      
-      const rolPrincipal =
-        rolPrincipalNorm === 'r_cirujano' || rolPrincipalNorm === 'cirujano' ? 'r_cirujano' :
-        rolPrincipalNorm === 'r_anestesista' || rolPrincipalNorm === 'anestesista' ? 'r_anestesista' :
-        rolPrincipalNorm === 'r_arsenalera' || rolPrincipalNorm === 'arsenalera' ? 'r_arsenalera' :
-        rolPrincipalNorm === 'r_ayudante_1' || rolPrincipalNorm === 'ayudante1' || rolPrincipalNorm === 'ayudante 1' ? 'r_ayudante_1' :
-        rolPrincipalNorm === 'r_ayudante_2' || rolPrincipalNorm === 'ayudante2' || rolPrincipalNorm === 'ayudante 2' ? 'r_ayudante_2' :
-        (rolPrincipalRaw || '');
-      
-      // ✅ Asegurar boolean real
-      const tieneBono =
-        x.tieneBono === true ||
-        String(x.tieneBono || '').toLowerCase().trim() === 'true' ||
-        String(x.tieneBono || '').trim() === '1';
-      
-      rolPrincipal: rolPrincipal,
-      tieneBono: tieneBono,
+      rolPrincipal,
+      tieneBono,
       bonosTramosOverride: Array.isArray(x.bonosTramosOverride) ? x.bonosTramosOverride : null,
       descuentoUF: Number(x.descuentoUF || 0) || 0
-
     };
+
 
     byId.set(String(doc.id), doc);
     if(nombreProfesional) byName.set(normalize(nombreProfesional), doc);
