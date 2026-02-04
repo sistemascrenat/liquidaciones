@@ -26,7 +26,7 @@ const $ = (id)=> document.getElementById(id);
    Columnas esperadas (como pediste)
 ========================= */
 const EXPECTED_COLS = [
-  '#','Suspendida','Confirmado','Fecha','Hora','Clínica',
+  'Suspendida','Confirmado','Fecha','Hora','Clínica',
   'Cirujano','Anestesista','Ayudante 1','Ayudante 2','Arsenalera',
   'Cirugía','Tipo de Paciente','Previsión','Nombre Paciente','RUT','Teléfono',
   'Dirección','e-mail','Sexo','Fecha nac. (dd/mm/aaaa)','Edad','Fecha consulta',
@@ -37,6 +37,7 @@ const EXPECTED_COLS = [
   'Eco Abdominal','Test de Esfuerzo','Grupo Sangre RH','Valor','Pagado','Fecha de Pago',
   'Derechos de Pabellón','HMQ','Insumos'
 ];
+
 
 /* =========================
    Utils
@@ -2788,24 +2789,26 @@ function collectItemPatchFromModal(){
   }
 
   // Profesionales (guardamos el NOMBRE del catálogo si eligió uno)
-  function pickProfText(selId, resolvedIdField, fallbackLabel){
+  function pickProfText(selId, roleField, rawLabel){
     const sel = $(selId);
     const v = clean(sel?.value || '');
-
+  
     if(!v) return ''; // “Sin profesional”
-
+  
     if(v !== PEND_VALUE){
       const p = state.catalogs.profById.get(v);
       return clean(p?.nombre || '');
     }
-    // pendiente => mantiene texto original
+  
+    // pendiente => mantiene el texto original
     const it = state._editingItemRef || null;
     return clean(
-      it?.normalizado?.profesionales?.[fallbackLabel] ||
-      it?.raw?.[fallbackLabel] ||
+      it?.normalizado?.profesionales?.[roleField] ||
+      it?.raw?.[rawLabel] ||
       ''
     );
   }
+
 
   return {
     clinica: clinicaTxt,
@@ -2813,11 +2816,11 @@ function collectItemPatchFromModal(){
     cirugia: cirugiaTxt,
 
     profesionales: {
-      cirujano:     pickProfText('edCirujanoSel',    'cirujanoId',    'Cirujano'),
-      anestesista:  pickProfText('edAnestesistaSel', 'anestesistaId', 'Anestesista'),
-      ayudante1:    pickProfText('edAy1Sel',         'ayudante1Id',   'Ayudante 1'),
-      ayudante2:    pickProfText('edAy2Sel',         'ayudante2Id',   'Ayudante 2'),
-      arsenalera:   pickProfText('edArsSel',         'arsenaleraId',  'Arsenalera')
+      cirujano:     pickProfText('edCirujanoSel',    'cirujano',    'Cirujano'),
+      anestesista:  pickProfText('edAnestesistaSel', 'anestesista', 'Anestesista'),
+      ayudante1:    pickProfText('edAy1Sel',         'ayudante1',   'Ayudante 1'),
+      ayudante2:    pickProfText('edAy2Sel',         'ayudante2',   'Ayudante 2'),
+      arsenalera:   pickProfText('edArsSel',         'arsenalera',  'Arsenalera')
     }
   };
 }
@@ -2967,92 +2970,75 @@ requireAuth({
     });
     
     // ✅ Import selector: recargar sugerencias si cambia Mes/Año
-    $('mes')?.addEventListener('change', fillImportSuggestions);
-    $('ano')?.addEventListener('change', fillImportSuggestions);
-
-
-    $('btnCargar').addEventListener('click', async ()=>{
-      try{
-        await handleLoadCSV($('fileCSV').files?.[0]);
-      }catch(err){
-        console.error(err);
-        toast('Error cargando CSV (ver consola)');
-      }
+    $('mes')?.addEventListener('change', async ()=>{
+      await fillImportSuggestions();
     });
 
-    $('btnResolver').addEventListener('click', openResolverModal);
-
-    // ✅ Cargar un Import existente desde Firestore
-    $('btnCargarImport')?.addEventListener('click', async ()=>{
-      try{
-        const importId = clean($('importId')?.value || $('importSelect')?.value || '');
-        if(!importId){
-          toast('Selecciona una importación.');
-          $('importSelect')?.focus();
-          return;
-        }
-        await loadStagingFromFirestore(importId);
-        setButtons();
-        paintPreview();
-      }catch(err){
-        console.error(err);
-        toast('Error cargando import (ver consola)');
-      }
+    $('ano')?.addEventListener('change', async ()=>{
+      await fillImportSuggestions();
     });
 
-
-    $('btnConfirmar').addEventListener('click', async ()=>{
-      try{ await confirmarImportacion(); }
-      catch(err){ console.error(err); toast('Error confirmando (ver consola)'); }
-    });
-
-    $('btnAnular').addEventListener('click', async ()=>{
-      try{ await anularImportacion(); }
-      catch(err){ console.error(err); toast('Error anulando (ver consola)'); }
-    });
-
-    $('q').addEventListener('input', ()=>{
-      state.ui.query = $('q').value || '';
+    // ✅ Buscar
+    $('q')?.addEventListener('input', (e)=>{
+      state.ui.query = e.target.value || '';
       state.ui.page = 1;
       paintPreview();
     });
 
-    $('btnPrev').addEventListener('click', ()=>{
-      if(state.ui.page > 1){ state.ui.page--; paintPreview(); }
+    // ✅ Pager
+    $('btnPrev')?.addEventListener('click', ()=>{
+      state.ui.page = Math.max(1, (state.ui.page || 1) - 1);
+      paintPreview();
+    });
+    $('btnNext')?.addEventListener('click', ()=>{
+      state.ui.page = (state.ui.page || 1) + 1;
+      paintPreview();
     });
 
-    $('btnNext').addEventListener('click', ()=>{
-      applyFilter();
-      const pages = Math.max(1, Math.ceil(state.view.filtered.length / state.ui.pageSize));
-      if(state.ui.page < pages){ state.ui.page++; paintPreview(); }
+    // ✅ Cargar CSV
+    $('csvFile')?.addEventListener('change', async (e)=>{
+      const f = e.target.files?.[0];
+      if(!f) return;
+      await handleLoadCSV(f);
+      // para permitir recargar el mismo archivo sin tener que cambiarle el nombre
+      e.target.value = '';
     });
 
-    $('btnResolverClose').addEventListener('click', closeResolverModal);
-    $('btnResolverCancelar').addEventListener('click', closeResolverModal);
-
-    $('btnResolverRevisar').addEventListener('click', async ()=>{
-      await refreshAfterMapping();
-      toast('Pendientes recalculados');
-      paintResolverModal();
+    // ✅ Resolver modal
+    $('btnResolver')?.addEventListener('click', ()=>{
+      openResolverModal();
     });
-
-    $('modalResolverBackdrop').addEventListener('click', (e)=>{
+    $('btnResolverClose')?.addEventListener('click', ()=>{
+      closeResolverModal();
+    });
+    $('modalResolverBackdrop')?.addEventListener('click', (e)=>{
       if(e.target === $('modalResolverBackdrop')) closeResolverModal();
     });
 
-    $('btnItemClose')?.addEventListener('click', closeItemModal);
-    $('btnItemCancelar')?.addEventListener('click', closeItemModal);
-    
-    $('modalItemBackdrop')?.addEventListener('click', (e)=>{
-      if(e.target === $('modalItemBackdrop')) closeItemModal();
+    // ✅ Confirmar / Anular
+    $('btnConfirmar')?.addEventListener('click', confirmarImportacion);
+    $('btnAnular')?.addEventListener('click', anularImportacion);
+
+    // ✅ Cargar staging desde ImportID (manual)
+    $('btnCargarImport')?.addEventListener('click', async ()=>{
+      const importId = clean($('importId')?.value || '');
+      if(!importId){ toast('Ingresa un ImportID'); return; }
+      await loadStagingFromFirestore(importId);
     });
 
-    // ✅ Si existe un botón global para guardar cola, lo conectamos
-    $('btnGuardarCola')?.addEventListener('click', async ()=>{
-      try{ await flushDirtyEdits(); }
-      catch(err){ console.error(err); toast('Error guardando cola (ver consola)'); }
+    // ✅ Cargar staging desde selector (y sincronizar hidden importId)
+    $('importSelect')?.addEventListener('change', async ()=>{
+      const v = clean($('importSelect')?.value || '');
+      $('importId').value = v;
+      if(v) await loadStagingFromFirestore(v);
     });
 
+    // ✅ Guardar cola (“Guardar todo” real)
+    $('btnGuardarCola')?.addEventListener('click', saveAllDirtyEdits);
+
+    // ✅ Si tienes pill de cola en HTML, inicialízala
+    refreshDirtyUI();
 
   }
 });
+
