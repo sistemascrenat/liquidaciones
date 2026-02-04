@@ -1106,10 +1106,29 @@ async function loadProfesionales(){
       estado,
     
       // ✅ NUEVO: Liquidaciones (UF/bono/descuento)
-      rolPrincipal: cleanReminder(x.rolPrincipal) || '', // ej: "r_cirujano"
-      tieneBono: !!x.tieneBono, // solo relevante si rolPrincipal = r_cirujano
+      // ✅ Normaliza rolPrincipal aunque venga como "cirujano", "CIRUJANO", etc.
+      const rolPrincipalRaw = cleanReminder(x.rolPrincipal) || '';
+      const rolPrincipalNorm = normalize(rolPrincipalRaw);
+      
+      const rolPrincipal =
+        rolPrincipalNorm === 'r_cirujano' || rolPrincipalNorm === 'cirujano' ? 'r_cirujano' :
+        rolPrincipalNorm === 'r_anestesista' || rolPrincipalNorm === 'anestesista' ? 'r_anestesista' :
+        rolPrincipalNorm === 'r_arsenalera' || rolPrincipalNorm === 'arsenalera' ? 'r_arsenalera' :
+        rolPrincipalNorm === 'r_ayudante_1' || rolPrincipalNorm === 'ayudante1' || rolPrincipalNorm === 'ayudante 1' ? 'r_ayudante_1' :
+        rolPrincipalNorm === 'r_ayudante_2' || rolPrincipalNorm === 'ayudante2' || rolPrincipalNorm === 'ayudante 2' ? 'r_ayudante_2' :
+        (rolPrincipalRaw || '');
+      
+      // ✅ Asegurar boolean real
+      const tieneBono =
+        x.tieneBono === true ||
+        String(x.tieneBono || '').toLowerCase().trim() === 'true' ||
+        String(x.tieneBono || '').trim() === '1';
+      
+      rolPrincipal: rolPrincipal,
+      tieneBono: tieneBono,
       bonosTramosOverride: Array.isArray(x.bonosTramosOverride) ? x.bonosTramosOverride : null,
-      descuentoUF: Number(x.descuentoUF || 0) || 0 // si 0 => no mostrar
+      descuentoUF: Number(x.descuentoUF || 0) || 0
+
     };
 
     byId.set(String(doc.id), doc);
@@ -1129,7 +1148,15 @@ async function loadProcedimientos(){
     const x = d.data() || {};
     const id = d.id;
     const nombre = cleanReminder(x.nombre) || '';
-    const tipo = (cleanReminder(x.tipo) || '').toLowerCase();
+    // ✅ Normaliza "Cirugía", "cirugías", "CIRUGIA", etc. -> "cirugia"
+    const tipoRaw = cleanReminder(x.tipo) || '';
+    const tipoN = normalize(tipoRaw); // usa tu helper normalize() (quita tildes y baja a minúscula)
+    
+    const tipo =
+      (tipoN.includes('cirug') ? 'cirugia' :
+       tipoN.includes('ambula') ? 'ambulatorio' :
+       (tipoN || ''));
+
     const tarifas = (x.tarifas && typeof x.tarifas === 'object') ? x.tarifas : null;
 
     const doc = {
@@ -2073,7 +2100,24 @@ async function recalc(){
     await loadUFDelMes();
 
     buildLiquidaciones();
+    
+    // 🔎 DEBUG: ver si hay cirujanos con bono detectados
+    const dbg = state.liquidResumen
+      .filter(x => x.rolPrincipal === 'r_cirujano')
+      .slice(0, 10)
+      .map(x => ({
+        nombre: x.nombre,
+        rolPrincipal: x.rolPrincipal,
+        tieneBono: x.tieneBono,
+        cirugiasComoPrincipal: x.ajustes?.cirugiasComoPrincipal,
+        bonoCLP: x.ajustes?.bonoCLP,
+        totalProcedimientos: x.ajustes?.totalProcedimientos,
+        totalAPagar: x.ajustes?.totalAPagar
+      }));
+    console.table(dbg);
+    
     paint();
+
 
   }catch(err){
     console.error(err);
