@@ -936,14 +936,15 @@ async function generarPDFLiquidacionProfesional(agg){
   
   // Columnas base (proporciones)
   let detCols = [
-    { key:'n',     label:'#',             w: 44  }, 
+    { key:'n',     label:'#',             w: 44  },
     { key:'fecha', label:'FECHA',         w: 110 },
     { key:'clin',  label:'CLÍNICA',       w: 160 },
     { key:'proc',  label:'PROCEDIMIENTO', w: 190 },
-    { key:'pac',   label:'PACIENTE',      w: 260 }, 
-    { key:'tipo',  label:'TIPO',          w: 110 }, 
-    { key:'monto', label:'MONTO',         w: 120 }
+    { key:'pac',   label:'PACIENTE',      w: 250 }, 
+    { key:'tipo',  label:'TIPO',          w: 150 }, 
+    { key:'monto', label:'MONTO',         w: 90  } 
   ];
+
 
   
   // ✅ Auto-ajuste exacto: para que sumen detW y SIEMPRE cierre el borde derecho
