@@ -428,12 +428,28 @@ async function generarPDFLiquidacionProfesional(agg){
   // 4 filas: Nro Liquidación (opcional si lo tienes), RUT Pago, Nombre, Profesión
   // Como acá no tienes nroLiquidacion/ profesion, mantenemos “Mes/Año” y “Tipo Persona”.
   // Puedes ajustar después si agregas campos reales.
+  // ✅ Siempre mostramos titular (persona) aunque el pago sea a empresa
   const dataRows = [
     ['Mes/Año', String(mesTxt).toUpperCase()],
+    ['Profesional', String(profNombre || '—').toUpperCase()],
+    ['RUT Profesional', String(profRut || '—').toUpperCase()]
+  ];
+  
+  // ✅ Si es jurídica, mostramos también empresa (en la misma tabla)
+  if (esJuridica) {
+    dataRows.push(
+      ['Empresa', String(empresaNombre || '—').toUpperCase()],
+      ['RUT Empresa', String(empresaRut || '—').toUpperCase()]
+    );
+  }
+  
+  // ✅ Y mantenemos el bloque de “pago”
+  dataRows.push(
     ['RUT Pago', String(rutMostrar).toUpperCase()],
     ['Nombre RUT de Pago', String(nombreMostrar).toUpperCase()],
     ['Tipo', String(tipoMostrar).toUpperCase()]
-  ];
+  );
+
 
   // altura tabla
   const dataH = dataRows.length * rowH;
