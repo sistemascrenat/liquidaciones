@@ -433,6 +433,7 @@ async function generarPDFLiquidacionProfesional(agg){
     ['Mes/Año', String(mesTxt).toUpperCase()],
     ['Profesional', String(profNombre || '—').toUpperCase()],
     ['RUT Profesional', String(profRut || '—').toUpperCase()]
+    ['Tipo de Persona', String(tipoMostrar).toUpperCase()]
   ];
   
   // ✅ Si es jurídica, mostramos también empresa (en la misma tabla)
@@ -445,9 +446,7 @@ async function generarPDFLiquidacionProfesional(agg){
   
   // ✅ Y mantenemos el bloque de “pago”
   dataRows.push(
-    ['RUT Pago', String(rutMostrar).toUpperCase()],
-    ['Nombre RUT de Pago', String(nombreMostrar).toUpperCase()],
-    ['Tipo', String(tipoMostrar).toUpperCase()]
+   
   );
 
 
