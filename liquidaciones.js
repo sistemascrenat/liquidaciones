@@ -433,7 +433,7 @@ async function generarPDFLiquidacionProfesional(agg){
   const dataRows = [];
   
   dataRows.push(['MES/AÑO', String(mesTxt).toUpperCase()]);
-  dataRows.push(['PEOFESIONAL', String(profNombre || '—').toUpperCase()]);
+  dataRows.push(['PROFESIONAL', String(profNombre || '—').toUpperCase()]);
   dataRows.push(['RUT', String(profRut || '—').toUpperCase()]);
   
   if(esJuridica){
