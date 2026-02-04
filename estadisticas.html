@@ -4,15 +4,19 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Estadísticas · Rentabilidad</title>
+
+  <!-- ✅ Favicon (como ya lo tenías) -->
   <link rel="icon" type="image/png" href="logoCR.png">
-  <!-- ✅ Tu CSS global del sistema (el mismo que usan cirugias/profesionales/etc.) -->
+
+  <!-- ✅ CSS global del sistema -->
   <link rel="stylesheet" href="./estilos.css" />
 </head>
 
 <body>
   <!-- ✅ Shell común: Sidebar + Main -->
   <div class="container">
-    <!-- SIDEBAR (inyectado) -->
+    <!-- ✅ IMPORTANTE: usa el MISMO id que estás usando en tu proyecto -->
+    <!-- Si tu layout.js inyecta en #sidebar-slot, déjalo así. -->
     <div id="sidebar-slot"></div>
 
     <main class="appMain">
@@ -32,29 +36,29 @@
           </div>
         </div>
 
-        <!-- ✅ Panel de filtros (estilo card del sistema) -->
+        <!-- ✅ Panel filtros -->
         <section class="card">
           <div class="cardBody">
 
             <div class="filtersGrid">
               <div class="field">
-                <label for="fAno">Año</label>
-                <select id="fAno"></select>
+                <label for="fYear">Año</label>
+                <select id="fYear"></select>
               </div>
 
               <div class="field">
-                <label for="fMes">Mes</label>
-                <select id="fMes"></select>
+                <label for="fMonth">Mes</label>
+                <select id="fMonth"></select>
               </div>
 
               <div class="field">
-                <label for="fDesde">Desde (opcional)</label>
-                <input id="fDesde" type="date" />
+                <label for="fFrom">Desde (opcional)</label>
+                <input id="fFrom" type="date" />
               </div>
 
               <div class="field">
-                <label for="fHasta">Hasta (opcional)</label>
-                <input id="fHasta" type="date" />
+                <label for="fTo">Hasta (opcional)</label>
+                <input id="fTo" type="date" />
               </div>
 
               <div class="field fieldWide">
@@ -63,23 +67,24 @@
               </div>
             </div>
 
-            <!-- Chips / toggles tipo paciente -->
-            <div class="chipsRow">
-              <button id="chipPI" class="chipBtn" type="button">PARTICULAR / ISAPRE</button>
-              <button id="chipFONASA" class="chipBtn" type="button">FONASA</button>
-              <button id="chipMLE" class="chipBtn" type="button">MLE</button>
-            </div>
+            <!-- ✅ Chips tipo paciente (el JS los pinta aquí) -->
+            <div id="chipsTipos" class="chipsRow"></div>
 
-            <!-- Botones -->
+            <!-- ✅ Botones -->
             <div class="actionsRow">
-              <button id="btnCargar" class="btn" type="button">Cargar datos</button>
+              <button id="btnLoad" class="btn" type="button">Cargar datos</button>
               <button id="btnReset" class="btn ghost" type="button">Reset filtros</button>
-              <button id="btnExportCSV" class="btn" type="button">Export CSV resumen</button>
+              <button id="btnExport" class="btn" type="button" disabled>Export CSV resumen</button>
 
               <div class="spacer"></div>
 
-              <div class="muted" id="status">
-                — 
+              <div class="muted" id="statusLine">—</div>
+            </div>
+
+            <!-- ✅ Progreso (el JS lo usa al leer pacientes/items) -->
+            <div id="progressWrap" class="progressWrap" style="display:none;">
+              <div class="progressTrack">
+                <div id="progressBar" class="progressBar" style="width:0%"></div>
               </div>
             </div>
 
@@ -91,37 +96,37 @@
           <div class="card">
             <div class="cardBody">
               <div class="kpiLabel">Casos</div>
-              <div class="kpiValue" id="kpiCasos">—</div>
-              <div class="kpiSub muted" id="kpiPendientes">Tarifas pendientes: —</div>
+              <div class="kpiValue" id="kCasos">—</div>
+              <div class="kpiSub muted" id="kPend">Tarifas pendientes: —</div>
             </div>
           </div>
 
           <div class="card">
             <div class="cardBody">
               <div class="kpiLabel">Ingresos (Precio)</div>
-              <div class="kpiValue" id="kpiIngresos">—</div>
-              <div class="kpiSub muted" id="kpiIngresosSub">—</div>
+              <div class="kpiValue" id="kIngresos">—</div>
+              <div class="kpiSub muted">—</div>
             </div>
           </div>
 
           <div class="card">
             <div class="cardBody">
               <div class="kpiLabel">Costos (HMQ + DP + INS)</div>
-              <div class="kpiValue" id="kpiCostos">—</div>
-              <div class="kpiSub muted" id="kpiCostosSub">—</div>
+              <div class="kpiValue" id="kCostos">—</div>
+              <div class="kpiSub muted" id="kDetalleCosto">—</div>
             </div>
           </div>
 
           <div class="card">
             <div class="cardBody">
               <div class="kpiLabel">Utilidad / Margen</div>
-              <div class="kpiValue" id="kpiUtilidad">—</div>
-              <div class="kpiSub muted" id="kpiMargen">—</div>
+              <div class="kpiValue" id="kUtilidad">—</div>
+              <div class="kpiSub muted" id="kMargen">Margen: —</div>
             </div>
           </div>
         </section>
 
-        <!-- ✅ Bloque tablas / rankings -->
+        <!-- ✅ Rankings -->
         <section class="grid2">
 
           <!-- Ranking por cirugía -->
@@ -129,9 +134,9 @@
             <div class="cardHeader">
               <div>
                 <div class="cardTitle">Ranking por cirugía</div>
-                <div class="muted mini" id="subRankingCir">Ordenado por utilidad total</div>
+                <div class="muted mini">Ordenado por utilidad total</div>
               </div>
-              <div class="muted mini" id="countCirugias">—</div>
+              <div class="muted mini" id="rankProcCount">—</div>
             </div>
 
             <div class="cardBody">
@@ -147,7 +152,7 @@
                       <th class="num">Margen</th>
                     </tr>
                   </thead>
-                  <tbody id="tbodyRankingCir">
+                  <tbody id="tbProc">
                     <tr><td colspan="6" class="muted">Sin datos</td></tr>
                   </tbody>
                 </table>
@@ -155,7 +160,7 @@
             </div>
           </div>
 
-          <!-- Por clínica + mix + calidad -->
+          <!-- Clínicas + mix/calidad -->
           <div class="stack">
 
             <!-- Clínicas -->
@@ -178,7 +183,7 @@
                         <th class="num">Margen</th>
                       </tr>
                     </thead>
-                    <tbody id="tbodyClinicas">
+                    <tbody id="tbClin">
                       <tr><td colspan="4" class="muted">Sin datos</td></tr>
                     </tbody>
                   </table>
@@ -193,8 +198,8 @@
                   <div class="cardTitle">Mix tipo paciente</div>
                 </div>
                 <div class="cardBody">
-                  <div class="mini muted" id="mixCounts">—</div>
-                  <div class="mini" id="mixPerc">—</div>
+                  <div class="mini muted" id="mixBox">—</div>
+                  <div class="mini" id="mixSub">—</div>
                 </div>
               </div>
 
@@ -204,50 +209,14 @@
                   <div class="cardTitle">Calidad de datos</div>
                 </div>
                 <div class="cardBody">
-                  <div class="mini" id="qualityOk">—</div>
-                  <div class="mini muted" id="qualityPend">—</div>
+                  <div class="mini" id="qualityBox">—</div>
+                  <div class="mini muted" id="qualitySub">—</div>
                 </div>
               </div>
             </div>
 
           </div>
 
-        </section>
-
-        <!-- ✅ Detalle (opcional) -->
-        <section class="card">
-          <div class="cardHeader">
-            <div>
-              <div class="cardTitle">Detalle (ítems analizados)</div>
-              <div class="muted mini">Esta tabla es útil para auditar casos con tarifa pendiente o margen raro.</div>
-            </div>
-            <div class="muted mini" id="countDetalle">—</div>
-          </div>
-
-          <div class="cardBody">
-            <div class="tableWrap">
-              <table class="table">
-                <thead>
-                  <tr>
-                    <th>Fecha</th>
-                    <th>Hora</th>
-                    <th>Paciente</th>
-                    <th>Clínica</th>
-                    <th>Cirugía</th>
-                    <th>Tipo</th>
-                    <th class="num">Precio</th>
-                    <th class="num">Costo</th>
-                    <th class="num">Utilidad</th>
-                    <th class="num">Margen</th>
-                    <th class="num">Bono</th>
-                  </tr>
-                </thead>
-                <tbody id="tbodyDetalle">
-                  <tr><td colspan="11" class="muted">Sin datos</td></tr>
-                </tbody>
-              </table>
-            </div>
-          </div>
         </section>
 
       </div>
@@ -257,29 +226,54 @@
   <!-- ✅ JS del módulo -->
   <script type="module" src="./estadisticas.js"></script>
 
-  <!-- ✅ Helpers mínimos SOLO si tu style.css no los trae (no pisa tu diseño) -->
+  <!-- ✅ CSS mínimo SOLO para layout interno (no pisa tu estilos.css) -->
   <style>
-    /* Si tu style.css ya define estos, puedes borrar este bloque. */
-    .filtersGrid{display:grid;grid-template-columns:160px 140px 180px 180px 1fr;gap:12px;align-items:end}
+    /* Layout de filtros */
+    .filtersGrid{
+      display:grid;
+      grid-template-columns:160px 140px 180px 180px 1fr;
+      gap:12px;
+      align-items:end;
+    }
     .field{display:flex;flex-direction:column;gap:6px}
     .fieldWide{grid-column:span 2}
+
     .chipsRow{display:flex;gap:10px;margin-top:12px;flex-wrap:wrap}
     .actionsRow{display:flex;gap:10px;align-items:center;margin-top:14px;flex-wrap:wrap}
     .spacer{flex:1}
+
     .kpiGrid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:12px}
     .kpiLabel{font-weight:700}
     .kpiValue{font-size:22px;font-weight:900;margin-top:6px}
     .kpiSub{margin-top:6px}
+
     .grid2{display:grid;grid-template-columns:1.25fr .75fr;gap:12px;margin-top:12px}
     .stack{display:flex;flex-direction:column;gap:12px}
     .grid2compact{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+
     .tableWrap{overflow:auto}
     .table{width:100%;border-collapse:separate;border-spacing:0}
     .table th,.table td{padding:10px;border-bottom:1px solid rgba(0,0,0,.08);vertical-align:middle}
     .table th{position:sticky;top:0;background:var(--card,#fff);z-index:1;text-align:left}
     .num{text-align:right}
-    .chipBtn{border:1px solid rgba(0,0,0,.15);background:transparent;padding:8px 10px;border-radius:999px;font-weight:800;cursor:pointer}
-    .btn{cursor:pointer}
+
+    /* Progreso */
+    .progressWrap{margin-top:12px}
+    .progressTrack{
+      width:100%;
+      height:10px;
+      background:rgba(0,0,0,.08);
+      border-radius:999px;
+      overflow:hidden;
+    }
+    .progressBar{
+      height:100%;
+      background:var(--accent,#00c7b6);
+      border-radius:999px;
+      transition:width .2s ease;
+    }
+
+    /* Responsive */
     @media (max-width:1100px){
       .filtersGrid{grid-template-columns:repeat(2,1fr)}
       .fieldWide{grid-column:span 2}
@@ -289,3 +283,4 @@
   </style>
 </body>
 </html>
+
