@@ -37,6 +37,21 @@ function normalize(s=''){
     .toLowerCase()
     .trim();
 }
+
+// ✅ Canoniza IDs/RUT para matching (soporta: "14.145.305-K", "14145305", "14145305K", etc.)
+function canonRutAny(v=''){
+  const s = (v ?? '').toString().toUpperCase().trim();
+  if(!s) return '';
+
+  // deja solo dígitos y K
+  const only = s.replace(/[^0-9K]/g,'');
+
+  // casos típicos:
+  // - "14145305K" (con DV)
+  // - "14145305"  (sin DV)
+  return only;
+}
+
 function escapeHtml(s=''){
   return (s ?? '').toString()
     .replaceAll('&','&amp;')
@@ -1136,10 +1151,29 @@ async function loadProfesionales(){
       descuentoUF: Number(x.descuentoUF || 0) || 0
     };
 
-
-
-    byId.set(String(doc.id), doc);
+    // ✅ Guardar en byId con múltiples variantes para que SIEMPRE matchee
+    const keys = new Set();
+    
+    // doc.id / rutId (lo que usas como id)
+    keys.add(String(doc.id || '').trim());
+    keys.add(String(doc.rutId || '').trim());
+    
+    // rut personal (con y sin DV, con puntos, etc.)
+    keys.add(String(doc.rut || '').trim());
+    
+    // además, versiones canonizadas
+    keys.add(canonRutAny(doc.id));
+    keys.add(canonRutAny(doc.rutId));
+    keys.add(canonRutAny(doc.rut));
+    
+    // guarda
+    for(const k of keys){
+      const kk = (k ?? '').toString().trim();
+      if(kk) byId.set(kk, doc);
+    }
+    
     if(nombreProfesional) byName.set(normalize(nombreProfesional), doc);
+
   });
 
   state.profesionalesByName = byName;
@@ -1449,10 +1483,25 @@ function buildLiquidaciones(){
       if(!profNameRaw && !profIdRaw) continue;
 
       // Buscar en catálogo: por ID o por nombre personal
+      // ✅ Normaliza el ID que venga desde producción (puede venir "14.145.305-K" o "14145305")
+      const profIdCanon = canonRutAny(profIdRaw);
+      
       const profDoc =
-        (profIdRaw && state.profesionalesById.get(String(profIdRaw))) ||
+        // 1) match por ID tal cual
+        (profIdRaw && state.profesionalesById.get(String(profIdRaw).trim())) ||
+      
+        // 2) match por ID canon (sin puntos/guiones)
+        (profIdCanon && state.profesionalesById.get(profIdCanon)) ||
+      
+        // 3) si el docId está guardado sin DV (ej: 14145305), y el canon viene con DV (14145305K),
+        // intentamos también con "solo dígitos" (remueve K al final si existe)
+        (profIdCanon && state.profesionalesById.get(profIdCanon.replace(/K$/,''))) ||
+      
+        // 4) fallback por nombre
         (profNameRaw && state.profesionalesByName.get(normalize(profNameRaw))) ||
+      
         null;
+
 
       // Datos de “titular” siempre = persona (cuando existe en catálogo),
       // si NO existe en catálogo, usamos lo que viene en producción.
@@ -1510,7 +1559,7 @@ function buildLiquidaciones(){
 
         // Profesional (titular siempre persona)
         profesionalNombre: titularNombre,
-        profesionalId: profDoc?.id || profIdRaw || '',
+        profesionalId: (profDoc?.id || profIdCanon || profIdRaw || '').toString(),
         profesionalRut: titularRut,
         tipoPersona,
 
