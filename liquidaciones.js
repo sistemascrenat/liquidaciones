@@ -769,6 +769,124 @@ async function generarPDFLiquidacionProfesional(agg){
   
   y = y - totalBarH - 10;
 
+  // =========================
+  // ✅ DESGLOSE FECHAS DE PAGO (post TOTAL A PAGAR)
+  // - 5 del mes cargado: PARTICULAR/ISAPRE (+ BONO si aplica)
+  // - 27 del mes cargado: FONASA
+  // - Monto Particular incluye: Particular/Isapre - Descuento + Bono (para que sume totalAPagar)
+  // =========================
+  {
+    const lines = Array.isArray(agg?.lines) ? agg.lines : [];
+  
+    // Sumas por bucket (según tu normalización: fonasa | particular_isapre)
+    const sumPartIsap = lines.reduce((acc, l) => {
+      const tp = String(l?.tipoPaciente || '').toLowerCase().trim();
+      const isFonasa = tp.includes('fona');
+      const m = Number(l?.monto || 0) || 0;
+      return isFonasa ? acc : (acc + m);
+    }, 0);
+  
+    const sumFonasa = lines.reduce((acc, l) => {
+      const tp = String(l?.tipoPaciente || '').toLowerCase().trim();
+      const isFonasa = tp.includes('fona');
+      const m = Number(l?.monto || 0) || 0;
+      return isFonasa ? (acc + m) : acc;
+    }, 0);
+  
+    // Bono y descuento (ya calculados arriba)
+    const bono = Number(bonoCLP || 0) || 0;
+    const desc = Number(descuentoCLP || 0) || 0;
+  
+    // ✅ Reparto para que el desglose sume EXACTO el totalAPagar:
+    // Particular/Isapre: Particular - Descuento + Bono
+    // Fonasa: Fonasa
+    let montoPart = Math.round(sumPartIsap - desc + bono);
+    let montoFona = Math.round(sumFonasa);
+  
+    // Si por descuento el montoPart quedara negativo, lo “arrastra” a Fonasa (sin dejar negativos)
+    if (montoPart < 0) {
+      montoFona = Math.max(0, montoFona + montoPart);
+      montoPart = 0;
+    }
+  
+    // Mostrar tabla solo si hay algo que desglosar (o si hay total a pagar)
+    const shouldShow = (Number(totalAPagar || 0) > 0) || (sumPartIsap > 0) || (sumFonasa > 0) || (bono > 0) || (desc > 0);
+  
+    if (shouldShow) {
+  
+      // helper fecha texto
+      const MES_TXT = String(monthNameEs(state.mesNum)).toUpperCase();
+      const ANO_TXT = String(state.ano);
+      const fechaPagoTxt = (day) => `${day} DE ${MES_TXT} ${ANO_TXT}`;
+  
+      // armado asunto (sin mencionar bono si no aplica)
+      const asuntoPart = bono > 0 ? 'PARTICULAR + BONO' : 'PARTICULAR';
+      const asuntoFona = 'FONASA';
+  
+      // medidas tabla
+      const headH3 = 22;
+      const rowH3  = 22;
+      const rows3 = [
+        { fecha: fechaPagoTxt(5),  asunto: asuntoPart, monto: montoPart },
+        { fecha: fechaPagoTxt(27), asunto: asuntoFona, monto: montoFona }
+      ];
+  
+      const tableH = headH3 + rows3.length * rowH3;
+  
+      // caja exterior
+      drawBox(page1, M, y, boxW, tableH, rgb(1,1,1), BORDER_SOFT, 1);
+  
+      // header azul RENNAT
+      drawBox(page1, M, y, boxW, headH3, RENNAT_BLUE, RENNAT_BLUE, 1);
+  
+      // columnas
+      const cFecha = 170;
+      const cMonto = 160;
+      const cAsun  = boxW - cFecha - cMonto;
+  
+      // separadores verticales
+      drawVLine(page1, M + cFecha, y, tableH, 1, BORDER_SOFT);
+      drawVLine(page1, M + cFecha + cAsun, y, tableH, 1, BORDER_SOFT);
+  
+      // headers (BLANCO / NEGRITA / MAYUS)
+      drawCellText(page1, 'FECHA DE PAGO', M, y, headH3, 9.5, true, rgb(1,1,1), 8);
+      drawCellText(page1, 'ASUNTO DEL PAGO', M + cFecha, y, headH3, 9.5, true, rgb(1,1,1), 8);
+      drawCellTextRight(page1, 'MONTO', M + cFecha + cAsun, y, cMonto, headH3, 9.5, true, rgb(1,1,1), 8);
+  
+      // filas (VERDE / TEXTO BLANCO / NEGRITA / MAYUS)
+      for (let i=0; i<rows3.length; i++) {
+        const r = rows3[i];
+        const yTop = y - headH3 - i*rowH3;
+  
+        // fondo verde fila completa
+        page1.drawRectangle({
+          x: M,
+          y: (yTop - rowH3),
+          width: boxW,
+          height: rowH3,
+          color: RENNAT_GREEN
+        });
+  
+        // redibujar separadores encima del verde (para que no desaparezcan)
+        drawVLine(page1, M + cFecha, yTop, rowH3, 1, BORDER_SOFT);
+        drawVLine(page1, M + cFecha + cAsun, yTop, rowH3, 1, BORDER_SOFT);
+  
+        // línea horizontal superior
+        drawHLine2(page1, M, yTop, boxW, 1, BORDER_SOFT);
+  
+        // textos
+        drawCellText(page1, String(r.fecha || '').toUpperCase(), M, yTop, rowH3, 10, true, rgb(1,1,1), 8);
+        drawCellText(page1, String(r.asunto || '').toUpperCase(), M + cFecha, yTop, rowH3, 10, true, rgb(1,1,1), 8);
+        drawCellTextRight(page1, money(r.monto || 0), M + cFecha + cAsun, yTop, cMonto, rowH3, 10, true, rgb(1,1,1), 8);
+      }
+  
+      // línea inferior
+      drawHLine2(page1, M, y - tableH, boxW, 1, BORDER_SOFT);
+  
+      // avanzar cursor
+      y = y - tableH - 10;
+    }
+  }
 
   // ✅ Caja DATOS CLÍNICA en Página 1
   const clinH = drawClinicaBoxPage1(page1, y);
