@@ -461,16 +461,40 @@ async function generarPDFLiquidacionProfesional(agg){
   for(let r=0; r<dataRows.length; r++){
     const yRowTop = y - r*rowH;
   
-    if(r > 0) drawHLine2(page1, M, yRowTop, boxW, 1, BORDER_SOFT);
-  
     // ✅ Blindado: si por cualquier razón viene undefined, no rompe
     const row = Array.isArray(dataRows[r]) ? dataRows[r] : ['',''];
     const label = row[0] ?? '';
     const value = row[1] ?? '';
   
-    drawCellText(page1, label, M, yRowTop, rowH, 10, false, TEXT_MAIN, 8);
-    drawCellText(page1, wrapClip(value, 50), M + c1, yRowTop, rowH, 10, true, TEXT_MAIN, 8);
+    // ✅ Detecta la fila “Profesional”
+    const isProfesionalRow = String(label).toLowerCase().trim() === 'profesional';
+  
+    // ✅ 1) Fondo verde SOLO para “Profesional”
+    if(isProfesionalRow){
+      // pinta el fondo de la fila completa (sin borde) - OJO: PDF-lib usa y desde abajo
+      page1.drawRectangle({
+        x: M,
+        y: (yRowTop - rowH),
+        width: boxW,
+        height: rowH,
+        color: RENNAT_GREEN
+      });
+  
+      // como el fondo tapa líneas, redibujamos la línea vertical del separador SOLO en esta fila
+      drawVLine(page1, M + c1, yRowTop, rowH, 1, BORDER_SOFT);
+    }
+  
+    // ✅ 2) Línea horizontal superior (va después para que se vea)
+    if(r > 0) drawHLine2(page1, M, yRowTop, boxW, 1, BORDER_SOFT);
+  
+    // ✅ 3) Texto: blanco si es “Profesional”
+    const labelColor = isProfesionalRow ? rgb(1,1,1) : TEXT_MAIN;
+    const valueColor = isProfesionalRow ? rgb(1,1,1) : TEXT_MAIN;
+  
+    drawCellText(page1, label, M, yRowTop, rowH, 10, false, labelColor, 8);
+    drawCellText(page1, wrapClip(value, 50), M + c1, yRowTop, rowH, 10, true, valueColor, 8);
   }
+
 
 
   y = y - dataH - 16;
