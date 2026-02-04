@@ -1640,7 +1640,11 @@ function buildLiquidaciones(){
     let bonoCLP = 0;
     let bonoTramo = null;
   
-    const aplicaBono = (x.rolPrincipal === 'r_cirujano') && (x.tieneBono === true) && (cirugiasComoPrincipal > 0);
+    const aplicaBono =
+      (x.rolPrincipal === 'r_cirujano') &&
+      (cirugiasComoPrincipal > 0) &&
+      (x.tieneBono === true || x.tieneBono === undefined || x.tieneBono === null);
+
     if(aplicaBono){
       const tramos = Array.isArray(x.bonosTramosOverride) ? x.bonosTramosOverride : state.bonosTramosGlobal;
       const tramo = pickTramo(tramos, cirugiasComoPrincipal);
