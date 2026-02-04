@@ -1232,14 +1232,29 @@ async function loadProcedimientos(){
    Config UF + Bonos
 ========================= */
 async function loadBonosConfig(){
+  // ✅ Defaults por si config/bonos no existe o viene sin tramos
+  const defaultTramos = [
+    { min: 11, max: 15, montoCLP: 1000000 },
+    { min: 16, max: 20, montoCLP: 1500000 },
+    { min: 21, max: 30, montoCLP: 3000000 },
+    { min: 31, max: null, montoCLP: 6000000 }
+  ];
+
   try{
     const ref = doc(db, 'config', 'bonos');
     const snap = await getDoc(ref);
+
     const x = snap.exists() ? (snap.data() || {}) : {};
-    state.bonosTramosGlobal = Array.isArray(x.tramos) ? x.tramos : [];
+    const tramos = Array.isArray(x.tramos) ? x.tramos : [];
+
+    // ✅ si viene vacío => usamos defaults
+    state.bonosTramosGlobal = tramos.length ? tramos : defaultTramos;
+
+    console.log('BONOS: tramos cargados =', state.bonosTramosGlobal);
+
   }catch(e){
-    console.warn('No se pudo leer config/bonos', e);
-    state.bonosTramosGlobal = [];
+    console.warn('No se pudo leer config/bonos, usando defaults', e);
+    state.bonosTramosGlobal = defaultTramos;
   }
 }
 
@@ -2173,6 +2188,16 @@ async function recalc(){
 
     buildLiquidaciones();
     
+    // 🔎 DEBUG: confirmar tramos de bonos cargados
+    console.log('BONOS tramos global (state.bonosTramosGlobal)=', state.bonosTramosGlobal);
+    console.table((state.bonosTramosGlobal || []).map(t => ({
+      min: t?.min,
+      max: t?.max,
+      montoCLP: t?.montoCLP,
+      monto: t?.monto,
+      bonoCLP: t?.bonoCLP
+    })));
+
     // 🔎 DEBUG: ver si hay cirujanos con bono detectados
     const dbg = state.liquidResumen
       .filter(x => x.rolPrincipal === 'r_cirujano')
@@ -2187,6 +2212,7 @@ async function recalc(){
         totalAPagar: x.ajustes?.totalAPagar
       }));
     console.table(dbg);
+
     
     paint();
 
