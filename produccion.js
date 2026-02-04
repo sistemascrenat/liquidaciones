@@ -2753,11 +2753,20 @@ function openItemModal(it){
   // 1) Guardar 1 ítem (inmediato)
   $('btnGuardarItem').onclick = async ()=>{
     const patch = collectItemPatchFromModal();
-    await saveOneItemPatch(it, patch);
-    toast('✅ Item guardado');
-    closeItemModal();
-    refreshDirtyUI();
+
+    try{
+      await saveOneItemPatch(it, patch);
+      toast('✅ Item guardado');
+      closeItemModal();
+      refreshDirtyUI();
+
+    }catch(err){
+      console.error('❌ btnGuardarItem: no se pudo guardar', err);
+      toast(`❌ No se pudo guardar: ${err?.message || 'ver consola'}`);
+      // NO cerramos el modal para que puedas reintentar
+    }
   };
+
 
   // 2) Guardar todo = ENCOLAR (no guardar aún)
   $('btnGuardarTodo').onclick = ()=>{
@@ -2875,17 +2884,37 @@ async function saveOneItemPatch(it, patch){
   it.resolved = resolveOneItem(it.normalizado);
 
   // 3) ✅ si está en STAGING, persiste el cambio en produccion_imports/{importId}/items/{itemId}
+  // 3) ✅ si está en STAGING, persiste el cambio en produccion_imports/{importId}/items/{itemId}
   if(state.status === 'staged'){
     const importId = state.importId;
     const itemId = it.itemId;
-  
+
     // ✅ si falta algo, esto ES un error (si no, la cola “dice que guardó” y no guardó)
     if(!importId || !itemId){
+      console.error('❌ STAGED: falta importId/itemId', { importId, itemId, it });
       throw new Error(`STAGED: falta importId/itemId para guardar. importId=${importId} itemId=${itemId}`);
     }
-  
+
     const refStagingItem = doc(db, 'produccion_imports', importId, 'items', itemId);
-  
+
+    // ✅ LOG: qué estoy intentando guardar
+    console.groupCollapsed('💾 saveOneItemPatch(STAGED)');
+    console.log('state.status:', state.status);
+    console.log('importId:', importId);
+    console.log('itemId:', itemId);
+    console.log('ref path:', `produccion_imports/${importId}/items/${itemId}`);
+    console.log('patch:', patch);
+    console.log('raw (preview):', {
+      'Clínica': it.raw?.['Clínica'],
+      'Tipo de Paciente': it.raw?.['Tipo de Paciente'],
+      'Cirugía': it.raw?.['Cirugía'],
+      'Cirujano': it.raw?.['Cirujano'],
+      'Anestesista': it.raw?.['Anestesista'],
+      'Ayudante 1': it.raw?.['Ayudante 1'],
+      'Ayudante 2': it.raw?.['Ayudante 2'],
+      'Arsenalera': it.raw?.['Arsenalera'],
+    });
+
     try{
       await setDoc(refStagingItem, {
         raw: it.raw,
@@ -2893,12 +2922,34 @@ async function saveOneItemPatch(it, patch){
         actualizadoEl: serverTimestamp(),
         actualizadoPor: state.user?.email || ''
       }, { merge:true });
-  
+
+      // ✅ VERIFICACIÓN: leer inmediatamente lo recién escrito
+      const back = await getDoc(refStagingItem);
+      if(!back.exists()){
+        console.error('❌ readback: el doc NO existe después de setDoc()', { importId, itemId });
+        throw new Error('No se encontró el item después de guardar (readback fail).');
+      }
+
+      const bd = back.data() || {};
+      console.log('✅ readback OK. Campos guardados:', {
+        actualizadoPor: bd.actualizadoPor,
+        updatedHasRaw: !!bd.raw,
+        updatedHasNormalizado: !!bd.normalizado,
+        rawClinica: bd.raw?.['Clínica'],
+        rawCirugia: bd.raw?.['Cirugía'],
+        rawCirujano: bd.raw?.['Cirujano'],
+      });
+
+      console.groupEnd();
+
     }catch(err){
+      console.error('❌ saveOneItemPatch(STAGED) falló', err);
+      console.groupEnd();
       // ✅ esto hace que “Guardar cola” sepa que falló y NO lo saque de la cola
       throw err;
     }
   }
+
 
 
   // 3) si ya está confirmada, persiste en producción
