@@ -176,13 +176,14 @@ async function generarPDFLiquidacionProfesional(agg){
   const rgb255 = (r,g,b)=> rgb(r/255, g/255, b/255);
   
   // Paleta RENNAT (sobria) — valores correctos para pdf-lib
-  const RENNAT_BLUE  = rgb255(0, 39, 56);      // #002738 (azul oscuro del logo aprox)
+  const RENNAT_BLUE  = rgb255(0, 39, 56);     
   const RENNAT_GREEN = rgb255(31, 140, 115);
+  const RENNAT_GRAY  = rgb255(210, 215, 220); 
   const TEXT_MAIN    = rgb(0.08, 0.09, 0.11);
   const TEXT_MUTED   = rgb(0.45, 0.48, 0.52);
   const BORDER_SOFT  = rgb(0.82, 0.84, 0.86);
-  const RENNAT_BLUE_SOFT  = rgb(0.18, 0.36, 0.45); // rol (azul apagado)
-  const RENNAT_GREEN_SOFT = rgb(0.20, 0.50, 0.42); // subtotal rol (verde apagado)
+  const RENNAT_BLUE_SOFT  = rgb(0.18, 0.36, 0.45); 
+  const RENNAT_GREEN_SOFT = rgb(0.20, 0.50, 0.42); 
 
   const M = 36;
 
@@ -234,7 +235,9 @@ async function generarPDFLiquidacionProfesional(agg){
   // =========================
   function drawClinicaBoxPage1(page, topY){
     const boxW = W - 2*M;
-    const emH = 104;
+  
+    // ✅ Más compacta
+    const emH = 82;
   
     // Marco
     page.drawRectangle({
@@ -247,17 +250,21 @@ async function generarPDFLiquidacionProfesional(agg){
       color: rgb(1,1,1)
     });
   
-    // Título
-    drawText(page, 'DATOS CLÍNICA RENNAT', M + 12, topY - 18, 10.5, true, RENNAT_BLUE);
+    // ✅ Título más chico
+    drawText(page, 'DATOS CLÍNICA RENNAT', M + 10, topY - 16, 9.2, true, RENNAT_BLUE);
   
-    // Líneas
-    drawText(page, 'RUT: 77.460.159-7', M + 12, topY - 36, 9.5, false, TEXT_MUTED);
-    drawText(page, 'RAZÓN SOCIAL: SERVICIOS MÉDICOS GCS PROVIDENCIA SPA.', M + 12, topY - 52, 9.5, false, TEXT_MUTED);
-    drawText(page, 'GIRO: ACTIVIDADES DE HOSPITALES Y CLÍNICAS PRIVADAS.', M + 12, topY - 68, 9.5, false, TEXT_MUTED);
-    drawText(page, 'DIRECCIÓN: AV MANUEL MONTT 427. PISO 10. PROVIDENCIA.', M + 12, topY - 84, 9.5, false, TEXT_MUTED);
+    // ✅ Texto más chico + menos interlineado
+    const fs = 8.2;
+    const lh = 14;
+  
+    drawText(page, 'RUT: 77.460.159-7', M + 10, topY - (16 + lh*1), fs, false, TEXT_MUTED);
+    drawText(page, 'RAZÓN SOCIAL: SERVICIOS MÉDICOS GCS PROVIDENCIA SPA.', M + 10, topY - (16 + lh*2), fs, false, TEXT_MUTED);
+    drawText(page, 'GIRO: ACTIVIDADES DE HOSPITALES Y CLÍNICAS PRIVADAS.', M + 10, topY - (16 + lh*3), fs, false, TEXT_MUTED);
+    drawText(page, 'DIRECCIÓN: AV MANUEL MONTT 427. PISO 10. PROVIDENCIA.', M + 10, topY - (16 + lh*4), fs, false, TEXT_MUTED);
   
     return emH;
   }
+
 
     // =========================
     // Caja DATOS CLÍNICA en horizontal (última página)
@@ -853,33 +860,33 @@ async function generarPDFLiquidacionProfesional(agg){
       drawCellText(page1, 'ASUNTO DEL PAGO', M + cFecha, y, headH3, 9.5, true, rgb(1,1,1), 8);
       drawCellTextRight(page1, 'MONTO', M + cFecha + cAsun, y, cMonto, headH3, 9.5, true, rgb(1,1,1), 8);
   
-      // filas (VERDE / TEXTO BLANCO / NEGRITA / MAYUS)
+      // filas (GRIS / TEXTO AZUL / NEGRITA / MAYUS)
       for (let i=0; i<rows3.length; i++) {
         const r = rows3[i];
         const yTop = y - headH3 - i*rowH3;
-  
-        // fondo verde fila completa
+      
+        // ✅ Fondo gris "del logo"
         page1.drawRectangle({
           x: M,
           y: (yTop - rowH3),
           width: boxW,
           height: rowH3,
-          color: RENNAT_GREEN
+          color: RENNAT_GRAY // 👈 nuevo color
         });
-  
-        // redibujar separadores encima del verde (para que no desaparezcan)
+      
+        // redibujar separadores encima del fondo
         drawVLine(page1, M + cFecha, yTop, rowH3, 1, BORDER_SOFT);
         drawVLine(page1, M + cFecha + cAsun, yTop, rowH3, 1, BORDER_SOFT);
-  
+      
         // línea horizontal superior
         drawHLine2(page1, M, yTop, boxW, 1, BORDER_SOFT);
-  
-        // textos
-        drawCellText(page1, String(r.fecha || '').toUpperCase(), M, yTop, rowH3, 10, true, rgb(1,1,1), 8);
-        drawCellText(page1, String(r.asunto || '').toUpperCase(), M + cFecha, yTop, rowH3, 10, true, rgb(1,1,1), 8);
-        drawCellTextRight(page1, money(r.monto || 0), M + cFecha + cAsun, yTop, cMonto, rowH3, 10, true, rgb(1,1,1), 8);
+      
+        // ✅ Textos AZUL RENNAT, negrita, mayúscula
+        drawCellText(page1, String(r.fecha || '').toUpperCase(), M, yTop, rowH3, 10, true, RENNAT_BLUE, 8);
+        drawCellText(page1, String(r.asunto || '').toUpperCase(), M + cFecha, yTop, rowH3, 10, true, RENNAT_BLUE, 8);
+        drawCellTextRight(page1, money(r.monto || 0), M + cFecha + cAsun, yTop, cMonto, rowH3, 10, true, RENNAT_BLUE, 8);
       }
-  
+ 
       // línea inferior
       drawHLine2(page1, M, y - tableH, boxW, 1, BORDER_SOFT);
   
