@@ -2969,6 +2969,13 @@ requireAuth({
     // ✅ Import selector: cargar sugerencias al entrar
     await fillImportSuggestions();
 
+    // ✅ (OPCIONAL PERO RECOMENDADO)
+    // Si fillImportSuggestions() auto-seleccionó el 1° ítem, cargamos staging automáticamente.
+    if ($('importSelect')?.value) {
+      $('importId').value = clean($('importSelect').value || '');
+      await loadStagingFromFirestore($('importSelect').value);
+    }
+
     /* -------------------------
        Import selector + ImportID
        (UNO SOLO, sin duplicar)
@@ -2993,7 +3000,6 @@ requireAuth({
     ------------------------- */
     $('mes')?.addEventListener('change', async () => {
       await fillImportSuggestions();
-      // opcional: limpiar selección previa
       if ($('importSelect')) $('importSelect').value = '';
       if ($('importId')) $('importId').value = '';
     });
@@ -3033,8 +3039,7 @@ requireAuth({
       const f = e.target.files?.[0];
       if (!f) return;
       await handleLoadCSV(f);
-      // permitir recargar el mismo archivo sin renombrar
-      e.target.value = '';
+      e.target.value = ''; // permitir recargar el mismo archivo sin renombrar
     });
 
     /* -------------------------
@@ -3053,7 +3058,7 @@ requireAuth({
     $('btnAnular')?.addEventListener('click', anularImportacion);
 
     /* -------------------------
-       Cargar staging manual por ImportID (input hidden/visible)
+       Cargar staging manual por ImportID
     ------------------------- */
     $('btnCargarImport')?.addEventListener('click', async () => {
       const importId = clean($('importId')?.value || '');
@@ -3070,8 +3075,7 @@ requireAuth({
        UI cola (si existe)
     ------------------------- */
     refreshDirtyUI();
-
-  } // ← fin onUser
-});  // ← fin requireAuth
+  }
+});
 
 
