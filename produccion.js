@@ -2256,13 +2256,12 @@ function buildSelectProfesionalHTML(it, roleField, resolvedIdField, label){
     }
 
     return opts.join('');
-  } // ✅ ← ESTA LLAVE FALTABA (y era la causa del error)
+  } // ✅ cierre correcto del IF (si no está, se te rompe el archivo)
 
   // Si no hay nombre en CSV, permitimos “(vacío)” sin bloquear
   if(!profCsv){
     opts.push(optionHtml('', '(Sin profesional)', true));
   } else {
-    // ✅ Si no hay ID y hay texto => pendiente
     opts.push(optionHtml(PEND_VALUE, `⚠️ PENDIENTE: ${profCsv}`, true));
     opts.push(optionHtml('', '(Seleccionar profesional)', false));
   }
