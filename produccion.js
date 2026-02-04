@@ -443,21 +443,46 @@ function enqueueDirtyEdit(key, it, patch){
 }
 
 async function flushDirtyEdits(){
-  if(dirtyCount() === 0){
+  const total = dirtyCount();
+  if(total === 0){
     toast('No hay cambios en cola.');
     return;
   }
-  const ok = confirm(`¿Guardar ${dirtyCount()} cambio(s) en cola?`);
+
+  const ok = confirm(`¿Guardar ${total} cambio(s) en cola?`);
   if(!ok) return;
 
-  // Guardado secuencial (seguro). Si luego quieres batch, lo optimizamos.
-  for(const [k, v] of state.dirtyEdits.entries()){
-    await saveOneItemPatch(v.it, v.patch);
-    state.dirtyEdits.delete(k);
+  let okCount = 0;
+  let failCount = 0;
+
+  // OJO: iteramos sobre una copia para poder mantener en cola los que fallen
+  const entries = Array.from(state.dirtyEdits.entries());
+
+  for(const [k, v] of entries){
+    try{
+      // intenta guardar
+      await saveOneItemPatch(v.it, v.patch);
+
+      // si no lanzó error, lo consideramos guardado
+      state.dirtyEdits.delete(k);
+      okCount++;
+
+    }catch(err){
+      failCount++;
+      console.warn('❌ flushDirtyEdits: no se pudo guardar', { key:k, err });
+
+      // IMPORTANTE: NO lo borramos de la cola
+      // así puedes reintentar después
+    }
   }
 
   refreshDirtyUI();
-  toast('✅ Cola guardada');
+
+  if(failCount === 0){
+    toast(`✅ Cola guardada (${okCount}/${total})`);
+  }else{
+    toast(`⚠️ Cola parcial: ${okCount} guardado(s), ${failCount} falló/fallaron. Revisa consola.`);
+  }
 }
 
 
@@ -2854,9 +2879,14 @@ async function saveOneItemPatch(it, patch){
     const importId = state.importId;
     const itemId = it.itemId;
   
-    if(importId && itemId){
-      const refStagingItem = doc(db, 'produccion_imports', importId, 'items', itemId);
+    // ✅ si falta algo, esto ES un error (si no, la cola “dice que guardó” y no guardó)
+    if(!importId || !itemId){
+      throw new Error(`STAGED: falta importId/itemId para guardar. importId=${importId} itemId=${itemId}`);
+    }
   
+    const refStagingItem = doc(db, 'produccion_imports', importId, 'items', itemId);
+  
+    try{
       await setDoc(refStagingItem, {
         raw: it.raw,
         normalizado: it.normalizado,
@@ -2864,11 +2894,12 @@ async function saveOneItemPatch(it, patch){
         actualizadoPor: state.user?.email || ''
       }, { merge:true });
   
-    } else {
-      // si no hay itemId, no podemos persistir (por eso el patch #1 es clave)
-      console.warn('STAGING edit sin itemId/importId, no se pudo guardar en Firestore', { importId, itemId });
+    }catch(err){
+      // ✅ esto hace que “Guardar cola” sepa que falló y NO lo saque de la cola
+      throw err;
     }
   }
+
 
   // 3) si ya está confirmada, persiste en producción
   if(state.status === 'confirmada'){
