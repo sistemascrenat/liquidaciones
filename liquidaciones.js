@@ -416,11 +416,12 @@ async function generarPDFLiquidacionProfesional(agg){
   
   drawBox(page1, barX, barTop, barW, barH, RENNAT_BLUE, RENNAT_BLUE, 1);
 
-
-  const title = 'LIQUIDACIÓN DE PAGO - PARTICIPACIONES MENSUALES';
-  const titleSize = 12;
+  // ✅ Título solicitado: "LIQUIDACIÓN DE PAGO MES AÑO"
+  const title = `LIQUIDACIÓN DE PAGO ${String(mesTxt).toUpperCase()}`; // ej: "LIQUIDACIÓN DE PAGO ENERO 2026"
+  const titleSize = 13;
   const titleW = measure(title, titleSize, true);
   drawText(page1, title, barX + (barW - titleW)/2, barTop - 19, titleSize, true, rgb(1,1,1));
+
 
   y = barTop - barH - 14;
 
@@ -432,7 +433,6 @@ async function generarPDFLiquidacionProfesional(agg){
 
   const dataRows = [];
   
-  dataRows.push(['MES/AÑO', String(mesTxt).toUpperCase()]);
   dataRows.push(['PROFESIONAL', String(profNombre || '—').toUpperCase()]);
   dataRows.push(['RUT', String(profRut || '—').toUpperCase()]);
   
