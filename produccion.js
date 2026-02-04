@@ -2939,23 +2939,29 @@ async function saveAllDirtyEdits(){
    Boot
 ========================= */
 requireAuth({
-  onUser: async (user)=>{
+  onUser: async (user) => {
     state.user = user;
 
+    // Sidebar / nav
     await loadSidebar({ active: 'produccion' });
     setActiveNav('produccion');
 
-    $('who').textContent = `Conectado: ${user.email}`;
+    // UI usuario
+    const whoEl = $('who');
+    if (whoEl) whoEl.textContent = `Conectado: ${user.email}`;
     wireLogout();
 
     // ✅ Al entrar: por defecto muestra el MES PASADO (ej: enero 2026 → diciembre 2025)
     setDefaultToPreviousMonth();
 
+    // Header tabla
     buildThead();
 
+    // Data base
     await loadMappings();
     await loadCatalogs();
 
+    // Render inicial
     recomputePending();
     setButtons();
     paintPreview();
@@ -2963,82 +2969,109 @@ requireAuth({
     // ✅ Import selector: cargar sugerencias al entrar
     await fillImportSuggestions();
 
-    // ✅ Cuando el usuario elige una importación, guardamos el importId real en el hidden
-    $('importSelect')?.addEventListener('change', ()=>{
-      const v = clean($('importSelect').value || '');
-      $('importId').value = v;
-    });
-    
-    // ✅ Import selector: recargar sugerencias si cambia Mes/Año
-    $('mes')?.addEventListener('change', async ()=>{
-      await fillImportSuggestions();
+    /* -------------------------
+       Import selector + ImportID
+       (UNO SOLO, sin duplicar)
+    ------------------------- */
+    const syncImportIdFromSelect = () => {
+      const sel = $('importSelect');
+      const hid = $('importId');
+      if (!sel || !hid) return '';
+      const v = clean(sel.value || '');
+      hid.value = v;
+      return v;
+    };
+
+    $('importSelect')?.addEventListener('change', async () => {
+      const v = syncImportIdFromSelect();
+      if (v) await loadStagingFromFirestore(v);
     });
 
-    $('ano')?.addEventListener('change', async ()=>{
+    /* -------------------------
+       Si cambia mes/año: refrescar sugerencias
+       (y limpiar selection/importId)
+    ------------------------- */
+    $('mes')?.addEventListener('change', async () => {
       await fillImportSuggestions();
+      // opcional: limpiar selección previa
+      if ($('importSelect')) $('importSelect').value = '';
+      if ($('importId')) $('importId').value = '';
     });
 
-    // ✅ Buscar
-    $('q')?.addEventListener('input', (e)=>{
+    $('ano')?.addEventListener('change', async () => {
+      await fillImportSuggestions();
+      if ($('importSelect')) $('importSelect').value = '';
+      if ($('importId')) $('importId').value = '';
+    });
+
+    /* -------------------------
+       Buscar
+    ------------------------- */
+    $('q')?.addEventListener('input', (e) => {
       state.ui.query = e.target.value || '';
       state.ui.page = 1;
       paintPreview();
     });
 
-    // ✅ Pager
-    $('btnPrev')?.addEventListener('click', ()=>{
+    /* -------------------------
+       Pager
+    ------------------------- */
+    $('btnPrev')?.addEventListener('click', () => {
       state.ui.page = Math.max(1, (state.ui.page || 1) - 1);
       paintPreview();
     });
-    $('btnNext')?.addEventListener('click', ()=>{
+
+    $('btnNext')?.addEventListener('click', () => {
       state.ui.page = (state.ui.page || 1) + 1;
       paintPreview();
     });
 
-    // ✅ Cargar CSV
-    $('csvFile')?.addEventListener('change', async (e)=>{
+    /* -------------------------
+       Cargar CSV
+    ------------------------- */
+    $('csvFile')?.addEventListener('change', async (e) => {
       const f = e.target.files?.[0];
-      if(!f) return;
+      if (!f) return;
       await handleLoadCSV(f);
-      // para permitir recargar el mismo archivo sin tener que cambiarle el nombre
+      // permitir recargar el mismo archivo sin renombrar
       e.target.value = '';
     });
 
-    // ✅ Resolver modal
-    $('btnResolver')?.addEventListener('click', ()=>{
-      openResolverModal();
-    });
-    $('btnResolverClose')?.addEventListener('click', ()=>{
-      closeResolverModal();
-    });
-    $('modalResolverBackdrop')?.addEventListener('click', (e)=>{
-      if(e.target === $('modalResolverBackdrop')) closeResolverModal();
+    /* -------------------------
+       Resolver modal
+    ------------------------- */
+    $('btnResolver')?.addEventListener('click', () => openResolverModal());
+    $('btnResolverClose')?.addEventListener('click', () => closeResolverModal());
+    $('modalResolverBackdrop')?.addEventListener('click', (e) => {
+      if (e.target === $('modalResolverBackdrop')) closeResolverModal();
     });
 
-    // ✅ Confirmar / Anular
+    /* -------------------------
+       Confirmar / Anular
+    ------------------------- */
     $('btnConfirmar')?.addEventListener('click', confirmarImportacion);
     $('btnAnular')?.addEventListener('click', anularImportacion);
 
-    // ✅ Cargar staging desde ImportID (manual)
-    $('btnCargarImport')?.addEventListener('click', async ()=>{
+    /* -------------------------
+       Cargar staging manual por ImportID (input hidden/visible)
+    ------------------------- */
+    $('btnCargarImport')?.addEventListener('click', async () => {
       const importId = clean($('importId')?.value || '');
-      if(!importId){ toast('Ingresa un ImportID'); return; }
+      if (!importId) { toast('Ingresa un ImportID'); return; }
       await loadStagingFromFirestore(importId);
     });
 
-    // ✅ Cargar staging desde selector (y sincronizar hidden importId)
-    $('importSelect')?.addEventListener('change', async ()=>{
-      const v = clean($('importSelect')?.value || '');
-      $('importId').value = v;
-      if(v) await loadStagingFromFirestore(v);
-    });
-
-    // ✅ Guardar cola (“Guardar todo” real)
+    /* -------------------------
+       Guardar cola (“Guardar todo” real)
+    ------------------------- */
     $('btnGuardarCola')?.addEventListener('click', saveAllDirtyEdits);
 
-    // ✅ Si tienes pill de cola en HTML, inicialízala
+    /* -------------------------
+       UI cola (si existe)
+    ------------------------- */
     refreshDirtyUI();
 
-  }
-});
+  } // ← fin onUser
+});  // ← fin requireAuth
+
 
