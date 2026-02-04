@@ -1295,9 +1295,12 @@ function paintResolverModal(){
     Clínicas: <b>${pc}</b> · Cirugías: <b>${ps}</b> · Ambulatorios: <b>${pa}</b> · Profesionales: <b>${pp}</b>
   `;
 
-  // Clínicas
+  /* =========================
+     CLÍNICAS
+  ========================= */
   const wrapC = $('resolverClinicasList');
   wrapC.innerHTML = '';
+
   if(pc === 0){
     wrapC.innerHTML = `<div class="muted tiny">✅ Sin pendientes de clínicas.</div>`;
   } else {
@@ -1305,7 +1308,7 @@ function paintResolverModal(){
       const row = document.createElement('div');
       row.className = 'miniRow';
 
-      const options = state.catalogs.clinicas
+      const options = (state.catalogs.clinicas || [])
         .map(c=> `<option value="${escapeHtml(c.id)}">${escapeHtml(`${c.nombre} (${c.id})`)}</option>`)
         .join('');
 
@@ -1330,9 +1333,10 @@ function paintResolverModal(){
         </div>
       `;
 
-      row.querySelector(`[data-save-clin="${CSS.escape(item.norm)}"]`).addEventListener('click', async ()=>{
+      // Guardar
+      row.querySelector(`[data-save-clin="${CSS.escape(item.norm)}"]`)?.addEventListener('click', async ()=>{
         const sel = row.querySelector(`select[data-assoc-clin="${CSS.escape(item.norm)}"]`);
-        const id = sel.value || '';
+        const id = sel?.value || '';
         if(!id){ toast('Selecciona una clínica'); return; }
         await persistMapping(docMapClinicas, item.norm, id);
         toast('Clínica asociada');
@@ -1340,14 +1344,16 @@ function paintResolverModal(){
         paintResolverModal();
       });
 
-      row.querySelector(`[data-pend-clin="${CSS.escape(item.norm)}"]`).addEventListener('click', async ()=>{
+      // Pendiente
+      row.querySelector(`[data-pend-clin="${CSS.escape(item.norm)}"]`)?.addEventListener('click', ()=>{
         state.allowPend.clinicas.add(item.norm);
         toast('Clínica marcada como pendiente (se podrá confirmar).');
         recomputePending();
         paintResolverModal();
       });
 
-      row.querySelector(`[data-create-clin="${CSS.escape(item.norm)}"]`).addEventListener('click', async ()=>{
+      // Crear
+      row.querySelector(`[data-create-clin="${CSS.escape(item.norm)}"]`)?.addEventListener('click', async ()=>{
         const nombre = item.csvName;
         const suggested = suggestClinicaId();
         const id = prompt('ID de clínica (ej: C001). Puedes editar:', suggested) || '';
@@ -1373,12 +1379,18 @@ function paintResolverModal(){
     }
   }
 
-  // Ambulatorios (placeholder)
+  /* =========================
+     AMBULATORIOS (placeholder)
+  ========================= */
   $('resolverAmbList').innerHTML = `<div class="muted tiny">— (Tu CSV actual no trae ambulatorios.)</div>`;
 
-  // Cirugías por contexto
+  /* =========================
+     CIRUGÍAS POR CONTEXTO
+     ✅ ARREGLADO: data-pend-cir / data-create-cir / data-save-cir
+  ========================= */
   const wrapS = $('resolverCirugiasList');
   wrapS.innerHTML = '';
+
   if(ps === 0){
     wrapS.innerHTML = `<div class="muted tiny">✅ Sin pendientes de cirugías.</div>`;
   } else {
@@ -1386,7 +1398,7 @@ function paintResolverModal(){
       const row = document.createElement('div');
       row.className = 'miniRow';
 
-      const options = state.catalogs.cirugias
+      const options = (state.catalogs.cirugias || [])
         .map(s=> `<option value="${escapeHtml(s.id)}">${escapeHtml(`${s.nombre} (${s.codigo})`)}</option>`)
         .join('');
 
@@ -1394,19 +1406,18 @@ function paintResolverModal(){
         .map(x=> `<span class="pill warn" style="cursor:pointer;" data-sug-key="${escapeHtml(item.key)}" data-sug-id="${escapeHtml(x.id)}">${escapeHtml(x.nombre)}</span>`)
         .join(' ');
 
-      const tipoOptions = TIPOS_PACIENTE
+      const tipoOptions = (TIPOS_PACIENTE || [])
         .map(t => {
           const sel = normalizeKey(t) === normalizeKey(item.tipoCsv) ? 'selected' : '';
           return `<option value="${escapeHtml(t)}" ${sel}>${escapeHtml(t)}</option>`;
         })
         .join('');
-      
+
       row.innerHTML = `
         <div>
           <div style="font-weight:900;">${escapeHtml(item.csvName)}</div>
           <div class="muted tiny"><b>Clínica:</b> ${escapeHtml(item.clinicaCsv)}</div>
-      
-          <!-- ✅ Tipo editable -->
+
           <div class="field" style="margin:8px 0 0 0;">
             <label>Tipo de Paciente (editable)</label>
             <select data-tipo-cir="${escapeHtml(item.key)}">
@@ -1414,11 +1425,14 @@ function paintResolverModal(){
             </select>
             <div class="help">Esto corrige el “contexto” usado para resolver la cirugía.</div>
           </div>
-      
+
           <div class="muted tiny mono">key: ${escapeHtml(item.key)}</div>
-          ${sug ? `<div style="margin-top:8px; display:flex; flex-wrap:wrap; gap:8px;">${sug}</div>` : `<div class="muted tiny" style="margin-top:8px;">Sin sugerencias.</div>`}
+          ${sug
+            ? `<div style="margin-top:8px; display:flex; flex-wrap:wrap; gap:8px;">${sug}</div>`
+            : `<div class="muted tiny" style="margin-top:8px;">Sin sugerencias.</div>`
+          }
         </div>
-      
+
         <div class="field" style="margin:0;">
           <label>Asociar a</label>
           <select data-assoc-cir="${escapeHtml(item.key)}">
@@ -1429,84 +1443,78 @@ function paintResolverModal(){
             o <button class="linkBtn" data-go-cir="${escapeHtml(item.key)}" type="button">crear en Cirugías</button>
           </div>
         </div>
-      
+
         <div style="display:flex; gap:8px; justify-content:flex-end;">
-          <button class="btn" data-pend-prof="${escapeHtml(item.key)}" type="button">Dejar pendiente</button>
-          <button class="btn soft" data-create-prof="${escapeHtml(item.key)}" type="button">+ Crear</button>
-          <button class="btn primary" data-save-prof="${escapeHtml(item.key)}" type="button">Guardar</button>
+          <button class="btn" data-pend-cir="${escapeHtml(item.key)}" type="button">Dejar pendiente</button>
+          <button class="btn primary" data-save-cir="${escapeHtml(item.key)}" type="button">Guardar</button>
         </div>
       `;
 
-
-      row.querySelectorAll('[data-sug-key]').forEach(pill=>{
+      // Click sugerencias -> setear select
+      row.querySelectorAll('[data-sug-key]')?.forEach(pill=>{
         pill.addEventListener('click', ()=>{
           const id = pill.getAttribute('data-sug-id') || '';
           const sel = row.querySelector(`select[data-assoc-cir="${CSS.escape(item.key)}"]`);
-          sel.value = id;
+          if(sel) sel.value = id;
         });
       });
 
-      row.querySelector(`[data-pend-cir="${CSS.escape(item.key)}"]`).addEventListener('click', ()=>{
-      // registra “permitido”
-      state.allowPend.cirugias.add(item.key);
-    
-      // ✅ importante: si el usuario cambió Tipo Paciente, lo aplicamos al staging
-      const selTipo = row.querySelector(`select[data-tipo-cir="${CSS.escape(item.key)}"]`);
-      const tipoElegido = clean(selTipo?.value || item.tipoCsv || '');
-    
-      for(const it of state.stagedItems){
-        const r = it.resolved || {};
-        if(r._cirKey === item.key){
-          if(it.normalizado) it.normalizado.tipoPaciente = tipoElegido || null;
-          if(it.raw) it.raw['Tipo de Paciente'] = tipoElegido || it.raw['Tipo de Paciente'];
-          it._search = null;
-        }
-      }
-    
-      toast('Cirugía marcada como pendiente (se podrá confirmar).');
-      recomputePending();
-      paintResolverModal();
-    });
+      // Pendiente (cirugía)
+      row.querySelector(`[data-pend-cir="${CSS.escape(item.key)}"]`)?.addEventListener('click', ()=>{
+        state.allowPend.cirugias.add(item.key);
 
-      row.querySelector(`[data-save-cir="${CSS.escape(item.key)}"]`).addEventListener('click', async ()=>{
-        const selCir = row.querySelector(`select[data-assoc-cir="${CSS.escape(item.key)}"]`);
-        const id = selCir.value || '';
-        if(!id){ toast('Selecciona una cirugía'); return; }
-      
+        // si cambió tipo, reflejar en staging
         const selTipo = row.querySelector(`select[data-tipo-cir="${CSS.escape(item.key)}"]`);
         const tipoElegido = clean(selTipo?.value || item.tipoCsv || '');
-      
-        // ✅ 1) Actualiza staging en memoria: tipoPaciente + raw['Tipo de Paciente']
-        for(const it of state.stagedItems){
+
+        for(const it of (state.stagedItems || [])){
           const r = it.resolved || {};
           if(r._cirKey === item.key){
-            if(it.normalizado){
-              it.normalizado.tipoPaciente = tipoElegido || null;
-            }
-            if(it.raw){
-              it.raw['Tipo de Paciente'] = tipoElegido || it.raw['Tipo de Paciente'];
-            }
-            // invalida búsqueda cacheada
+            if(it.normalizado) it.normalizado.tipoPaciente = tipoElegido || null;
+            if(it.raw) it.raw['Tipo de Paciente'] = tipoElegido || it.raw['Tipo de Paciente'];
             it._search = null;
           }
         }
-      
-        // ✅ 2) Persiste mapping con KEY recalculada usando el tipo elegido
-        // item.key era la key antigua; recalculamos con el tipo corregido
+
+        toast('Cirugía marcada como pendiente (se podrá confirmar).');
+        recomputePending();
+        paintResolverModal();
+      });
+
+      // Guardar (cirugía)
+      row.querySelector(`[data-save-cir="${CSS.escape(item.key)}"]`)?.addEventListener('click', async ()=>{
+        const selCir = row.querySelector(`select[data-assoc-cir="${CSS.escape(item.key)}"]`);
+        const id = selCir?.value || '';
+        if(!id){ toast('Selecciona una cirugía'); return; }
+
+        const selTipo = row.querySelector(`select[data-tipo-cir="${CSS.escape(item.key)}"]`);
+        const tipoElegido = clean(selTipo?.value || item.tipoCsv || '');
+
+        // 1) staging
+        for(const it of (state.stagedItems || [])){
+          const r = it.resolved || {};
+          if(r._cirKey === item.key){
+            if(it.normalizado) it.normalizado.tipoPaciente = tipoElegido || null;
+            if(it.raw) it.raw['Tipo de Paciente'] = tipoElegido || it.raw['Tipo de Paciente'];
+            it._search = null;
+          }
+        }
+
+        // 2) persist mapping con key recalculada
         const normClin = normalizeKey(item.clinicaCsv || '');
         const normTipo = normalizeKey(tipoElegido || '');
         const normCir  = normalizeKey(item.csvName || '');
-      
+
         const newKey = cirKey(normClin, normTipo, normCir);
         await persistMapping(docMapCirugias, newKey, id);
-      
+
         toast('Cirugía asociada (y tipo corregido en staging)');
         await refreshAfterMapping();
         paintResolverModal();
       });
 
-
-      row.querySelector(`[data-go-cir="${CSS.escape(item.key)}"]`).addEventListener('click', ()=>{
+      // Ir a crear cirugia
+      row.querySelector(`[data-go-cir="${CSS.escape(item.key)}"]`)?.addEventListener('click', ()=>{
         try{
           localStorage.setItem('CR_PREFILL_CIRUGIA_NOMBRE', item.csvName);
           localStorage.setItem('CR_PREFILL_TIPO_PACIENTE', item.tipoCsv);
@@ -1521,11 +1529,13 @@ function paintResolverModal(){
     }
   }
 
-  // ✅ Profesionales
+  /* =========================
+     PROFESIONALES
+     ✅ ARREGLADO: botón +Crear + listener async
+  ========================= */
   const wrapP = $('resolverProfesionalesList');
   if(wrapP){
     wrapP.innerHTML = '';
-    const pp = state.pending.prof.length;
 
     if(pp === 0){
       wrapP.innerHTML = `<div class="muted tiny">✅ Sin pendientes de profesionales.</div>`;
@@ -1534,23 +1544,16 @@ function paintResolverModal(){
         const row = document.createElement('div');
         row.className = 'miniRow';
 
-        // ✅ Profesionales “tipo agenda”: DR(A) APELLIDOS, NOMBRES (RUT)
-        // ✅ MAYÚSCULAS como hoy
-        // ✅ ORDENADO por la etiqueta transformada (APELLIDOS, NOMBRES)
         const profSorted = [...(state.catalogs.profesionales || [])]
           .map(p => ({
             ...p,
             _agendaLabel: proEtiquetaAgenda(p.nombre || '', p.id || '')
           }))
           .sort((a, b) => (a._agendaLabel || '').localeCompare((b._agendaLabel || ''), 'es'));
-        
+
         const options = profSorted
-          .map(p => {
-            return `<option value="${escapeHtml(p.id)}">${escapeHtml(p._agendaLabel)}</option>`;
-          })
+          .map(p => `<option value="${escapeHtml(p.id)}">${escapeHtml(p._agendaLabel)}</option>`)
           .join('');
-
-
 
         const sug = (item.suggestions || [])
           .map(x=> `<span class="pill warn" style="cursor:pointer;" data-sugp-key="${escapeHtml(item.key)}" data-sugp-id="${escapeHtml(x.id)}">${escapeHtml(`${x.nombre}`)}</span>`)
@@ -1561,7 +1564,10 @@ function paintResolverModal(){
             <div style="font-weight:900;">${escapeHtml(item.csvName)}</div>
             <div class="muted tiny"><b>Rol:</b> ${escapeHtml(item.roleLabel)}</div>
             <div class="muted tiny mono">key: ${escapeHtml(item.key)}</div>
-            ${sug ? `<div style="margin-top:8px; display:flex; flex-wrap:wrap; gap:8px;">${sug}</div>` : `<div class="muted tiny" style="margin-top:8px;">Sin sugerencias.</div>`}
+            ${sug
+              ? `<div style="margin-top:8px; display:flex; flex-wrap:wrap; gap:8px;">${sug}</div>`
+              : `<div class="muted tiny" style="margin-top:8px;">Sin sugerencias.</div>`
+            }
           </div>
 
           <div class="field" style="margin:0;">
@@ -1574,54 +1580,56 @@ function paintResolverModal(){
 
           <div style="display:flex; gap:8px; justify-content:flex-end;">
             <button class="btn" data-pend-prof="${escapeHtml(item.key)}" type="button">Dejar pendiente</button>
+            <button class="btn soft" data-create-prof="${escapeHtml(item.key)}" type="button">+ Crear</button>
             <button class="btn primary" data-save-prof="${escapeHtml(item.key)}" type="button">Guardar</button>
           </div>
         `;
 
-        row.querySelectorAll('[data-sugp-key]').forEach(pill=>{
+        // click sugerencia -> setear select
+        row.querySelectorAll('[data-sugp-key]')?.forEach(pill=>{
           pill.addEventListener('click', ()=>{
             const id = pill.getAttribute('data-sugp-id') || '';
             const sel = row.querySelector(`select[data-assoc-prof="${CSS.escape(item.key)}"]`);
-            sel.value = id;
+            if(sel) sel.value = id;
           });
         });
 
-        row.querySelector(`[data-pend-prof="${CSS.escape(item.key)}"]`).addEventListener('click', ()=>{
+        // pendiente
+        row.querySelector(`[data-pend-prof="${CSS.escape(item.key)}"]`)?.addEventListener('click', ()=>{
           state.allowPend.prof.add(item.key);
           toast('Profesional marcado como pendiente (se podrá confirmar).');
           recomputePending();
           paintResolverModal();
         });
 
-         // Pedimos RUT (docId) + nombre
+        // ✅ crear profesional (ANTES lo tenías SUELTO con await)
+        row.querySelector(`[data-create-prof="${CSS.escape(item.key)}"]`)?.addEventListener('click', async ()=>{
           const rut = clean(prompt('RUT del profesional (sin puntos ni guion, ej: 12345678K):', '') || '');
           if(!rut){ toast('Cancelado'); return; }
-        
+
           const nombre = clean(prompt('Nombre del profesional (ej: Paula Paoletto):', item.csvName || '') || '');
           if(!nombre){ toast('Falta nombre'); return; }
-        
-          // Guardar en /profesionales/{RUT}
+
           await setDoc(doc(db, 'profesionales', rut), {
-            nombreProfesional: nombre,     // ✅ tu campo real
+            nombreProfesional: nombre,
             estado: 'activo',
             creadoEl: serverTimestamp(),
             creadoPor: state.user?.email || '',
             actualizadoEl: serverTimestamp(),
             actualizadoPor: state.user?.email || ''
           }, { merge:true });
-        
-          // Asociar mapping para ESTE key rol||nombreCsv -> rut
+
           await persistMapping(docMapProf, item.key, rut);
-        
+
           toast('✅ Profesional creado y asociado');
           await refreshAfterMapping();
           paintResolverModal();
         });
-  
 
-        row.querySelector(`[data-save-prof="${CSS.escape(item.key)}"]`).addEventListener('click', async ()=>{
+        // guardar asociación
+        row.querySelector(`[data-save-prof="${CSS.escape(item.key)}"]`)?.addEventListener('click', async ()=>{
           const sel = row.querySelector(`select[data-assoc-prof="${CSS.escape(item.key)}"]`);
-          const id = sel.value || '';
+          const id = sel?.value || '';
           if(!id){ toast('Selecciona un profesional'); return; }
           await persistMapping(docMapProf, item.key, id);
           toast('Profesional asociado');
@@ -1633,8 +1641,8 @@ function paintResolverModal(){
       }
     }
   }
-
 }
+
 
 /* =========================
    Staging save
