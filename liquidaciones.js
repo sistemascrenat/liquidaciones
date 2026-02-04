@@ -712,10 +712,10 @@ async function generarPDFLiquidacionProfesional(agg){
     const tramoTxt = tramo
       ? (
           (tramo.max === null || tramo.max === undefined || tramo.max === '')
-            ? `Tramo ${tramoIdx || ''} (${tramo.min} a más cirugías)`
-            : `Tramo ${tramoIdx || ''} (${tramo.min} a ${tramo.max} cirugías)`
-        ).replace('Tramo  ', 'Tramo ')
-      : (tramoIdx ? `Tramo ${tramoIdx}` : '');
+            ? `TRAMO ${tramoIdx || ''} (${tramo.min} A MÁS CIRUGÍAS)`
+            : `TRAMO ${tramoIdx || ''} (${tramo.min} A ${tramo.max} CIRUGÍAS)`
+        ).replace('TRAMO ', 'TRAMO ')
+      : (tramoIdx ? `TRAMO ${tramoIdx}` : '');
   
     ajustesRows.push({
       item: `BONO CIRUJANO ${tramoTxt}`.trim(),
