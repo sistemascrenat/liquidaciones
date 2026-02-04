@@ -273,6 +273,38 @@
       transition:width .2s ease;
     }
 
+    /* ==========================
+     FIX: Separación sidebar / contenido
+     ========================== */
+  
+    /* Si tu shell usa flex sin gap, esto crea aire entre columnas */
+    .container{
+      gap: 18px;              /* ajusta: 12–24 */
+      padding: 14px;          /* aire global del layout */
+    }
+    
+    /* Asegura que el main no quede pegado aunque no exista gap */
+    .appMain{
+      padding-left: 6px;      /* micro aire extra */
+    }
+    
+    /* Si tu sidebar viene “pegado” visualmente, un borde ayuda */
+    #sidebar-slot{
+      border-right: 1px solid rgba(255,255,255,.18); /* sutil sobre verde */
+      padding-right: 12px;    /* separa contenido interno del borde */
+    }
+    
+    /* En pantallas chicas: menos padding para no perder espacio */
+    @media (max-width: 900px){
+      .container{
+        gap: 10px;
+        padding: 10px;
+      }
+      #sidebar-slot{
+        padding-right: 8px;
+      }
+    }
+
     /* Responsive */
     @media (max-width:1100px){
       .filtersGrid{grid-template-columns:repeat(2,1fr)}
