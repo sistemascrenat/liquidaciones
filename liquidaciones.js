@@ -1168,12 +1168,13 @@ async function loadUFDelMes(){
   state.ufDocId = id;
 
   try{
-    const ref = doc(db, 'config', 'uf', id);
+    // ✅ Ruta válida: config/uf/meses/{YYYYMM}
+    const ref = doc(db, 'config', 'uf', 'meses', id);
     const snap = await getDoc(ref);
     const x = snap.exists() ? (snap.data() || {}) : {};
     state.ufValorCLP = Number(x.ufValorCLP || 0) || 0;
   }catch(e){
-    console.warn('No se pudo leer config/uf/'+id, e);
+    console.warn('No se pudo leer config/uf/meses/'+id, e);
     state.ufValorCLP = 0;
   }
 }
@@ -1182,7 +1183,9 @@ async function saveUFDelMes(nuevoValorCLP){
   const id = yyyymm(state.ano, state.mesNum);
   state.ufDocId = id;
 
-  const ref = doc(db, 'config', 'uf', id);
+  // ✅ Ruta válida: config/uf/meses/{YYYYMM}
+  const ref = doc(db, 'config', 'uf', 'meses', id);
+
   const payload = {
     ufValorCLP: Number(nuevoValorCLP || 0) || 0,
     fecha: `${state.ano}-${String(state.mesNum).padStart(2,'0')}-01`,
@@ -2107,7 +2110,7 @@ requireAuth({
 
     $('btnUF')?.addEventListener('click', ()=>{
       $('ufBackdrop').style.display = 'grid';
-      $('ufSub').textContent = `Mes: ${monthNameEs(state.mesNum)} ${state.ano} · Doc: config/uf/${yyyymm(state.ano, state.mesNum)}`;
+      $('ufSub').textContent = `Mes: ${monthNameEs(state.mesNum)} ${state.ano} · Doc: config/uf/meses/${yyyymm(state.ano, state.mesNum)}`;
       $('ufValor').value = state.ufValorCLP ? String(state.ufValorCLP) : '';
     });
     
