@@ -1,0 +1,329 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Estadísticas · Rentabilidad</title>
+
+  <link rel="stylesheet" href="./style.css" />
+  <style>
+    /* Ajustes locales (respeta tu style.css global) */
+    .page {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 18px;
+    }
+    .topbar {
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:12px;
+      margin-bottom: 14px;
+    }
+    .titleBlock h1{
+      font-size: 20px;
+      margin:0;
+    }
+    .titleBlock .muted{ font-size: 12px; }
+    .panel{
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 14px;
+      box-shadow: 0 10px 20px rgba(15,23,42,.06);
+    }
+    .grid{
+      display:grid;
+      gap:12px;
+    }
+    .grid.filters{
+      grid-template-columns: 160px 160px 1fr 1fr;
+      align-items:end;
+    }
+    .grid.kpis{
+      grid-template-columns: repeat(4, 1fr);
+    }
+    .kpi{
+      padding: 12px;
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      background: #fff;
+      min-height: 72px;
+    }
+    .kpi .kpiLabel{ font-size:12px; color: var(--muted); }
+    .kpi .kpiValue{ font-size:18px; font-weight:900; margin-top:4px; }
+    .kpi .kpiSub{ font-size:12px; color: var(--muted); margin-top:4px; }
+    .row2{
+      display:grid;
+      grid-template-columns: 1.2fr .8fr;
+      gap:12px;
+      margin-top: 12px;
+    }
+    .row2 .panel{ height:100%; }
+    .formField label{
+      display:block;
+      font-size:12px;
+      color: var(--muted);
+      margin-bottom:6px;
+    }
+    .formField input, .formField select{
+      width:100%;
+      padding:10px 10px;
+      border:1px solid var(--border);
+      border-radius: 12px;
+      background:#fff;
+      outline:none;
+    }
+    .formField input:focus, .formField select:focus{
+      border-color: var(--accent);
+      box-shadow: 0 0 0 4px rgba(0,199,182,.14);
+    }
+    .btn{
+      padding:10px 12px;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      background:#fff;
+      cursor:pointer;
+      font-weight:700;
+    }
+    .btn.primary{
+      background: var(--accent);
+      border-color: var(--accent);
+      color:#062a27;
+    }
+    .btn:disabled{
+      opacity:.6;
+      cursor:not-allowed;
+    }
+    .chips{
+      display:flex;
+      flex-wrap:wrap;
+      gap:8px;
+      margin-top: 10px;
+    }
+    .chip{
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 6px 10px;
+      font-size: 12px;
+      background: #fff;
+      cursor:pointer;
+      user-select:none;
+    }
+    .chip.active{
+      background: var(--accent-soft);
+      border-color: var(--accent);
+      font-weight: 800;
+    }
+    table{
+      width:100%;
+      border-collapse: collapse;
+    }
+    th, td{
+      border-bottom: 1px solid var(--border);
+      padding: 10px 8px;
+      font-size: 13px;
+      vertical-align: top;
+    }
+    th{
+      text-align:left;
+      font-size:12px;
+      color: var(--muted);
+      font-weight:800;
+      background: #fff;
+      position: sticky;
+      top: 0;
+      z-index: 1;
+    }
+    .mono{ font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+    .right{ text-align:right; }
+    .badge{
+      display:inline-block;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 12px;
+      border: 1px solid var(--border);
+      background:#fff;
+    }
+    .ok{ border-color:#86efac; background:#f0fdf4; }
+    .warn{ border-color:#facc15; background:#fffbeb; }
+    .bad{ border-color:#fda4af; background:#fff1f2; }
+    .mini{
+      font-size:12px;
+      color: var(--muted);
+      margin-top: 8px;
+      line-height: 1.35;
+    }
+    .progressLine{
+      height: 8px;
+      background: #eef2ff;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      overflow: hidden;
+      margin-top: 10px;
+    }
+    .progressLine > div{
+      height:100%;
+      width:0%;
+      background: var(--accent);
+    }
+    .split2{
+      display:grid;
+      grid-template-columns: 1fr 1fr;
+      gap:12px;
+      margin-top: 12px;
+    }
+
+    @media (max-width: 980px){
+      .grid.filters{ grid-template-columns: 1fr 1fr; }
+      .grid.kpis{ grid-template-columns: 1fr 1fr; }
+      .row2{ grid-template-columns: 1fr; }
+      .split2{ grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+
+<body>
+  <!-- Sidebar común (si tu layout.js la inyecta, perfecto) -->
+  <div class="page">
+    <div class="topbar">
+      <div class="titleBlock">
+        <h1>Estadísticas · Rentabilidad</h1>
+        <div class="muted" id="subTitle">Cruza Producción + Tarifario (precio/costo/utilidad)</div>
+      </div>
+      <div class="muted" id="who">—</div>
+    </div>
+
+    <div class="panel">
+      <div class="grid filters">
+        <div class="formField">
+          <label>Año</label>
+          <select id="fYear"></select>
+        </div>
+
+        <div class="formField">
+          <label>Mes</label>
+          <select id="fMonth"></select>
+        </div>
+
+        <div class="formField">
+          <label>Rango fechas (opcional)</label>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+            <input id="fFrom" type="date" />
+            <input id="fTo" type="date" />
+          </div>
+        </div>
+
+        <div class="formField">
+          <label>Búsqueda (cirugía / clínica / tipo paciente)</label>
+          <input id="fQ" placeholder="Ej: manga, huinganal, fonasa" />
+        </div>
+      </div>
+
+      <div class="chips" id="chipsTipos">
+        <!-- se pinta desde JS -->
+      </div>
+
+      <div style="display:flex; gap:10px; margin-top:12px; flex-wrap:wrap;">
+        <button class="btn primary" id="btnLoad">Cargar datos</button>
+        <button class="btn" id="btnReset">Reset filtros</button>
+        <button class="btn" id="btnExport" disabled>Export CSV resumen</button>
+      </div>
+
+      <div class="mini" id="statusLine">Listo.</div>
+      <div class="progressLine" id="progressWrap" style="display:none;">
+        <div id="progressBar"></div>
+      </div>
+    </div>
+
+    <div style="height:12px;"></div>
+
+    <div class="grid kpis" id="kpis">
+      <div class="kpi">
+        <div class="kpiLabel">Casos</div>
+        <div class="kpiValue" id="kCasos">—</div>
+        <div class="kpiSub" id="kPend">—</div>
+      </div>
+      <div class="kpi">
+        <div class="kpiLabel">Ingresos (Precio)</div>
+        <div class="kpiValue" id="kIngresos">—</div>
+        <div class="kpiSub" id="kMix">—</div>
+      </div>
+      <div class="kpi">
+        <div class="kpiLabel">Costos (HMQ+DP+INS)</div>
+        <div class="kpiValue" id="kCostos">—</div>
+        <div class="kpiSub" id="kDetalleCosto">—</div>
+      </div>
+      <div class="kpi">
+        <div class="kpiLabel">Utilidad / Margen</div>
+        <div class="kpiValue" id="kUtilidad">—</div>
+        <div class="kpiSub" id="kMargen">—</div>
+      </div>
+    </div>
+
+    <div class="row2">
+      <div class="panel">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;">
+          <div>
+            <div style="font-weight:900;">Ranking por cirugía</div>
+            <div class="muted" style="font-size:12px;">Ordenado por utilidad total</div>
+          </div>
+          <span class="badge" id="rankProcCount">—</span>
+        </div>
+
+        <div style="max-height:420px; overflow:auto; margin-top:10px;">
+          <table>
+            <thead>
+              <tr>
+                <th>Cirugía</th>
+                <th class="right">Casos</th>
+                <th class="right">Precio</th>
+                <th class="right">Costo</th>
+                <th class="right">Utilidad</th>
+                <th class="right">Margen</th>
+              </tr>
+            </thead>
+            <tbody id="tbProc"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div style="font-weight:900;">Clínicas</div>
+        <div class="muted" style="font-size:12px;">Utilidad total por clínica</div>
+
+        <div style="max-height:420px; overflow:auto; margin-top:10px;">
+          <table>
+            <thead>
+              <tr>
+                <th>Clínica</th>
+                <th class="right">Casos</th>
+                <th class="right">Utilidad</th>
+                <th class="right">Margen</th>
+              </tr>
+            </thead>
+            <tbody id="tbClin"></tbody>
+          </table>
+        </div>
+
+        <div class="split2">
+          <div class="panel" style="padding:12px;">
+            <div class="muted" style="font-size:12px;">Mix tipo paciente</div>
+            <div style="font-weight:900;margin-top:4px;" id="mixBox">—</div>
+            <div class="mini" id="mixSub">—</div>
+          </div>
+          <div class="panel" style="padding:12px;">
+            <div class="muted" style="font-size:12px;">Calidad de datos</div>
+            <div style="font-weight:900;margin-top:4px;" id="qualityBox">—</div>
+            <div class="mini" id="qualitySub">—</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Tu init Firebase (debe exportar db) -->
+  <script type="module" src="./estadisticas.js"></script>
+</body>
+</html>
