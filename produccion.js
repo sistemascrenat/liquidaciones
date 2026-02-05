@@ -1769,6 +1769,54 @@ function paintResolverModal(){
   }
 }
 
+/* =========================
+   ✅ Aprender mapping desde el ítem (cuando el usuario elige en el modal)
+   - Guarda decisión en produccion_mappings/*
+========================= */
+async function learnMappingsFromItemDecision(patch){
+  if(!patch || !patch._selectedIds || !patch._originalCsv) return;
+
+  const sel = patch._selectedIds;
+  const orig = patch._originalCsv;
+
+  const jobs = [];
+
+  // ---- Clínica ----
+  if(sel.clinicaId && clean(orig.clinica)){
+    const keyClin = normalizeKey(orig.clinica);
+    jobs.push(persistMapping(docMapClinicas, keyClin, sel.clinicaId));
+  }
+
+  // ---- Cirugía por contexto (Clínica + Tipo + Cirugía) ----
+  if(sel.cirugiaId && clean(orig.cirugia)){
+    const keyCir = cirKey(
+      normalizeKey(orig.clinica || ''),
+      normalizeKey(orig.tipoPaciente || ''),
+      normalizeKey(orig.cirugia || '')
+    );
+    jobs.push(persistMapping(docMapCirugias, keyCir, sel.cirugiaId));
+  }
+
+  // ---- Profesionales por rol ----
+  const roles = [
+    { role:'r_cirujano',    name: orig.profesionales?.cirujano,    id: sel.profIds?.cirujanoId },
+    { role:'r_anestesista', name: orig.profesionales?.anestesista, id: sel.profIds?.anestesistaId },
+    { role:'r_ayudante_1',  name: orig.profesionales?.ayudante1,   id: sel.profIds?.ayudante1Id },
+    { role:'r_ayudante_2',  name: orig.profesionales?.ayudante2,   id: sel.profIds?.ayudante2Id },
+    { role:'r_arsenalera',  name: orig.profesionales?.arsenalera,  id: sel.profIds?.arsenaleraId }
+  ];
+
+  for(const r of roles){
+    if(r.id && clean(r.name)){
+      const keyProf = profKey(r.role, r.name);
+      jobs.push(persistMapping(docMapProf, keyProf, r.id));
+    }
+  }
+
+  if(jobs.length){
+    await Promise.all(jobs);
+  }
+}
 
 /* =========================
    Staging save
@@ -3021,6 +3069,40 @@ function collectItemPatchFromModal(){
   }
 
 
+  // ✅ Guardamos también: (1) IDs elegidos y (2) textos originales del CSV
+  const it = state._editingItemRef || null;
+
+  const origClin = clean(it?.normalizado?.clinica || it?.raw?.['Clínica'] || '');
+  const origTipo = clean(it?.normalizado?.tipoPaciente || it?.raw?.['Tipo de Paciente'] || '');
+  const origCir  = clean(it?.normalizado?.cirugia || it?.raw?.['Cirugía'] || '');
+
+  const origProf = {
+    cirujano:    clean(it?.normalizado?.profesionales?.cirujano    || it?.raw?.['Cirujano']     || ''),
+    anestesista: clean(it?.normalizado?.profesionales?.anestesista || it?.raw?.['Anestesista']  || ''),
+    ayudante1:   clean(it?.normalizado?.profesionales?.ayudante1   || it?.raw?.['Ayudante 1']   || ''),
+    ayudante2:   clean(it?.normalizado?.profesionales?.ayudante2   || it?.raw?.['Ayudante 2']   || ''),
+    arsenalera:  clean(it?.normalizado?.profesionales?.arsenalera  || it?.raw?.['Arsenalera']   || '')
+  };
+
+  // IDs elegidos (si el usuario eligió algo real)
+  const clinIdSel = clean($('edClinicaSel')?.value || '');
+  const cirIdSel  = clean($('edCirugiaSel')?.value || '');
+
+  function pickProfId(selId){
+    const v = clean($(selId)?.value || '');
+    if(!v) return '';                  // “Sin profesional”
+    if(v === PEND_VALUE) return '';    // pendiente
+    return v;                          // id (rut)
+  }
+
+  const profIdsSel = {
+    cirujanoId:    pickProfId('edCirujanoSel'),
+    anestesistaId: pickProfId('edAnestesistaSel'),
+    ayudante1Id:   pickProfId('edAy1Sel'),
+    ayudante2Id:   pickProfId('edAy2Sel'),
+    arsenaleraId:  pickProfId('edArsSel')
+  };
+
   return {
     clinica: clinicaTxt,
     tipoPaciente: tipoTxt,
@@ -3032,12 +3114,29 @@ function collectItemPatchFromModal(){
       ayudante1:    pickProfText('edAy1Sel',         'ayudante1',   'Ayudante 1'),
       ayudante2:    pickProfText('edAy2Sel',         'ayudante2',   'Ayudante 2'),
       arsenalera:   pickProfText('edArsSel',         'arsenalera',  'Arsenalera')
+    },
+
+    // ✅ EXTRA (para “aprender”)
+    _selectedIds: {
+      clinicaId: (clinIdSel && clinIdSel !== PEND_VALUE) ? clinIdSel : '',
+      cirugiaId: (cirIdSel  && cirIdSel  !== PEND_VALUE) ? cirIdSel  : '',
+      profIds: profIdsSel
+    },
+    _originalCsv: {
+      clinica: origClin,
+      tipoPaciente: origTipo,
+      cirugia: origCir,
+      profesionales: origProf
     }
   };
 }
 
 
 async function saveOneItemPatch(it, patch, options = {}){
+  // ✅ 0) “Aprender” mapping desde este ítem (para futuras importaciones)
+  //     (si el usuario eligió IDs en los selects)
+  await learnMappingsFromItemDecision(patch);}
+
   // 1) aplica al staging en memoria
   it.normalizado = it.normalizado || {};
   it.normalizado.clinica = patch.clinica || null;
