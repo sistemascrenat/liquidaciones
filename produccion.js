@@ -2192,20 +2192,29 @@ async function guardarColaEnProduccionConfirmada(queueItems){
     // Importante: MERGE para “pisar” los campos resueltos SIN romper lo ya confirmado
     // y mantener trazabilidad si usas importId.
     const payload = {
-      ...it,
+      raw: it.raw || {},
       normalizado: {
         ...(it.normalizado || {}),
         fechaISO,
         horaHM,
         rut: rutKey
       },
-      // opcional: marca que este item ya se resolvió post-confirmación
+    
+      // si quieres empujar también los campos “resueltos”:
+      clinica: it.normalizado?.clinica ?? null,
+      cirugia: it.normalizado?.cirugia ?? null,
+      tipoPaciente: it.normalizado?.tipoPaciente ?? null,
+      profesionales: it.normalizado?.profesionales || {},
+    
+      // marca post-fix
       pendiente: false,
+    
       actualizadoEl: serverTimestamp(),
-      actualizadoPor: (state.userEmail || null)
+      actualizadoPor: (state.user?.email || '')
     };
-
+    
     batch.set(ref, payload, { merge: true });
+
     escritos++;
   }
 
@@ -2277,17 +2286,24 @@ async function handleLoadCSV(file){
   setStatus(`🟡 Staging listo: ${staged.length} filas (líneas vacías descartadas)`);
   buildThead();
 
-  // ✅ al crear import nuevo: cola vacía en Firestore
+  // ✅ 1) Guardar staging en Firestore (NECESARIO para confirmar y para sobrevivir recargas)
+  await saveStagingToFirestore();
+
+  // ✅ 2) Limpiar cola en Firestore (import nuevo)
   await clearDirtyQueueDoc(state.importId);
-  refreshDirtyUI();
-  
-  // ✅ refrescar selector del mes y seleccionar el nuevo import
+
+  // ✅ 3) Refrescar selector del mes y seleccionar el nuevo import
   await fillImportSuggestions();
-  $('importSelect').value = state.importId;
-  $('importId').value = state.importId;
-  
-  await refreshAfterMapping();
+  if ($('importSelect')) $('importSelect').value = state.importId;
+  if ($('importId')) $('importId').value = state.importId;
+
+  // ✅ 4) Re-cargar desde Firestore para:
+  // - tener idx consistente (1..N)
+  // - asegurar itemId estable
+  // - asegurar que la cola se rehidrate bien
+  await loadStagingFromFirestore(state.importId);
 }
+
 
 /* =========================
    Refresh pipeline
@@ -3269,22 +3285,6 @@ requireAuth({
       if (!f) return;
       await handleLoadCSV(f);
       e.target.value = ''; // permitir recargar el mismo archivo sin renombrar
-    });
-
-    /* -------------------------
-   4.2) Cola de cambios (Guardar todo)
-   - Guardar cola: intenta guardar todos los edits encolados
-   - Limpiar cola: borra cola local + borra doc en Firestore (para el import actual)
-    ------------------------- */
-    $('btnGuardarCola')?.addEventListener('click', async () => {
-      try{
-        await saveAllDirtyEdits();              // usa tu función (staged -> staging / confirmada -> producción)
-        await persistDirtyQueueNow();           // deja Firestore consistente (por si quedó algo)
-        toast('✅ Cola guardada', 'ok');
-      }catch(err){
-        console.error('❌ btnGuardarCola', err);
-        toast(`❌ No se pudo guardar la cola: ${err?.message || 'ver consola'}`);
-      }
     });
     
     $('btnLimpiarCola')?.addEventListener('click', async () => {
