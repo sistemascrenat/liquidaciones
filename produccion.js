@@ -774,7 +774,7 @@ function paintPreview(){
 
   if(total === 0){
     const tr = document.createElement('tr');
-    tr.innerHTML = `<td colspan="${EXPECTED_COLS.length + 2}" class="muted tiny">Sin resultados para el filtro.</td>`;
+    tr.innerHTML = `<td colspan="${EXPECTED_COLS.length + 3}" class="muted tiny">Sin resultados para el filtro.</td>`;
     tb.appendChild(tr);
   }
 
