@@ -3277,8 +3277,14 @@ requireAuth({
    - Limpiar cola: borra cola local + borra doc en Firestore (para el import actual)
     ------------------------- */
     $('btnGuardarCola')?.addEventListener('click', async () => {
-      await saveAllDirtyEdits();   // llama a flushDirtyEdits()
-      refreshDirtyUI();
+      try{
+        await saveAllDirtyEdits();              // usa tu función (staged -> staging / confirmada -> producción)
+        await persistDirtyQueueNow();           // deja Firestore consistente (por si quedó algo)
+        toast('✅ Cola guardada', 'ok');
+      }catch(err){
+        console.error('❌ btnGuardarCola', err);
+        toast(`❌ No se pudo guardar la cola: ${err?.message || 'ver consola'}`);
+      }
     });
     
     $('btnLimpiarCola')?.addEventListener('click', async () => {
