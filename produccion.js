@@ -3257,14 +3257,15 @@ async function saveOneItemPatch(it, patch, options = {}){
     await saveToFinal();         // ✅ SIEMPRE producción
   } else {
     if(state.status === 'staged'){
-      await saveToStaging();     // staging normal
+      await saveToStaging();
     }
     if(state.status === 'confirmada'){
-      await saveToFinal();       // confirmada normal
+      await saveToFinal();
     }
   
     recomputePending();
     paintPreview();
+  }
 }
 
 // ✅ Guarda la cola completa
