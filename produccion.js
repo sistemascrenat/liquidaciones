@@ -3135,7 +3135,7 @@ function collectItemPatchFromModal(){
 async function saveOneItemPatch(it, patch, options = {}){
   // ✅ 0) “Aprender” mapping desde este ítem (para futuras importaciones)
   //     (si el usuario eligió IDs en los selects)
-  await learnMappingsFromItemDecision(patch);}
+  await learnMappingsFromItemDecision(patch);
 
   // 1) aplica al staging en memoria
   it.normalizado = it.normalizado || {};
