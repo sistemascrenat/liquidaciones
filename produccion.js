@@ -3159,7 +3159,6 @@ async function saveOneItemPatch(it, patch, options = {}){
   // 2) recalcula resolución local
   it.resolved = resolveOneItem(it.normalizado);
 
-  // 3) si ya está confirmada, persiste en producción
   /* =========================
      3) Persistencia
      - Si options.forceFinal === true  -> SIEMPRE a PRODUCCIÓN confirmada
@@ -3167,7 +3166,6 @@ async function saveOneItemPatch(it, patch, options = {}){
          - staged      -> guarda en produccion_imports
          - confirmada  -> guarda en producción
   ========================= */
-
   const forceFinal = !!options.forceFinal;
 
   // --- helper: guardar en PRODUCCIÓN (ruta final) ---
@@ -3212,22 +3210,20 @@ async function saveOneItemPatch(it, patch, options = {}){
       pendientes: {
         clinica: !!(it.resolved?._pendClin) || (it.resolved?.clinicaOk === false),
         cirugia: !!(it.resolved?._pendCir)  || (it.resolved?.cirugiaOk === false),
-      
-      profesionales: {
+
+        profesionales: {
           cirujano:     !!(it.resolved?._pend_cirujano)     || (it.resolved?.cirujanoOk === false),
           anestesista:  !!(it.resolved?._pend_anestesista)  || (it.resolved?.anestesistaOk === false),
           ayudante1:    !!(it.resolved?._pend_ayudante1)    || (it.resolved?.ayudante1Ok === false),
           ayudante2:    !!(it.resolved?._pend_ayudante2)    || (it.resolved?.ayudante2Ok === false),
           arsenalera:   !!(it.resolved?._pend_arsenalera)   || (it.resolved?.arsenaleraOk === false)
-      },
-      
+        },
+
         tipoPaciente: !clean(n.tipoPaciente || '')
       },
-      
+
       actualizadoEl: serverTimestamp(),
       actualizadoPor: state.user?.email || '',
-
-      // opcional: deja trazabilidad del import aunque sea final
       importId: state.importId || null
     }, { merge:true });
   };
@@ -3253,20 +3249,22 @@ async function saveOneItemPatch(it, patch, options = {}){
   };
 
   // ✅ Decisión final
-  if(forceFinal){
-    await saveToFinal();         // ✅ SIEMPRE producción
+  if (forceFinal) {
+    await saveToFinal(); // ✅ SIEMPRE producción
   } else {
-    if(state.status === 'staged'){
-      await saveToStaging();
+    if (state.status === 'staged') {
+      await saveToStaging(); // staging normal
     }
-    if(state.status === 'confirmada'){
-      await saveToFinal();
+    if (state.status === 'confirmada') {
+      await saveToFinal();   // confirmada normal
     }
-  
-    recomputePending();
-    paintPreview();
   }
+
+  // ✅ Siempre refrescar UI después de guardar
+  recomputePending();
+  paintPreview();
 }
+
 
 // ✅ Guarda la cola completa
 // - staged     -> guarda en STAGING (produccion_imports)
