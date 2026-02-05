@@ -3437,17 +3437,18 @@ requireAuth({
       await loadStagingFromFirestore(importId);
     });
 
+  /* --------------------------
+     Guardar cola (“Guardar todo”) real
+  -------------------------- */
+  $('btnGuardarCola')?.addEventListener('click', () => saveAllDirtyEdits());
 
-    /* -------------------------
-       Guardar cola (“Guardar todo” real)
-    ------------------------- */
-   $('btnGuardarCola')?.addEventListener('click', () => flushDirtyEdits());
+  /* --------------------------
+     UI cola (si existe)
+  -------------------------- */
+  refreshDirtyUI();
 
-    /* -------------------------
-       UI cola (si existe)
-    ------------------------- */
-    refreshDirtyUI();
-  }
+}  // ✅ cierre correcto del callback onUser()
+
 });
 
 
