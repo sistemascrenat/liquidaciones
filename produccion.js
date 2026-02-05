@@ -3262,10 +3262,9 @@ async function saveOneItemPatch(it, patch, options = {}){
     if(state.status === 'confirmada'){
       await saveToFinal();       // confirmada normal
     }
-  }
-
-  recomputePending();
-  paintPreview();
+  
+    recomputePending();
+    paintPreview();
 }
 
 // ✅ Guarda la cola completa
