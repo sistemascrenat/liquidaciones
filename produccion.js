@@ -2162,6 +2162,63 @@ async function anularImportacion(){
   toast('Importación anulada');
 }
 
+async function guardarColaEnProduccionConfirmada(queueItems){
+  // queueItems = items ya “resueltos” o editados desde la cola (aunque antes estaban PENDIENTE)
+  // OBJETIVO: escribir SI O SI en la producción confirmada (path final)
+
+  const YYYY = String(state.year);
+  const MM = pad(state.monthNum, 2);
+
+  const batch = writeBatch(db);
+
+  let escritos = 0;
+
+  for (const it of queueItems) {
+    const n = it.normalizado || {};
+    const raw = it.raw || {};
+
+    const fechaISO = n.fechaISO || parseDateToISO(raw['Fecha'] || '');
+    const horaHM   = n.horaHM   || parseHora24(raw['Hora'] || '');
+    const rutKey   = normalizeRutKey(n.rut || raw['RUT'] || '');
+
+    // Si no hay ID estable, no podemos escribir confirmada
+    if (!fechaISO || !horaHM || !rutKey) continue;
+
+    const itemId = `${fechaISO}_${horaHM}`;
+
+    // ✅ ESTE ES EL PATH CONFIRMADO (el definitivo)
+    const ref = doc(db, 'produccion', YYYY, 'meses', MM, 'pacientes', rutKey, 'items', itemId);
+
+    // Importante: MERGE para “pisar” los campos resueltos SIN romper lo ya confirmado
+    // y mantener trazabilidad si usas importId.
+    const payload = {
+      ...it,
+      normalizado: {
+        ...(it.normalizado || {}),
+        fechaISO,
+        horaHM,
+        rut: rutKey
+      },
+      // opcional: marca que este item ya se resolvió post-confirmación
+      pendiente: false,
+      actualizadoEl: serverTimestamp(),
+      actualizadoPor: (state.userEmail || null)
+    };
+
+    batch.set(ref, payload, { merge: true });
+    escritos++;
+  }
+
+  if (!escritos) {
+    toast('No hay ítems válidos en la cola para guardar en producción confirmada.', 'warn');
+    return { escritos: 0 };
+  }
+
+  await batch.commit();
+  toast(`Cola guardada en Producción Confirmada (${escritos}).`, 'ok');
+  return { escritos };
+}
+
 /* =========================
    Carga CSV (con filtro de filas basura)
 ========================= */
