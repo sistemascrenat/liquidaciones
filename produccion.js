@@ -3213,13 +3213,13 @@ async function saveOneItemPatch(it, patch, options = {}){
         clinica: !!(it.resolved?._pendClin) || (it.resolved?.clinicaOk === false),
         cirugia: !!(it.resolved?._pendCir)  || (it.resolved?.cirugiaOk === false),
       
-        profesionales: {
+      profesionales: {
           cirujano:     !!(it.resolved?._pend_cirujano)     || (it.resolved?.cirujanoOk === false),
           anestesista:  !!(it.resolved?._pend_anestesista)  || (it.resolved?.anestesistaOk === false),
           ayudante1:    !!(it.resolved?._pend_ayudante1)    || (it.resolved?.ayudante1Ok === false),
           ayudante2:    !!(it.resolved?._pend_ayudante2)    || (it.resolved?.ayudante2Ok === false),
           arsenalera:   !!(it.resolved?._pend_arsenalera)   || (it.resolved?.arsenaleraOk === false)
-        },
+      },
       
         tipoPaciente: !clean(n.tipoPaciente || '')
       },
