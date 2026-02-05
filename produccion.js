@@ -14,7 +14,7 @@ import { loadSidebar } from './layout.js';
 import {
   collection, doc, setDoc, getDoc, getDocs, writeBatch, updateDoc,
   serverTimestamp, query, where, limit, orderBy, startAfter,
-  collectionGroup
+  collectionGroup, deleteField
 } from 'https://www.gstatic.com/firebasejs/11.7.3/firebase-firestore.js';
 
 /* =========================
@@ -440,7 +440,11 @@ function refreshDirtyUI(){
 function enqueueDirtyEdit(key, it, patch){
   state.dirtyEdits.set(key, { it, patch, queuedAt: Date.now() });
   refreshDirtyUI();
+
+  // ✅ persistir la cola en Firestore (debounced)
+  schedulePersistDirtyQueue();
 }
+
 
 async function flushDirtyEdits(){
   const total = dirtyCount();
@@ -466,6 +470,7 @@ async function flushDirtyEdits(){
       // si no lanzó error, lo consideramos guardado
       state.dirtyEdits.delete(k);
       okCount++;
+      schedulePersistDirtyQueue();
 
     }catch(err){
       failCount++;
@@ -485,6 +490,103 @@ async function flushDirtyEdits(){
   }
 }
 
+/* =========================
+   ✅ Persistencia COLA en Firestore
+   Ruta: produccion_imports/{importId}/queue/dirtyEdits
+========================= */
+
+function dirtyQueueDocRef(importId){
+  if(!importId) return null;
+  return doc(db, 'produccion_imports', importId, 'queue', 'dirtyEdits');
+}
+
+// debounce simple para no escribir a cada click en Firestore
+let _dirtyQueueTimer = null;
+
+function schedulePersistDirtyQueue(){
+  if(_dirtyQueueTimer) clearTimeout(_dirtyQueueTimer);
+  _dirtyQueueTimer = setTimeout(async ()=>{
+    try{
+      await persistDirtyQueueNow();
+    }catch(err){
+      console.warn('❌ persistDirtyQueueNow() falló', err);
+    }
+  }, 250);
+}
+
+async function persistDirtyQueueNow(){
+  const importId = state.importId;
+  const ref = dirtyQueueDocRef(importId);
+  if(!ref) return;
+
+  // serializar Map -> objeto plano
+  const entriesObj = {};
+  for(const [k, v] of state.dirtyEdits.entries()){
+    entriesObj[k] = {
+      // guardamos lo mínimo necesario para reintentar
+      itemId: clean(v?.it?.itemId || ''),
+      idx: Number(v?.it?.idx || 0) || 0,
+      patch: v?.patch || {},
+      queuedAt: Number(v?.queuedAt || Date.now()) || Date.now()
+    };
+  }
+
+  await setDoc(ref, {
+    importId,
+    updatedAt: serverTimestamp(),
+    updatedBy: state.user?.email || '',
+    entries: entriesObj
+  }, { merge:true });
+}
+
+async function loadDirtyQueueFromFirestore(importId){
+  state.dirtyEdits = new Map();
+
+  const ref = dirtyQueueDocRef(importId);
+  if(!ref) { refreshDirtyUI(); return; }
+
+  const snap = await getDoc(ref);
+  if(!snap.exists()){
+    refreshDirtyUI();
+    return;
+  }
+
+  const data = snap.data() || {};
+  const entries = data.entries || {};
+
+  // reconstruir it desde state.stagedItems por itemId (o idx si no existe)
+  for(const k of Object.keys(entries)){
+    const e = entries[k] || {};
+    const itemId = clean(e.itemId || '');
+    const idx = Number(e.idx || 0) || 0;
+
+    let it = null;
+    if(itemId){
+      it = (state.stagedItems || []).find(x => clean(x.itemId) === itemId) || null;
+    }
+    if(!it && idx){
+      it = (state.stagedItems || []).find(x => Number(x.idx||0) === idx) || null;
+    }
+
+    // si no encontramos el item, lo dejamos “huérfano” pero NO rompemos
+    const patch = e.patch || {};
+    const queuedAt = Number(e.queuedAt || Date.now()) || Date.now();
+
+    state.dirtyEdits.set(k, { it, patch, queuedAt });
+  }
+
+  refreshDirtyUI();
+}
+
+async function clearDirtyQueueDoc(importId){
+  const ref = dirtyQueueDocRef(importId);
+  if(!ref) return;
+  await setDoc(ref, {
+    entries: {},
+    clearedAt: serverTimestamp(),
+    clearedBy: state.user?.email || ''
+  }, { merge:true });
+}
 
 /* =========================
    Preview table
@@ -1773,6 +1875,9 @@ async function loadStagingFromFirestore(importId){
   buildThead();
   await refreshAfterMapping();
 
+  // ✅ rehidratar cola desde Firestore para que sobreviva reinicios
+  await loadDirtyQueueFromFirestore(importId);
+
   toast(`✅ Cargado import ${importId} (${staged.length} filas)`);
 }
 
@@ -2117,8 +2222,9 @@ async function handleLoadCSV(file){
   setStatus(`🟡 Staging listo: ${staged.length} filas (líneas vacías descartadas)`);
   buildThead();
 
-  await saveStagingToFirestore();
-  toast('Staging guardado en Firestore');
+  // ✅ al crear import nuevo: cola vacía en Firestore
+  await clearDirtyQueueDoc(state.importId);
+  refreshDirtyUI();
   
   // ✅ refrescar selector del mes y seleccionar el nuevo import
   await fillImportSuggestions();
@@ -3123,6 +3229,39 @@ requireAuth({
       await handleLoadCSV(f);
       e.target.value = ''; // permitir recargar el mismo archivo sin renombrar
     });
+
+    /* -------------------------
+   4.2) Cola de cambios (Guardar todo)
+   - Guardar cola: intenta guardar todos los edits encolados
+   - Limpiar cola: borra cola local + borra doc en Firestore (para el import actual)
+    ------------------------- */
+    $('btnGuardarCola')?.addEventListener('click', async () => {
+      await saveAllDirtyEdits();   // llama a flushDirtyEdits()
+      refreshDirtyUI();
+    });
+    
+    $('btnLimpiarCola')?.addEventListener('click', async () => {
+      const n = dirtyCount();
+      if(n === 0){
+        toast('No hay cola para limpiar.');
+        return;
+      }
+    
+      const ok = confirm(`¿Limpiar la cola de cambios? (${n} pendiente/s)\n\nEsto NO guarda cambios; solo los descarta.`);
+      if(!ok) return;
+    
+      // limpia en memoria
+      state.dirtyEdits.clear();
+      refreshDirtyUI();
+    
+      // limpia en Firestore (solo si hay import actual)
+      if(state.importId){
+        await clearDirtyQueueDoc(state.importId);
+      }
+    
+      toast('✅ Cola limpiada');
+    });
+
 
     /* -------------------------
        Resolver modal
