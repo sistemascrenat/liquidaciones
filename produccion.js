@@ -3134,7 +3134,6 @@ function collectItemPatchFromModal(){
 
 async function saveOneItemPatch(it, patch, options = {}){
   // ✅ 0) “Aprender” mapping desde este ítem (para futuras importaciones)
-  //     (si el usuario eligió IDs en los selects)
   await learnMappingsFromItemDecision(patch);
 
   // 1) aplica al staging en memoria
@@ -3143,6 +3142,10 @@ async function saveOneItemPatch(it, patch, options = {}){
   it.normalizado.tipoPaciente = patch.tipoPaciente || null;
   it.normalizado.cirugia = patch.cirugia || null;
   it.normalizado.profesionales = patch.profesionales || {};
+
+  // ✅ IMPORTANTE: si el CSV trae Confirmado=Sí, mantenlo como "confirmado" en normalizado
+  // (esto hace que un item "ya confirmado" se persista en Producción aunque el estado global sea staged)
+  const confirmadoBool = (it.normalizado?.confirmado === true) || (toBool(it.raw?.['Confirmado']) === true);
 
   it.raw = it.raw || {};
   it.raw['Clínica'] = patch.clinica;
@@ -3154,6 +3157,9 @@ async function saveOneItemPatch(it, patch, options = {}){
   it.raw['Ayudante 2'] = patch.profesionales.ayudante2;
   it.raw['Arsenalera'] = patch.profesionales.arsenalera;
 
+  // ✅ si ya venía confirmado, asegúrate que siga marcado como Sí en la tabla
+  if(confirmadoBool) it.raw['Confirmado'] = 'Sí';
+
   it._search = null;
 
   // 2) recalcula resolución local
@@ -3161,21 +3167,22 @@ async function saveOneItemPatch(it, patch, options = {}){
 
   /* =========================
      3) Persistencia
-     - Si options.forceFinal === true  -> SIEMPRE a PRODUCCIÓN confirmada
+     - options.forceFinal === true  -> SIEMPRE a PRODUCCIÓN
      - Si NO forceFinal:
-         - staged      -> guarda en produccion_imports
-         - confirmada  -> guarda en producción
+         - Si state.status === 'confirmada' -> PRODUCCIÓN
+         - Si item está Confirmado=Sí       -> PRODUCCIÓN (aunque state.status sea staged)
+         - Si no -> STAGING (produccion_imports)
   ========================= */
+
   const forceFinal = !!options.forceFinal;
 
   // --- helper: guardar en PRODUCCIÓN (ruta final) ---
   const saveToFinal = async () => {
     const n = it.normalizado || {};
     const fechaISO = n.fechaISO || parseDateToISO(it.raw['Fecha'] || '');
-    const horaHM = n.horaHM || parseHora24(it.raw['Hora'] || '');
-    const rutKey = normalizeRutKey(n.rut || it.raw['RUT'] || '');
+    const horaHM  = n.horaHM  || parseHora24(it.raw['Hora'] || '');
+    const rutKey  = normalizeRutKey(n.rut || it.raw['RUT'] || '');
 
-    // ✅ En producción confirmada NO aceptamos incompletos
     if(!fechaISO || !horaHM || !rutKey){
       throw new Error(`FINAL: falta RUT/Fecha/Hora para guardar. rut=${rutKey} fecha=${fechaISO} hora=${horaHM}`);
     }
@@ -3210,15 +3217,13 @@ async function saveOneItemPatch(it, patch, options = {}){
       pendientes: {
         clinica: !!(it.resolved?._pendClin) || (it.resolved?.clinicaOk === false),
         cirugia: !!(it.resolved?._pendCir)  || (it.resolved?.cirugiaOk === false),
-
         profesionales: {
-          cirujano:     !!(it.resolved?._pend_cirujano)     || (it.resolved?.cirujanoOk === false),
-          anestesista:  !!(it.resolved?._pend_anestesista)  || (it.resolved?.anestesistaOk === false),
-          ayudante1:    !!(it.resolved?._pend_ayudante1)    || (it.resolved?.ayudante1Ok === false),
-          ayudante2:    !!(it.resolved?._pend_ayudante2)    || (it.resolved?.ayudante2Ok === false),
-          arsenalera:   !!(it.resolved?._pend_arsenalera)   || (it.resolved?.arsenaleraOk === false)
+          cirujano:    !!(it.resolved?._pend_cirujano)    || (it.resolved?.cirujanoOk === false),
+          anestesista: !!(it.resolved?._pend_anestesista) || (it.resolved?.anestesistaOk === false),
+          ayudante1:   !!(it.resolved?._pend_ayudante1)   || (it.resolved?.ayudante1Ok === false),
+          ayudante2:   !!(it.resolved?._pend_ayudante2)   || (it.resolved?.ayudante2Ok === false),
+          arsenalera:  !!(it.resolved?._pend_arsenalera)  || (it.resolved?.arsenaleraOk === false)
         },
-
         tipoPaciente: !clean(n.tipoPaciente || '')
       },
 
@@ -3248,23 +3253,19 @@ async function saveOneItemPatch(it, patch, options = {}){
     }, { merge:true });
   };
 
-  // ✅ Decisión final
-  if (forceFinal) {
-    await saveToFinal(); // ✅ SIEMPRE producción
+  // ✅ Decisión final (AQUÍ está la corrección clave)
+  const shouldFinal = forceFinal || (state.status === 'confirmada') || confirmadoBool;
+
+  if(shouldFinal){
+    await saveToFinal();         // ✅ SIEMPRE producción
   } else {
-    if (state.status === 'staged') {
-      await saveToStaging(); // staging normal
-    }
-    if (state.status === 'confirmada') {
-      await saveToFinal();   // confirmada normal
-    }
+    await saveToStaging();       // ✅ staging normal
   }
 
   // ✅ Siempre refrescar UI después de guardar
   recomputePending();
   paintPreview();
 }
-
 
 // ✅ Guarda la cola completa
 // - staged     -> guarda en STAGING (produccion_imports)
