@@ -2282,7 +2282,7 @@ function buildSelectProfesionalHTML(it, roleField, resolvedIdField, label){
     }
 
     return opts.join('');
-  } // ✅ cierre correcto del IF (si no está, se te rompe el archivo)
+  } // ✅ ESTA LLAVE ES LA CLAVE (cierra el IF)
 
   // Si no hay nombre en CSV, permitimos “(vacío)” sin bloquear
   if(!profCsv){
