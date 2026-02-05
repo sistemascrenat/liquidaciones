@@ -3442,7 +3442,7 @@ requireAuth({
     /* -------------------------
        Guardar cola (“Guardar todo” real)
     ------------------------- */
-    $('btnGuardarCola')?.addEventListener('click', saveAllDirtyEdits);
+   $('btnGuardarCola')?.addEventListener('click', () => flushDirtyEdits());
 
     /* -------------------------
        UI cola (si existe)
