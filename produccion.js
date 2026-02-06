@@ -3254,12 +3254,31 @@ async function saveOneItemPatch(it, patch, options = {}){
   };
 
   // ✅ Decisión final (AQUÍ está la corrección clave)
-  const shouldFinal = forceFinal || (state.status === 'confirmada') || confirmadoBool;
-
-  if(shouldFinal){
-    await saveToFinal();         // ✅ SIEMPRE producción
+  // ✅ Decisión final
+  if (forceFinal) {
+    // Si forzamos final: guardamos en producción…
+    await saveToFinal();
+  
+    // …y si existe staging, lo mantenemos sincronizado (para que al F5 no “reviva” el CSV viejo)
+    if (state.importId && it.itemId) {
+      await saveToStaging();
+    }
+  
   } else {
-    await saveToStaging();       // ✅ staging normal
+    if (state.status === 'staged') {
+      // staging normal
+      await saveToStaging();
+    }
+  
+    if (state.status === 'confirmada') {
+      // ✅ confirmada: guardamos en producción…
+      await saveToFinal();
+  
+      // ✅ …y también en staging para que loadStagingFromFirestore() refleje el cambio tras F5
+      if (state.importId && it.itemId) {
+        await saveToStaging();
+      }
+    }
   }
 
   // ✅ Siempre refrescar UI después de guardar
