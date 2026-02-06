@@ -1959,7 +1959,11 @@ async function loadStagingFromFirestore(importId){
         itemId: clean(x.itemId) || d.id, // ✅ clave para editar
         raw: x.raw || {},
         normalizado: x.normalizado || {},
-        resolved: null,
+      
+        // ✅ REHIDRATAR lo que ya editaste/guardaste
+        resolved: x.resolved || null,
+        _selectedIds: x._selectedIds || null,
+      
         _search: null
       });
     });
@@ -2001,7 +2005,10 @@ async function loadStagingFromFirestore(importId){
    Confirmar / Anular
 ========================= */
 async function confirmarImportacion(){
-  if(state.status !== 'staged'){ toast('No hay staging para confirmar.'); return; }
+  if(!['staged','reemplazada'].includes(state.status)){
+    toast('No hay staging para confirmar.');
+    return;
+  }
 
   const totalPend =
     state.pending.clinicas.length +
@@ -2056,10 +2063,62 @@ async function confirmarImportacion(){
     const slice = docs.slice(i, i + batchSize);
 
     for(const data of slice){
+
       const n = data.normalizado || {};
       const raw = data.raw || {};
+      
+      // ✅ Construimos un "it" REAL desde lo que viene en Firestore (data)
+      const it = {
+        normalizado: n,
+        resolved: data.resolved || null,
+        _selectedIds: data._selectedIds || null
+      };
+      
+      // ✅ Usa resolved guardado si existe; si no, resuelve por texto
+      let resolved = getResolvedPreferUser(it) || {};
+      
+      // ✅ FIX CLAVE: si hay IDs elegidos en dropdown, son fuente de verdad
+      const sel = data._selectedIds || {};
+      if(sel.clinicaId){
+        resolved.clinicaId = sel.clinicaId;
+        resolved.clinicaOk = true;
+        resolved._pendClin = false;
+      }
+      if(sel.cirugiaId){
+        resolved.cirugiaId = sel.cirugiaId;
+        resolved.cirugiaOk = true;
+        resolved._pendCir = false;
+      }
+      
+      // ✅ Profesionales (si estás guardando profIds dentro de _selectedIds)
+      if(sel.profIds && typeof sel.profIds === 'object'){
+        if(sel.profIds.cirujanoId){
+          resolved.cirujanoId = sel.profIds.cirujanoId;
+          resolved.cirujanoOk = true;
+          resolved._pend_cirujano = false;
+        }
+        if(sel.profIds.anestesistaId){
+          resolved.anestesistaId = sel.profIds.anestesistaId;
+          resolved.anestesistaOk = true;
+          resolved._pend_anestesista = false;
+        }
+        if(sel.profIds.ayudante1Id){
+          resolved.ayudante1Id = sel.profIds.ayudante1Id;
+          resolved.ayudante1Ok = true;
+          resolved._pend_ayudante1 = false;
+        }
+        if(sel.profIds.ayudante2Id){
+          resolved.ayudante2Id = sel.profIds.ayudante2Id;
+          resolved.ayudante2Ok = true;
+          resolved._pend_ayudante2 = false;
+        }
+        if(sel.profIds.arsenaleraId){
+          resolved.arsenaleraId = sel.profIds.arsenaleraId;
+          resolved.arsenaleraOk = true;
+          resolved._pend_arsenalera = false;
+        }
+      }
 
-      const resolved = getResolvedPreferUser(it);
 
       const fechaISO = n.fechaISO || parseDateToISO(raw['Fecha'] || '');
       const horaHM = n.horaHM || parseHora24(raw['Hora'] || '');
