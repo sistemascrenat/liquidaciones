@@ -3162,24 +3162,35 @@ async function saveOneItemPatch(it, patch, options = {}){
 
   it._search = null;
 
+
   // 2) recalcula resolución local
   it.resolved = resolveOneItem(it.normalizado);
-
+  
+  console.log('🧠 resolveOneItem RESULT:', JSON.parse(JSON.stringify(it.resolved)));
+  console.log('📦 PATCH recibido:', JSON.parse(JSON.stringify(patch)));
+  
   // ✅ FIX: si el usuario eligió un ID explícito en el dropdown, úsalo como fuente de verdad
   // (evita depender del mapping por texto/contexto)
   const sel = patch?._selectedIds || {};
+  console.log('👤 _selectedIds detectado:', JSON.parse(JSON.stringify(sel)));
+  
   if(sel.clinicaId){
     it.resolved = it.resolved || {};
     it.resolved.clinicaId = sel.clinicaId;
     it.resolved.clinicaOk = true;
     it.resolved._pendClin = false;
+    console.log('✅ Override manual clínica aplicado:', sel.clinicaId);
   }
+  
   if(sel.cirugiaId){
     it.resolved = it.resolved || {};
     it.resolved.cirugiaId = sel.cirugiaId;
     it.resolved.cirugiaOk = true;
     it.resolved._pendCir = false;
+    console.log('✅ Override manual cirugía aplicado:', sel.cirugiaId);
   }
+  
+  console.log('💾 RESOLVED FINAL QUE SE VA A GUARDAR:', JSON.parse(JSON.stringify(it.resolved)));
 
 
   /* =========================
