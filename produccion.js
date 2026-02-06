@@ -3165,6 +3165,23 @@ async function saveOneItemPatch(it, patch, options = {}){
   // 2) recalcula resolución local
   it.resolved = resolveOneItem(it.normalizado);
 
+  // ✅ FIX: si el usuario eligió un ID explícito en el dropdown, úsalo como fuente de verdad
+  // (evita depender del mapping por texto/contexto)
+  const sel = patch?._selectedIds || {};
+  if(sel.clinicaId){
+    it.resolved = it.resolved || {};
+    it.resolved.clinicaId = sel.clinicaId;
+    it.resolved.clinicaOk = true;
+    it.resolved._pendClin = false;
+  }
+  if(sel.cirugiaId){
+    it.resolved = it.resolved || {};
+    it.resolved.cirugiaId = sel.cirugiaId;
+    it.resolved.cirugiaOk = true;
+    it.resolved._pendCir = false;
+  }
+
+
   /* =========================
      3) Persistencia
      - options.forceFinal === true  -> SIEMPRE a PRODUCCIÓN
