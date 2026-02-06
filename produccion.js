@@ -2186,6 +2186,11 @@ async function confirmarImportacion(){
         // raw completo
         raw,
 
+        // ✅ limpia flags de reemplazo heredados por merge
+        reemplazadoEl: null,
+        reemplazadoPor: null,
+        reemplazadoPorImportId: null,
+
         estado: 'activa',
         creadoEl: serverTimestamp(),
         creadoPor: state.user?.email || ''
