@@ -2053,7 +2053,7 @@ async function confirmarImportacion(){
   }, { merge:true });
 
   const docs = [];
-  itemsSnap.forEach(d => docs.push(d.data() || {}));
+  itemsSnap.forEach(d => docs.push({ itemId: d.id, ...(d.data() || {}) }));
 
   const batchSize = 320;
   let i = 0;
@@ -2877,9 +2877,23 @@ async function saveMorePatch(it, patch){
     await setDoc(refStagingItem, {
       raw: it.raw,
       normalizado: it.normalizado,
+    
+      // ✅ CLAVE: persistir lo que elegiste en el modal
+      resolved: it.resolved || null,
+      _selectedIds: it._selectedIds || null,
+    
       actualizadoEl: serverTimestamp(),
       actualizadoPor: state.user?.email || ''
     }, { merge:true });
+    
+    // ✅ LOG para corroborar
+    console.log('✅ [STAGING SAVE] item guardado con resolved/_selectedIds', {
+      importId,
+      itemId,
+      resolved: it.resolved,
+      _selectedIds: it._selectedIds
+    });
+
 
     recomputePending();
     paintPreview();
@@ -3237,6 +3251,7 @@ async function saveOneItemPatch(it, patch, options = {}){
   // (evita depender del mapping por texto/contexto)
   const sel = patch?._selectedIds || {};
   console.log('👤 _selectedIds detectado:', JSON.parse(JSON.stringify(sel)));
+  it._selectedIds = sel; // ✅ CLAVE: persistir selección manual en el item
   
   if(sel.clinicaId){
     it.resolved = it.resolved || {};
@@ -3329,21 +3344,35 @@ async function saveOneItemPatch(it, patch, options = {}){
   const saveToStaging = async () => {
     const importId = state.importId;
     const itemId = it.itemId;
-
+  
     if(!importId || !itemId){
       console.error('❌ STAGED: falta importId/itemId', { importId, itemId, it });
       throw new Error(`STAGED: falta importId/itemId para guardar. importId=${importId} itemId=${itemId}`);
     }
-
+  
     const refStagingItem = doc(db, 'produccion_imports', importId, 'items', itemId);
-
+  
     await setDoc(refStagingItem, {
       raw: it.raw,
       normalizado: it.normalizado,
+  
+      // ✅ CLAVE: lo que el usuario eligió en el modal
+      resolved: it.resolved || null,
+      _selectedIds: it._selectedIds || null,
+  
       actualizadoEl: serverTimestamp(),
       actualizadoPor: state.user?.email || ''
     }, { merge:true });
+  
+    // ✅ LOG para corroborar (opcional)
+    console.log('✅ [STAGING SAVE - saveOneItemPatch] guardado:', {
+      importId,
+      itemId,
+      resolved: it.resolved,
+      _selectedIds: it._selectedIds
+    });
   };
+
 
   // ✅ Decisión final (AQUÍ está la corrección clave)
   // ✅ Decisión final
