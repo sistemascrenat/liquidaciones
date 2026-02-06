@@ -1871,62 +1871,72 @@ async function saveStagingToFirestore(){
   }
 }
 
+// ✅ Loader de import/staging (recupera stagedItems + estado) + recupera COLA
 async function loadStagingFromFirestore(importId){
-  if(!importId){ toast('Falta ImportID'); return; }
+  if(!importId) throw new Error('loadStagingFromFirestore: importId vacío');
 
-  const refImport = doc(db, 'produccion_imports', importId);
-  const snapImp = await getDoc(refImport);
-  if(!snapImp.exists()){
-    toast('No existe ese ImportID');
+  const ref = doc(db, 'produccion_imports', importId);
+  const snap = await getDoc(ref);
+
+  if(!snap.exists()){
+    // si no existe, dejamos estado limpio
+    state.importId = importId;
+    state.status = 'idle';
+    state.filename = '';
+    state.stagedItems = [];
+    state.pending = { clinicas: [], cirugias: [], amb: [], prof: [] };
+    refreshDirtyUI();
+    paintPreview();
+    setPills();
+    setButtons();
+    setStatus('Import no encontrado (staging vacío).');
     return;
   }
 
-  const imp = snapImp.data() || {};
+  const data = snap.data() || {};
 
-  // set estado base
-  state.importId = importId;
-  state.status = clean(imp.estado) || 'staged';
-  state.monthName = clean(imp.mes) || '';
-  state.monthNum = Number(imp.mesNum || 0) || 0;
-  state.year = Number(imp.ano || 0) || 0;
-  state.filename = clean(imp.filename) || '';
+  // 1) estado base
+  state.importId  = importId;
+  state.filename  = data.filename || '';
+  state.year      = Number(data.year || state.year || 0) || state.year;
+  state.monthNum  = Number(data.monthNum || state.monthNum || 0) || state.monthNum;
+  state.monthName = data.monthName || state.monthName || '';
+  state.status    = (data.status === 'confirmada') ? 'confirmada' : 'staged';
 
-  $('importId').value = importId;
-  if(state.year) $('ano').value = String(state.year);
-  if(state.monthName) $('mes').value = state.monthName;
+  // 2) stagedItems
+  // OJO: ajusta el nombre del campo si en tu doc se llama distinto (ej: items, stagedItems, rows, etc.)
+  const items = Array.isArray(data.stagedItems) ? data.stagedItems : [];
+  state.stagedItems = items;
 
-  // leer items staging
-  const itemsCol = collection(db, 'produccion_imports', importId, 'items');
-  const qy = query(itemsCol, orderBy('idx','asc'));
-  const snapItems = await getDocs(qy);
+  // 3) Recalcular “pending” en base a resolved (esto depende de tus helpers existentes)
+  // Si tú ya tienes una función tipo recomputePending(), úsala acá.
+  try{
+    state.pending = { clinicas: [], cirugias: [], amb: [], prof: [] };
+    for(const it of state.stagedItems){
+      const r = it.resolved || {};
+      if(r._pendClin) state.pending.clinicas.push(it);
+      if(r._pendCir)  state.pending.cirugias.push(it);
 
-  const staged = [];
-  snapItems.forEach(d=>{
-    const x = d.data() || {};
-    staged.push({
-      idx: Number(x.idx || 0) || 0,
-      itemId: clean(x.itemId) || d.id, // ✅ clave para editar
-      raw: x.raw || {},
-      normalizado: x.normalizado || {},
-      resolved: null,
-      _search: null
-    });
-  });
+      if(r._pend_cirujano)     state.pending.prof.push({ role:'cirujano', it });
+      if(r._pend_anestesista)  state.pending.prof.push({ role:'anestesista', it });
+      if(r._pend_ayudante1)    state.pending.prof.push({ role:'ayudante1', it });
+      if(r._pend_ayudante2)    state.pending.prof.push({ role:'ayudante2', it });
+      if(r._pend_arsenalera)   state.pending.prof.push({ role:'arsenalera', it });
+    }
+  }catch(err){
+    console.warn('⚠️ No se pudo recalcular pendientes desde staging', err);
+  }
 
-  state.stagedItems = staged;
-  state.ui.page = 1;
-  state.ui.query = '';
-  $('q').value = '';
-
-  buildThead();
-  await refreshAfterMapping();
-
-  // ✅ rehidratar cola desde Firestore para que sobreviva reinicios
+  // 4) ✅ IMPORTANTE: cargar cola guardada (si existe)
   await loadDirtyQueueFromFirestore(importId);
 
-  toast(`✅ Cargado import ${importId} (${staged.length} filas)`);
+  // 5) repintar UI
+  state.ui.page = 1;
+  paintPreview();
+  setPills();
+  setButtons();
+  setStatus(`Staging cargado: ${state.stagedItems.length} filas · Import ${importId}`);
 }
-
 
 async function reemplazarMesAntesDeConfirmar(YYYY, MM, newImportId){
   // 1) Marcar items activos del mes como “reemplazado”
