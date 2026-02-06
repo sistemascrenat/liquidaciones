@@ -488,6 +488,7 @@ async function flushDirtyEdits(options = {}){
 }
 
 
+
 /* =========================
    ✅ Persistencia COLA en Firestore
    Ruta: produccion_imports/{importId}/queue/dirtyEdits
@@ -1208,6 +1209,19 @@ function resolveOneItem(n){
   return resolved;
 }
 
+function getResolvedPreferUser(it){
+  const r = it?.resolved || null;
+
+  const hasManualIds =
+    !!(r && (
+      r.clinicaId || r.cirugiaId ||
+      r.cirujanoId || r.anestesistaId || r.ayudante1Id || r.ayudante2Id || r.arsenaleraId
+    ));
+
+  return hasManualIds ? r : resolveOneItem(it.normalizado || {});
+}
+
+
 function recomputePending(){
   state.pending.clinicas = [];
   state.pending.cirugias = [];
@@ -1215,9 +1229,42 @@ function recomputePending(){
   state.pending.prof = [];
 
   // 1) recalcular resolved por cada item
-  for(const it of state.stagedItems){
-    it.resolved = resolveOneItem(it.normalizado || {});
+  // ✅ NO pisar lo que el usuario ya resolvió manualmente (desde modal / Firestore)
+  for (const it of state.stagedItems) {
+    const r = it.resolved || null;
+    const sel = it._selectedIds || {}; // ✅ si existe aunque r esté vacío
+  
+    // Si ya hay IDs elegidos manualmente (en resolved o en _selectedIds), respetarlos
+    const hasManualIds =
+      !!(
+        (r && (r.clinicaId || r.cirugiaId ||
+               r.cirujanoId || r.anestesistaId || r.ayudante1Id || r.ayudante2Id || r.arsenaleraId)) ||
+        (sel && (sel.clinicaId || sel.cirugiaId))
+      );
+  
+    if (!hasManualIds) {
+      it.resolved = resolveOneItem(it.normalizado || {});
+    } else {
+      // ✅ asegúrate que resolved exista para no reventar
+      it.resolved = it.resolved || {};
+  
+      // ✅ si hay _selectedIds, úsalo como fuente de verdad (esto evita “se pierde al recompute”)
+      if (sel.clinicaId) it.resolved.clinicaId = sel.clinicaId;
+      if (sel.cirugiaId) it.resolved.cirugiaId = sel.cirugiaId;
+  
+      // opcional: asegura flags OK si ya hay selección manual
+      if (it.resolved.clinicaId) it.resolved.clinicaOk = true;
+      if (it.resolved.cirugiaId) it.resolved.cirugiaOk = true;
+  
+      if (it.resolved.cirujanoId)    it.resolved.cirujanoOk = true;
+      if (it.resolved.anestesistaId) it.resolved.anestesistaOk = true;
+      if (it.resolved.ayudante1Id)   it.resolved.ayudante1Ok = true;
+      if (it.resolved.ayudante2Id)   it.resolved.ayudante2Ok = true;
+      if (it.resolved.arsenaleraId)  it.resolved.arsenaleraOk = true;
+    }
   }
+
+
 
   const seenClin = new Set();
   const seenCir = new Set();
@@ -2012,7 +2059,7 @@ async function confirmarImportacion(){
       const n = data.normalizado || {};
       const raw = data.raw || {};
 
-      const resolved = resolveOneItem(n);
+      const resolved = getResolvedPreferUser(it);
 
       const fechaISO = n.fechaISO || parseDateToISO(raw['Fecha'] || '');
       const horaHM = n.horaHM || parseHora24(raw['Hora'] || '');
