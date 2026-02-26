@@ -427,13 +427,18 @@ function dirtyCount(){
 }
 
 function refreshDirtyUI(){
-  // 1) Muestra en status
   const n = dirtyCount();
-  const base = $('statusInfo')?.textContent || '—';
-  // Evita duplicar (lo mantenemos simple: reescribimos desde setStatus en otro patch si quieres)
-  if($('dirtyPill')){
-    $('dirtyPill').textContent = `Cambios en cola: ${n}`;
-    $('dirtyPill').className = 'pill ' + (n === 0 ? 'ok' : 'warn');
+
+  const pill = $('dirtyPill');
+  if(pill){
+    pill.textContent = `Cambios en cola: ${n}`;
+    pill.className = 'pill ' + (n === 0 ? 'ok' : 'warn');
+  }
+
+  // (opcional) si quieres deshabilitar Guardar Cola cuando no hay nada:
+  const btn = $('btnGuardarCola');
+  if(btn){
+    btn.disabled = (n === 0);
   }
 }
 
@@ -752,11 +757,22 @@ function paintPreview(){
     tds.push(`<td class="mono">${pad(start + i + 1,2)}</td>`);
 
     for(const col of EXPECTED_COLS){
-      const val = raw[col];
+      let val = raw[col];
+    
+      // ✅ Preferir lo resuelto para "Cirugía"
+      if(col === 'Cirugía'){
+        const r = it.resolved || {};
+        const id = clean(r.cirugiaId || '');
+        if(id){
+          const s = state.catalogs.cirugiasById.get(id);
+          // mostramos nombre del catálogo (si existe); si no, al menos el id
+          val = clean(s?.nombre || '') || id;
+        }
+      }
+    
       const wrapClass = (col === 'Dirección' || col === 'Otras' || col === 'Ex. Laboratorio') ? 'wrap' : '';
       tds.push(`<td class="${wrapClass}">${formatCell(col, val)}</td>`);
     }
-
     tds.push(`<td>${estadoCell(it)}</td>`);
 
     // ✅ Detalle (funciona sobre staging también, pero guarda solo si está confirmada)
@@ -3061,17 +3077,21 @@ function openItemModal(it){
   // 1) Guardar 1 ítem (inmediato)
   $('btnGuardarItem').onclick = async ()=>{
     const patch = collectItemPatchFromModal();
-
+  
     try{
       await saveOneItemPatch(it, patch);
+  
+      // ✅ Repinta SIEMPRE (simple y seguro)
+      recomputePending();
+      paintPreview();
+  
       toast('✅ Item guardado');
       closeItemModal();
       refreshDirtyUI();
-
+  
     }catch(err){
       console.error('❌ btnGuardarItem: no se pudo guardar', err);
       toast(`❌ No se pudo guardar: ${err?.message || 'ver consola'}`);
-      // NO cerramos el modal para que puedas reintentar
     }
   };
 
@@ -3209,7 +3229,13 @@ function collectItemPatchFromModal(){
       clinica: origClin,
       tipoPaciente: origTipo,
       cirugia: origCir,
-      profesionales: origProf
+      profesionales: {
+        cirujano: origProf.cirujano,
+        anestesista: origProf.anestesista,
+        ayudante1: origProf.ayudante1,
+        ayudante2: origProf.ayudante2,
+        arsenalera: origProf.arsenalera
+      }
     }
   };
 }
@@ -3256,22 +3282,57 @@ async function saveOneItemPatch(it, patch, options = {}){
   // (evita depender del mapping por texto/contexto)
   const sel = patch?._selectedIds || {};
   console.log('👤 _selectedIds detectado:', JSON.parse(JSON.stringify(sel)));
+
   it._selectedIds = sel; // ✅ CLAVE: persistir selección manual en el item
-  
+
+  // 1) Clínica
   if(sel.clinicaId){
     it.resolved = it.resolved || {};
     it.resolved.clinicaId = sel.clinicaId;
     it.resolved.clinicaOk = true;
     it.resolved._pendClin = false;
-    console.log('✅ Override manual clínica aplicado:', sel.clinicaId);
   }
-  
+
+  // 2) Cirugía
   if(sel.cirugiaId){
     it.resolved = it.resolved || {};
     it.resolved.cirugiaId = sel.cirugiaId;
     it.resolved.cirugiaOk = true;
     it.resolved._pendCir = false;
-    console.log('✅ Override manual cirugía aplicado:', sel.cirugiaId);
+  }
+
+  // 3) Profesionales (por rol)
+  const profIds = (sel.profIds && typeof sel.profIds === 'object') ? sel.profIds : {};
+
+  if(profIds.cirujanoId){
+    it.resolved = it.resolved || {};
+    it.resolved.cirujanoId = profIds.cirujanoId;
+    it.resolved.cirujanoOk = true;
+    it.resolved._pend_cirujano = false;
+  }
+  if(profIds.anestesistaId){
+    it.resolved = it.resolved || {};
+    it.resolved.anestesistaId = profIds.anestesistaId;
+    it.resolved.anestesistaOk = true;
+    it.resolved._pend_anestesista = false;
+  }
+  if(profIds.ayudante1Id){
+    it.resolved = it.resolved || {};
+    it.resolved.ayudante1Id = profIds.ayudante1Id;
+    it.resolved.ayudante1Ok = true;
+    it.resolved._pend_ayudante1 = false;
+  }
+  if(profIds.ayudante2Id){
+    it.resolved = it.resolved || {};
+    it.resolved.ayudante2Id = profIds.ayudante2Id;
+    it.resolved.ayudante2Ok = true;
+    it.resolved._pend_ayudante2 = false;
+  }
+  if(profIds.arsenaleraId){
+    it.resolved = it.resolved || {};
+    it.resolved.arsenaleraId = profIds.arsenaleraId;
+    it.resolved.arsenaleraOk = true;
+    it.resolved._pend_arsenalera = false;
   }
   
   console.log('💾 RESOLVED FINAL QUE SE VA A GUARDAR:', JSON.parse(JSON.stringify(it.resolved)));
@@ -3552,6 +3613,28 @@ requireAuth({
       }
     
       toast('✅ Cola limpiada');
+    });
+
+    // ✅ CAMBIO 1 — Guardar cola (persistir state.dirtyEdits en Firestore)
+    $('btnGuardarCola')?.addEventListener('click', async () => {
+      const n = dirtyCount();
+      if(n === 0){
+        toast('No hay cambios en cola para guardar.');
+        return;
+      }
+    
+      if(!state.importId){
+        toast('No se puede guardar la cola: falta importId (no hay import activo).');
+        return;
+      }
+    
+      try{
+        await upsertDirtyQueueDoc(state.importId); // 👈 esta función se agrega en “Cambio 2”
+        toast(`✅ Cola guardada (${n})`);
+      }catch(err){
+        console.error('btnGuardarCola error', err);
+        toast('❌ Error guardando la cola (ver consola).');
+      }
     });
 
 
