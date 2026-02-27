@@ -1862,11 +1862,19 @@ function buildLiquidaciones(){
         // 🔎 DEBUG: ver qué está llegando realmente en ese item
         console.log('[PROC NO MAP]', {
           prodId: row.id,
-          procId,
-          procIdFromX,
-          procIdFromRaw: pickRaw(raw,'Procedimiento'),
+      
+          // lo nuevo:
+          procCodeCandidate,
+          procIdCandidate,
+          procRealId,
+      
+          // fuentes útiles:
+          rawProcedimiento: pickRaw(raw,'Procedimiento'),
+          rawCirugia: pickRaw(raw,'Cirugía'),
           cirugiaNameRaw,
-          resolved: x.resolved || null
+      
+          resolved: x.resolved || null,
+          selected: x._selectedIds || null
         });
       }
 
