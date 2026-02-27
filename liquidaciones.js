@@ -1647,27 +1647,41 @@ function buildLiquidaciones(){
     const fecha = fmtDateISOorDMY(x.fechaISO || pickRaw(raw,'Fecha'));
     const hora = cleanReminder(x.horaHM || pickRaw(raw,'Hora'));
 
+    // ✅ Preferir resolución manual si existe (staging/producción)
+    const resolved = (x.resolved && typeof x.resolved === 'object') ? x.resolved : {};
+    const sel = (x._selectedIds && typeof x._selectedIds === 'object') ? x._selectedIds : {};
+    
     // Clínica (label siempre con lo que venga, pero alert si no existe en catálogo)
-    const clinicaId = cleanReminder(x.clinicaId) || '';
+    const clinicaId =
+      cleanReminder(resolved.clinicaId) ||
+      cleanReminder(sel.clinicaId) ||
+      cleanReminder(x.clinicaId) ||
+      '';
+    
     const clinicaNameRaw = toUpperSafe(cleanReminder(x.clinica || pickRaw(raw,'Clínica')));
     const clinicaLabel = clinicaId
       ? (state.clinicasById.get(clinicaId) || clinicaNameRaw || clinicaId)
       : (clinicaNameRaw || '(Sin clínica)');
-
+    
     const clinicaExists = !!(clinicaId && state.clinicasById.has(clinicaId));
-
+    
     // Procedimiento
-    const procId = cleanReminder(x.cirugiaId || x.ambulatorioId) || '';
+    const procId =
+      cleanReminder(resolved.cirugiaId || resolved.ambulatorioId || resolved.procedimientoId || resolved.procId) ||
+      cleanReminder(sel.cirugiaId || sel.ambulatorioId || sel.procedimientoId || sel.procId) ||
+      cleanReminder(x.cirugiaId || x.ambulatorioId) ||
+      '';
+    
     const cirugiaNameRaw = toUpperSafe(cleanReminder(x.cirugia || pickRaw(raw,'Cirugía')));
-
+    
     const procDoc =
       (procId && state.procedimientosById.get(String(procId))) ||
       (cirugiaNameRaw && state.procedimientosByName.get(normalize(cirugiaNameRaw))) ||
       null;
-
+    
     const procLabel = procDoc?.nombre || cirugiaNameRaw || '(Sin procedimiento)';
     const procRealId = procDoc?.id || procId || '';
-
+    
     const procedimientoExists = !!procDoc;
     const procedimientoTipo = (procDoc?.tipo || '').toLowerCase().trim(); // "cirugia" | ...
 
@@ -1692,8 +1706,18 @@ function buildLiquidaciones(){
       const profNameRaw =
         toUpperSafe(cleanReminder(x.profesionales?.[rf.key] || pickRaw(raw, rf.csvField))) || '';
 
+      // ✅ Preferir IDs resueltos manualmente
+      const resolved = (x.resolved && typeof x.resolved === 'object') ? x.resolved : {};
+      const sel = (x._selectedIds && typeof x._selectedIds === 'object') ? x._selectedIds : {};
+      const profIdsResolved = (resolved.profIds && typeof resolved.profIds === 'object') ? resolved.profIds : {};
+      
       const profIdRaw =
-        cleanReminder(x.profesionalesId?.[rf.idKey]) || '';
+        cleanReminder(profIdsResolved?.[rf.idKey]) ||      // resolved.profIds.cirujanoId, etc
+        cleanReminder(resolved?.[rf.idKey]) ||             // resolved.cirujanoId directo, etc
+        cleanReminder(sel?.profIds?.[rf.idKey]) ||         // _selectedIds.profIds.cirujanoId, etc
+        cleanReminder(sel?.[rf.idKey]) ||                  // _selectedIds.cirujanoId directo, etc
+        cleanReminder(x.profesionalesId?.[rf.idKey]) ||     // legacy
+        '';
 
       if(!profNameRaw && !profIdRaw) continue;
 
