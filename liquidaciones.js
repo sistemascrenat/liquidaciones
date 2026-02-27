@@ -1234,8 +1234,9 @@ const state = {
   profesionalesByName: new Map(), // normalize(nombreProfesional) -> profDoc
   profesionalesById: new Map(),   // rutId string -> profDoc
 
-  procedimientosByName: new Map(), // normalize(nombre) -> procDoc
-  procedimientosById: new Map(),   // id -> procDoc
+  procedimientosByName: new Map(),   // normalize(nombre) -> procDoc
+  procedimientosById: new Map(),     // docId -> procDoc
+  procedimientosByCodigo: new Map(), // "PC0001" -> procDoc
 
   // ✅ NUEVO: Config UF y bonos
   ufDocId: '',             // YYYYMM
@@ -1384,7 +1385,8 @@ async function loadProcedimientos(){
   const snap = await getDocs(colProcedimientos);
   const byName = new Map();
   const byId = new Map();
-
+  const byCodigo = new Map();
+  
   snap.forEach(d=>{
     const x = d.data() || {};
     const id = d.id;
@@ -1409,11 +1411,19 @@ async function loadProcedimientos(){
     };
 
     byId.set(String(id), doc);
+    
+    // ✅ índice por código (PC0001, etc.)
+    if(doc.codigo){
+      const c = String(doc.codigo).trim().toUpperCase();
+      if(c) byCodigo.set(c, doc);
+    }
+    
     if(nombre) byName.set(normalize(nombre), doc);
   });
 
   state.procedimientosByName = byName;
   state.procedimientosById = byId;
+  state.procedimientosByCodigo = byCodigo;
 }
 
 /* =========================
@@ -1666,21 +1676,35 @@ function buildLiquidaciones(){
     const clinicaExists = !!(clinicaId && state.clinicasById.has(clinicaId));
     
     // Procedimiento
+    // ✅ 1) sacar ID desde resolved/sel/legacy + (MUY IMPORTANTE) otros campos posibles
+    const procIdFromRaw = cleanReminder(pickRaw(raw,'Procedimiento')); // a veces viene "PC0001" o similar
+    const procIdFromX   = cleanReminder(x.procedimientoId || x.procId || ''); // por si tu item guarda esto con otro nombre
+    
     const procId =
       cleanReminder(resolved.cirugiaId || resolved.ambulatorioId || resolved.procedimientoId || resolved.procId) ||
       cleanReminder(sel.cirugiaId || sel.ambulatorioId || sel.procedimientoId || sel.procId) ||
       cleanReminder(x.cirugiaId || x.ambulatorioId) ||
+      procIdFromX ||
+      // ✅ si raw trae un código tipo PC0001 lo usamos como candidato
+      ( /^PC\d{3,6}$/i.test(procIdFromRaw) ? procIdFromRaw : '' ) ||
       '';
     
     const cirugiaNameRaw = toUpperSafe(cleanReminder(x.cirugia || pickRaw(raw,'Cirugía')));
     
+    // ✅ 2) lookup: primero por docId, luego por CÓDIGO (PC0001), luego por nombre
+    const procIdKey = String(procId || '').trim();
+    const procIdKeyUp = procIdKey.toUpperCase();
+    
     const procDoc =
-      (procId && state.procedimientosById.get(String(procId))) ||
+      (procIdKey && state.procedimientosById.get(procIdKey)) ||
+      (procIdKeyUp && state.procedimientosByCodigo?.get(procIdKeyUp)) ||
       (cirugiaNameRaw && state.procedimientosByName.get(normalize(cirugiaNameRaw))) ||
       null;
     
     const procLabel = procDoc?.nombre || cirugiaNameRaw || '(Sin procedimiento)';
-    const procRealId = procDoc?.id || procId || '';
+    
+    // ✅ Mostrar en UI el código si existe, si no, el id, si no, vacío
+    const procRealId = (procDoc?.codigo || procDoc?.id || procId || '').toString();
     
     const procedimientoExists = !!procDoc;
     const procedimientoTipo = (procDoc?.tipo || '').toLowerCase().trim(); // "cirugia" | ...
@@ -1758,7 +1782,20 @@ function buildLiquidaciones(){
       if(!profDoc) alerts.push('Profesional no existe en nómina (catálogo)');
       if(!clinicaId) alerts.push('clinicaId vacío (import)');
       else if(!clinicaExists) alerts.push('Clínica no existe en catálogo');
-      if(!procedimientoExists) alerts.push('Procedimiento no mapeado (catálogo)');
+
+      if(!procedimientoExists){
+        alerts.push('Procedimiento no mapeado (catálogo)');
+      
+        // 🔎 DEBUG: ver qué está llegando realmente en ese item
+        console.log('[PROC NO MAP]', {
+          prodId: row.id,
+          procId,
+          procIdFromX,
+          procIdFromRaw: pickRaw(raw,'Procedimiento'),
+          cirugiaNameRaw,
+          resolved: x.resolved || null
+        });
+      }
 
       // Pendientes por datos faltantes (no maestro)
       if(!pacienteTipo) pendings.push('Tipo paciente vacío');
