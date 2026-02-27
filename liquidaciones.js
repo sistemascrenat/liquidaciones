@@ -1618,6 +1618,13 @@ function getHonorarioFromTarifa(procDoc, clinicaId, tipoPaciente, roleId){
   }
 }
 
+// Helper local: extrae PC0001/PC0002 etc incluso si viene mezclado en texto
+function extractPC(v=''){
+  const s = (v ?? '').toString().toUpperCase();
+  const m = s.match(/PC\d{3,6}/);   // busca PC + 3..6 dígitos dentro del texto
+  return m ? m[0] : '';
+}
+
 /* =========================
    Fallback raw (más robusto)
 ========================= */
@@ -1676,75 +1683,101 @@ function buildLiquidaciones(){
     const clinicaExists = !!(clinicaId && state.clinicasById.has(clinicaId));
 
     // Procedimiento
-    // ✅ Opción 2 (blindado): usar cirugiaId si falta procedimientoId, y soportar docId / código PCxxxx / nombre
-    const procIdFromRaw = cleanReminder(pickRaw(raw,'Procedimiento')); // puede venir "PC0001" o id, o texto
-    const procIdFromX   = cleanReminder(x.procedimientoId || x.procId || x.cirugiaId || x.ambulatorioId || '');
+    // ✅ OBJETIVO: encontrar SIEMPRE el procedimiento aunque Producción guarde:
+    // - cirugiaId / procedimientoId
+    // - o el código PC dentro de un texto ("PC0002 - BYPASS")
+    // - o en otros campos alternativos
     
-    // 1) Prioridad de IDs (lo importante)
-    // - Si hay procedimientoId úsalo
-    // - Si no, cae a cirugiaId (tu caso típico)
-    // - luego ambulatorioId
-    // - luego lo que venga en x
-    // - luego un código PCxxxx desde raw
-    const procId =
-      cleanReminder(
-        resolved.procedimientoId ||
-        resolved.cirugiaId ||
-        resolved.ambulatorioId ||
-        resolved.procId ||
-        ''
-      ) ||
-      cleanReminder(
-        sel.procedimientoId ||
-        sel.cirugiaId ||
-        sel.ambulatorioId ||
-        sel.procId ||
-        ''
-      ) ||
-      cleanReminder(
-        x.procedimientoId ||
-        x.cirugiaId ||
-        x.ambulatorioId ||
-        x.procId ||
-        ''
-      ) ||
-      procIdFromX ||
-      ( /^PC\d{3,6}$/i.test(procIdFromRaw) ? procIdFromRaw : '' ) ||
+    // 1) Candidatos desde RAW (puede venir como "PC0002", "PC0002 - BYPASS", etc.)
+    const rawProcField = cleanReminder(pickRaw(raw,'Procedimiento')); // campo clásico
+    const rawPC = extractPC(rawProcField);
+    
+    // 2) Candidatos desde el item (por si Producción guarda el código/id en otro lado)
+    const procIdFromX = cleanReminder(
+      x.procedimientoId ||
+      x.procId ||
+      x.procedimiento ||          // a veces guardan el código acá
+      x.codigoProcedimiento ||    // alternativo
+      x.procedimientoCodigo ||    // alternativo
+      x.codigo ||                 // genérico
+      ''
+    );
+    const xPC = extractPC(procIdFromX);
+    
+    // 3) Candidatos desde resolución manual (resolved/selected) — aquí suele estar lo “corregido”
+    const resolvedProcAny = cleanReminder(
+      resolved.procedimientoId ||
+      resolved.procId ||
+      resolved.cirugiaId ||            // ✅ CLAVE: usar cirugiaId si falta procedimientoId
+      resolved.ambulatorioId ||
+      resolved.procedimiento ||        // alternativo
+      resolved.codigoProcedimiento ||  // alternativo
+      ''
+    );
+    const resolvedPC = extractPC(resolvedProcAny);
+    
+    const selectedProcAny = cleanReminder(
+      sel.procedimientoId ||
+      sel.procId ||
+      sel.cirugiaId ||                 // ✅ CLAVE: usar cirugiaId si falta procedimientoId
+      sel.ambulatorioId ||
+      sel.procedimiento ||             // alternativo
+      sel.codigoProcedimiento ||       // alternativo
+      ''
+    );
+    const selectedPC = extractPC(selectedProcAny);
+    
+    // 4) Legacy directos
+    const legacyAny = cleanReminder(
+      x.cirugiaId ||
+      x.ambulatorioId ||
+      ''
+    );
+    const legacyPC = extractPC(legacyAny);
+    
+    // ✅ Regla de oro:
+    // - PRIORIDAD 1: código PC (porque tu catálogo tiene índice por codigo -> byCodigo)
+    // - PRIORIDAD 2: id directo (por si coincide con docId)
+    // - PRIORIDAD 3: nombre (último recurso)
+    const procCodeCandidate =
+      resolvedPC ||
+      selectedPC ||
+      xPC ||
+      rawPC ||
+      legacyPC ||
       '';
     
-    // 2) Nombre (fallback final)
+    const procIdCandidate =
+      resolvedProcAny ||
+      selectedProcAny ||
+      procIdFromX ||
+      legacyAny ||
+      '';
+    
+    // Texto/nombre que llega desde producción (fallback final por nombre)
     const cirugiaNameRaw = toUpperSafe(cleanReminder(
       x.cirugia ||
       x.procedimientoNombre ||
       pickRaw(raw,'Cirugía') ||
-      pickRaw(raw,'Procedimiento') // a veces viene texto acá
+      pickRaw(raw,'Procedimiento') // a veces el “Procedimiento” viene como nombre
     ));
     
-    // 3) Lookup de catálogo (docId o código o nombre)
-    // - docId: state.procedimientosById
-    // - código: state.procedimientosByCodigo ("PC0001")
-    // - nombre : state.procedimientosByName(normalize(...))
-    const procIdKey = String(procId || '').trim();
-    const procIdKeyUp = procIdKey.toUpperCase();
+    // ✅ Lookup robusto
+    const procDoc =
+      // 1) por CÓDIGO PC (más confiable en tu caso)
+      (procCodeCandidate && state.procedimientosByCodigo?.get(procCodeCandidate)) ||
     
-    let procDoc =
-      (procIdKey && state.procedimientosById.get(procIdKey)) ||
-      (procIdKeyUp && state.procedimientosByCodigo?.get(procIdKeyUp)) ||
+      // 2) por docId (si alguna vez guardaste docId real)
+      (procIdCandidate && state.procedimientosById.get(String(procIdCandidate).trim())) ||
+    
+      // 3) por nombre
+      (cirugiaNameRaw && state.procedimientosByName.get(normalize(cirugiaNameRaw))) ||
+    
       null;
     
-    // ✅ fallback extra: si procIdKey NO es docId ni PCxxxx, podría ser NOMBRE; probamos por nombre también
-    if(!procDoc && procIdKey){
-      procDoc = state.procedimientosByName.get(normalize(procIdKey)) || null;
-    }
-    
-    // ✅ fallback final: por “Cirugía” (texto)
-    if(!procDoc && cirugiaNameRaw){
-      procDoc = state.procedimientosByName.get(normalize(cirugiaNameRaw)) || null;
-    }
-    
-    // Label + “id real”
+    // ✅ Para mostrar en UI/export:
     const procLabel = procDoc?.nombre || cirugiaNameRaw || '(Sin procedimiento)';
-    const procRealId = String(procDoc?.codigo || procDoc?.id || procId || '').trim();
+    const procRealId = (procDoc?.codigo || procDoc?.id || procCodeCandidate || procIdCandidate || '').toString();
     
     const procedimientoExists = !!procDoc;
     const procedimientoTipo = (procDoc?.tipo || '').toLowerCase().trim(); // "cirugia" | ...
