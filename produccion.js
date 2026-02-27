@@ -2135,7 +2135,10 @@ async function confirmarImportacion(){
         }
       }
 
-
+      // ✅ Construye un normalizado "final" que incorpore lo resuelto
+      // Esto asegura que Producción confirmada quede coherente para Liquidaciones.
+      const nFinal = mergeResolvedIntoNormalizado(n, resolved, raw);
+      
       const fechaISO = n.fechaISO || parseDateToISO(raw['Fecha'] || '');
       const horaHM = n.horaHM || parseHora24(raw['Hora'] || '');
       const rutKey = normalizeRutKey(n.rut || raw['RUT'] || '');
@@ -2166,9 +2169,11 @@ async function confirmarImportacion(){
         // claves
         fechaISO: fechaISO || null,
         horaHM: horaHM || null, // HHMM
-        clinica: n.clinica ?? null,
-        cirugia: n.cirugia ?? null,
-        tipoPaciente: n.tipoPaciente ?? null,
+
+        // ✅ usa el normalizado final (con resolved aplicado)
+        clinica: nFinal.clinica ?? null,
+        cirugia: nFinal.cirugia ?? null,
+        tipoPaciente: nFinal.tipoPaciente ?? null,
 
         // ids resueltos
         clinicaId: resolved.clinicaId ?? null,
@@ -2176,10 +2181,10 @@ async function confirmarImportacion(){
         ambulatorioId: resolved.ambulatorioId ?? null,
 
         // valores
-        valor: Number(n.valor || 0) || 0,
-        derechosPabellon: Number(n.dp || 0) || 0,
-        hmq: Number(n.hmq || 0) || 0,
-        insumos: Number(n.ins || 0) || 0,
+        valor: Number(nFinal.valor || 0) || 0,
+        derechosPabellon: Number(nFinal.dp || 0) || 0,
+        hmq: Number(nFinal.hmq || 0) || 0,
+        insumos: Number(nFinal.ins || 0) || 0,
 
         // flags
         suspendida: n.suspendida ?? null,
@@ -2187,7 +2192,7 @@ async function confirmarImportacion(){
         pagado: n.pagado ?? null,
         fechaPago: n.fechaPago ?? null,
 
-        profesionales: n.profesionales || {},
+        profesionales: nFinal.profesionales || {},
 
         // ✅ IDs por rol (RUT sin puntos/guion)
         profesionalesId: {
@@ -2197,6 +2202,11 @@ async function confirmarImportacion(){
           ayudante2Id: resolved.ayudante2Id ?? null,
           arsenaleraId: resolved.arsenaleraId ?? null
         },
+
+        // ✅ trazabilidad (recomendado)
+        normalizado: nFinal,
+        resolved: resolved || null,
+        _selectedIds: data._selectedIds || null,
 
 
         // raw completo
@@ -2459,6 +2469,170 @@ async function refreshAfterMapping(){
 /* =========================================================
    EDIT ITEM — SOLO SELECTS (Opción A)
    ========================================================= */
+
+/* =========================================================
+   GUARDAR 1 ITEM (inmediato) + aprender mappings
+   ========================================================= */
+
+// 1) Aplica patch a it en memoria (raw + normalizado + resolved/_selectedIds)
+function applyItemPatchToItemInMemory(it, patch){
+  if(!it || !patch) return;
+
+  it.raw = it.raw || {};
+  it.normalizado = it.normalizado || {};
+  it.resolved = it.resolved || {};
+
+  // A) Guardar texto “humano” en raw (para que el CSV y el preview se vean coherentes)
+  if(patch.clinica !== undefined) it.raw['Clínica'] = patch.clinica;
+  if(patch.tipoPaciente !== undefined) it.raw['Tipo de Paciente'] = patch.tipoPaciente;
+  if(patch.cirugia !== undefined) it.raw['Cirugía'] = patch.cirugia;
+
+  if(patch.profesionales){
+    if(patch.profesionales.cirujano !== undefined) it.raw['Cirujano'] = patch.profesionales.cirujano;
+    if(patch.profesionales.anestesista !== undefined) it.raw['Anestesista'] = patch.profesionales.anestesista;
+    if(patch.profesionales.ayudante1 !== undefined) it.raw['Ayudante 1'] = patch.profesionales.ayudante1;
+    if(patch.profesionales.ayudante2 !== undefined) it.raw['Ayudante 2'] = patch.profesionales.ayudante2;
+    if(patch.profesionales.arsenalera !== undefined) it.raw['Arsenalera'] = patch.profesionales.arsenalera;
+  }
+
+  // B) Rebuild normalizado desde raw (queda consistente)
+  it.normalizado = buildNormalizado(it.raw);
+
+  // C) Persistir “selecciones” (IDs) y “original CSV” para aprender mapping
+  it._selectedIds = patch._selectedIds || it._selectedIds || null;
+
+  // D) Resolver: base por texto, pero si hay IDs elegidos => fuente de verdad
+  it.resolved = resolveOneItem(it.normalizado || {});
+  const sel = it._selectedIds || {};
+
+  if(sel.clinicaId){
+    it.resolved.clinicaId = sel.clinicaId;
+    it.resolved.clinicaOk = true;
+    it.resolved._pendClin = false;
+  }
+  if(sel.cirugiaId){
+    it.resolved.cirugiaId = sel.cirugiaId;
+    it.resolved.cirugiaOk = true;
+    it.resolved._pendCir = false;
+  }
+  if(sel.profIds && typeof sel.profIds === 'object'){
+    if(sel.profIds.cirujanoId){
+      it.resolved.cirujanoId = sel.profIds.cirujanoId;
+      it.resolved.cirujanoOk = true;
+      it.resolved._pend_cirujano = false;
+    }
+    if(sel.profIds.anestesistaId){
+      it.resolved.anestesistaId = sel.profIds.anestesistaId;
+      it.resolved.anestesistaOk = true;
+      it.resolved._pend_anestesista = false;
+    }
+    if(sel.profIds.ayudante1Id){
+      it.resolved.ayudante1Id = sel.profIds.ayudante1Id;
+      it.resolved.ayudante1Ok = true;
+      it.resolved._pend_ayudante1 = false;
+    }
+    if(sel.profIds.ayudante2Id){
+      it.resolved.ayudante2Id = sel.profIds.ayudante2Id;
+      it.resolved.ayudante2Ok = true;
+      it.resolved._pend_ayudante2 = false;
+    }
+    if(sel.profIds.arsenaleraId){
+      it.resolved.arsenaleraId = sel.profIds.arsenaleraId;
+      it.resolved.arsenaleraOk = true;
+      it.resolved._pend_arsenalera = false;
+    }
+  }
+
+  // E) Importantísimo: normalizado final coherente con resolved (para Confirmar y Liquidaciones)
+  it.normalizado = mergeResolvedIntoNormalizado(it.normalizado, it.resolved, it.raw);
+
+  // invalidar búsqueda
+  it._search = null;
+}
+
+// 2) Guardar 1 item: staged -> produccion_imports/.../items
+//                confirmada -> produccion/.../pacientes/.../items
+async function saveOneItemPatch(it, patch, options = {}){
+  if(!it) throw new Error('saveOneItemPatch: falta item');
+
+  // aplica en memoria
+  applyItemPatchToItemInMemory(it, patch);
+
+  // ✅ aprender mappings automáticamente si venían los metadatos
+  // (esto te “entrena” clínicas/cirugías/profesionales para las próximas filas)
+  await learnMappingsFromItemDecision(patch);
+
+  // Persistir según estado
+  if(state.status === 'staged'){
+    const importId = state.importId;
+    const itemId = it.itemId;
+    if(!importId || !itemId) throw new Error('saveOneItemPatch: falta importId/itemId');
+
+    const refStagingItem = doc(db, 'produccion_imports', importId, 'items', itemId);
+
+    await setDoc(refStagingItem, {
+      raw: it.raw,
+      normalizado: it.normalizado,
+
+      // ✅ CLAVE: persistir lo que elegiste en el modal
+      resolved: it.resolved || null,
+      _selectedIds: it._selectedIds || null,
+
+      actualizadoEl: serverTimestamp(),
+      actualizadoPor: state.user?.email || ''
+    }, { merge:true });
+
+    return;
+  }
+
+  if(state.status === 'confirmada'){
+    const n = it.normalizado || {};
+    const raw = it.raw || {};
+
+    const fechaISO = n.fechaISO || parseDateToISO(raw['Fecha'] || '');
+    const horaHM   = n.horaHM   || parseHora24(raw['Hora'] || '');
+    const rutKey   = normalizeRutKey(n.rut || raw['RUT'] || '');
+
+    if(!fechaISO || !horaHM || !rutKey) throw new Error('Falta Fecha/Hora/RUT para guardar en confirmada');
+
+    const YYYY = String(state.year);
+    const MM = pad(state.monthNum,2);
+    const timeId = `${fechaISO}_${horaHM}`;
+
+    const refItem = doc(db, 'produccion', YYYY, 'meses', MM, 'pacientes', rutKey, 'items', timeId);
+
+    await updateDoc(refItem, {
+      raw,
+      normalizado: n,
+
+      clinica: n.clinica ?? null,
+      cirugia: n.cirugia ?? null,
+      tipoPaciente: n.tipoPaciente ?? null,
+      profesionales: n.profesionales || {},
+
+      clinicaId: it.resolved?.clinicaId ?? null,
+      cirugiaId: it.resolved?.cirugiaId ?? null,
+
+      profesionalesId: {
+        cirujanoId: it.resolved?.cirujanoId ?? null,
+        anestesistaId: it.resolved?.anestesistaId ?? null,
+        ayudante1Id: it.resolved?.ayudante1Id ?? null,
+        ayudante2Id: it.resolved?.ayudante2Id ?? null,
+        arsenaleraId: it.resolved?.arsenaleraId ?? null
+      },
+
+      resolved: it.resolved || null,
+      _selectedIds: it._selectedIds || null,
+
+      actualizadoEl: serverTimestamp(),
+      actualizadoPor: state.user?.email || ''
+    });
+
+    return;
+  }
+
+  throw new Error(`Estado no soportado para guardar: ${state.status}`);
+}
 
 // value especial para “pendiente”
 const PEND_VALUE = '__PEND__';
@@ -2880,9 +3054,56 @@ function applyMorePatchToItemInMemory(it, patch){
   }
 }
 
+// ✅ Helper: aplica lo resuelto al normalizado (para que Producción confirmada quede “coherente”)
+// Objetivo: Liquidaciones SIEMPRE debe poder calcular usando normalizado aunque resolved no exista.
+function mergeResolvedIntoNormalizado(normalizado = {}, resolved = null, raw = {}){
+  const n = { ...(normalizado || {}) };
+  const r = resolved || {};
+
+  // 1) Clínicas / Tipo paciente (si vienen resueltas)
+  if(r.clinicaId) n.clinicaId = r.clinicaId;
+  if(r.tipoPaciente) n.tipoPaciente = r.tipoPaciente;
+
+  // 2) Cirugía / Procedimiento (según tu esquema)
+  // Liquidaciones busca: n.cirugia o IDs (procedimientoId/cirugiaId/procId)
+  if(r.cirugiaId) n.cirugiaId = r.cirugiaId;
+  if(r.procedimientoId) n.procedimientoId = r.procedimientoId;
+  if(r.procId) n.procId = r.procId;
+
+  // Nombre “humano” (si lo tienes)
+  if(r.cirugiaNombre) n.cirugia = r.cirugiaNombre;
+  if(r.procedimientoNombre) n.procedimiento = r.procedimientoNombre;
+
+  // Fallback: si no hay nombre resuelto, intenta conservar desde el raw
+  // (esto evita que quede vacío si el usuario no tocó el nombre)
+  if(!n.cirugia){
+    n.cirugia = raw?.['Cirugía'] || raw?.['Cirugia'] || raw?.['Procedimiento'] || raw?.['PROCEDIMIENTO'] || n.cirugia || '';
+  }
+
+  // 3) Profesionales por rol (IDs)
+  // OJO: acá solo guardamos IDs; nombres/otros quedan en raw si corresponde.
+  n.profesionalesId = {
+    ...(n.profesionalesId || {}),
+    ...(r.cirujanoId ? { cirujanoId: r.cirujanoId } : {}),
+    ...(r.anestesistaId ? { anestesistaId: r.anestesistaId } : {}),
+    ...(r.ayudante1Id ? { ayudante1Id: r.ayudante1Id } : {}),
+    ...(r.ayudante2Id ? { ayudante2Id: r.ayudante2Id } : {}),
+    ...(r.arsenaleraId ? { arsenaleraId: r.arsenaleraId } : {})
+  };
+
+  // 4) Ambulatorio si aplica
+  if(r.ambulatorioId) n.ambulatorioId = r.ambulatorioId;
+
+  return n;
+}
+
 async function saveMorePatch(it, patch){
   // 1) aplica en memoria
   applyMorePatchToItemInMemory(it, patch);
+
+  // ✅ CLAVE: si el usuario resolvió algo, eso DEBE quedar dentro de normalizado
+  // para que luego "confirmar importación" y Liquidaciones sean coherentes.
+  it.normalizado = mergeResolvedIntoNormalizado(it.normalizado, it.resolved, it.raw);
 
   // 2) persistencia según estado
   if(state.status === 'staged'){
@@ -3217,6 +3438,27 @@ function collectItemPatchFromModal(){
       ayudante1:    pickProfText('edAy1Sel',         'ayudante1',   'Ayudante 1'),
       ayudante2:    pickProfText('edAy2Sel',         'ayudante2',   'Ayudante 2'),
       arsenalera:   pickProfText('edArsSel',         'arsenalera',  'Arsenalera')
+    },
+
+    // ✅ NUEVO: “resolved” = lo que quedó finalmente resuelto/seleccionado
+    // (esto es lo que después persistes como it.resolved y te sirve para “aprender”)
+    resolved: {
+      clinicaId: (clinIdSel && clinIdSel !== PEND_VALUE) ? clinIdSel : '',
+      clinicaTxt: clinicaTxt,
+
+      tipoPaciente: tipoTxt,
+
+      cirugiaId: (cirIdSel && cirIdSel !== PEND_VALUE) ? cirIdSel : '',
+      cirugiaTxt: cirugiaTxt,
+
+      profesionalesIds: { ...profIdsSel }, // {cirujanoId, anestesistaId, ...}
+      profesionalesTxt: {
+        cirujano:     pickProfText('edCirujanoSel',    'cirujano',    'Cirujano'),
+        anestesista:  pickProfText('edAnestesistaSel', 'anestesista', 'Anestesista'),
+        ayudante1:    pickProfText('edAy1Sel',         'ayudante1',   'Ayudante 1'),
+        ayudante2:    pickProfText('edAy2Sel',         'ayudante2',   'Ayudante 2'),
+        arsenalera:   pickProfText('edArsSel',         'arsenalera',  'Arsenalera')
+      }
     },
 
     // ✅ EXTRA (para “aprender”)
@@ -3615,7 +3857,7 @@ requireAuth({
       toast('✅ Cola limpiada');
     });
 
-    // ✅ CAMBIO 1 — Guardar cola (persistir state.dirtyEdits en Firestore)
+    // ✅ Guardar Cola = guardar TODO lo encolado (flush real a Firestore)
     $('btnGuardarCola')?.addEventListener('click', async () => {
       const n = dirtyCount();
       if(n === 0){
@@ -3624,12 +3866,18 @@ requireAuth({
       }
     
       if(!state.importId){
-        toast('No se puede guardar la cola: falta importId (no hay import activo).');
+        toast('No se puede guardar: falta importId (no hay import activo).');
         return;
       }
     
       try{
-        await upsertDirtyQueueDoc(state.importId); // 👈 esta función se agrega en “Cambio 2”
+        // 1) (opcional) guarda también un “snapshot” de la cola para sobrevivir recargas
+        //    Si no quieres persistir la cola como doc, puedes comentar esta línea.
+        await upsertDirtyQueueDoc(state.importId);
+    
+        // 2) flush REAL: escribe cada ítem en su doc correspondiente (staging / definitivo según tu lógica)
+        await flushDirtyEdits(); // 👈 ESTE es el que tú querías agregar
+    
         toast(`✅ Cola guardada (${n})`);
       }catch(err){
         console.error('btnGuardarCola error', err);
@@ -3664,11 +3912,6 @@ requireAuth({
       }
       await loadStagingFromFirestore(importId);
     });
-
-  /* --------------------------
-     Guardar cola (“Guardar todo”) real
-  -------------------------- */
-  $('btnGuardarCola')?.addEventListener('click', () => saveAllDirtyEdits());
 
   /* --------------------------
      UI cola (si existe)
