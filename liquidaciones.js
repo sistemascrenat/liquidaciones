@@ -1674,37 +1674,77 @@ function buildLiquidaciones(){
       : (clinicaNameRaw || '(Sin clínica)');
     
     const clinicaExists = !!(clinicaId && state.clinicasById.has(clinicaId));
-    
+
     // Procedimiento
-    // ✅ 1) sacar ID desde resolved/sel/legacy + (MUY IMPORTANTE) otros campos posibles
-    const procIdFromRaw = cleanReminder(pickRaw(raw,'Procedimiento')); // a veces viene "PC0001" o similar
-    const procIdFromX   = cleanReminder(x.procedimientoId || x.procId || ''); // por si tu item guarda esto con otro nombre
+    // ✅ Opción 2 (blindado): usar cirugiaId si falta procedimientoId, y soportar docId / código PCxxxx / nombre
+    const procIdFromRaw = cleanReminder(pickRaw(raw,'Procedimiento')); // puede venir "PC0001" o id, o texto
+    const procIdFromX   = cleanReminder(x.procedimientoId || x.procId || x.cirugiaId || x.ambulatorioId || '');
     
+    // 1) Prioridad de IDs (lo importante)
+    // - Si hay procedimientoId úsalo
+    // - Si no, cae a cirugiaId (tu caso típico)
+    // - luego ambulatorioId
+    // - luego lo que venga en x
+    // - luego un código PCxxxx desde raw
     const procId =
-      cleanReminder(resolved.cirugiaId || resolved.ambulatorioId || resolved.procedimientoId || resolved.procId) ||
-      cleanReminder(sel.cirugiaId || sel.ambulatorioId || sel.procedimientoId || sel.procId) ||
-      cleanReminder(x.cirugiaId || x.ambulatorioId) ||
+      cleanReminder(
+        resolved.procedimientoId ||
+        resolved.cirugiaId ||
+        resolved.ambulatorioId ||
+        resolved.procId ||
+        ''
+      ) ||
+      cleanReminder(
+        sel.procedimientoId ||
+        sel.cirugiaId ||
+        sel.ambulatorioId ||
+        sel.procId ||
+        ''
+      ) ||
+      cleanReminder(
+        x.procedimientoId ||
+        x.cirugiaId ||
+        x.ambulatorioId ||
+        x.procId ||
+        ''
+      ) ||
       procIdFromX ||
-      // ✅ si raw trae un código tipo PC0001 lo usamos como candidato
       ( /^PC\d{3,6}$/i.test(procIdFromRaw) ? procIdFromRaw : '' ) ||
       '';
     
-    const cirugiaNameRaw = toUpperSafe(cleanReminder(x.cirugia || pickRaw(raw,'Cirugía')));
+    // 2) Nombre (fallback final)
+    const cirugiaNameRaw = toUpperSafe(cleanReminder(
+      x.cirugia ||
+      x.procedimientoNombre ||
+      pickRaw(raw,'Cirugía') ||
+      pickRaw(raw,'Procedimiento') // a veces viene texto acá
+    ));
     
-    // ✅ 2) lookup: primero por docId, luego por CÓDIGO (PC0001), luego por nombre
+    // 3) Lookup de catálogo (docId o código o nombre)
+    // - docId: state.procedimientosById
+    // - código: state.procedimientosByCodigo ("PC0001")
+    // - nombre : state.procedimientosByName(normalize(...))
     const procIdKey = String(procId || '').trim();
     const procIdKeyUp = procIdKey.toUpperCase();
     
-    const procDoc =
+    let procDoc =
       (procIdKey && state.procedimientosById.get(procIdKey)) ||
       (procIdKeyUp && state.procedimientosByCodigo?.get(procIdKeyUp)) ||
-      (cirugiaNameRaw && state.procedimientosByName.get(normalize(cirugiaNameRaw))) ||
       null;
     
-    const procLabel = procDoc?.nombre || cirugiaNameRaw || '(Sin procedimiento)';
+    // ✅ fallback extra: si procIdKey NO es docId ni PCxxxx, podría ser NOMBRE; probamos por nombre también
+    if(!procDoc && procIdKey){
+      procDoc = state.procedimientosByName.get(normalize(procIdKey)) || null;
+    }
     
-    // ✅ Mostrar en UI el código si existe, si no, el id, si no, vacío
-    const procRealId = (procDoc?.codigo || procDoc?.id || procId || '').toString();
+    // ✅ fallback final: por “Cirugía” (texto)
+    if(!procDoc && cirugiaNameRaw){
+      procDoc = state.procedimientosByName.get(normalize(cirugiaNameRaw)) || null;
+    }
+    
+    // Label + “id real”
+    const procLabel = procDoc?.nombre || cirugiaNameRaw || '(Sin procedimiento)';
+    const procRealId = String(procDoc?.codigo || procDoc?.id || procId || '').trim();
     
     const procedimientoExists = !!procDoc;
     const procedimientoTipo = (procDoc?.tipo || '').toLowerCase().trim(); // "cirugia" | ...
