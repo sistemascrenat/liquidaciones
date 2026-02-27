@@ -1683,96 +1683,123 @@ function buildLiquidaciones(){
     const clinicaExists = !!(clinicaId && state.clinicasById.has(clinicaId));
 
     // Procedimiento
-    // ✅ OBJETIVO: encontrar SIEMPRE el procedimiento aunque Producción guarde:
-    // - cirugiaId / procedimientoId
-    // - o el código PC dentro de un texto ("PC0002 - BYPASS")
-    // - o en otros campos alternativos
+    // ✅ OBJETIVO: encontrar SIEMPRE el procedimiento aunque Producción guarde en campos variados
+    // - por código PC (PC0001)
+    // - por id (procedimientoId/cirugiaId)
+    // - por nombre (procedimientoNombre/cirugia/etc.)
+    // - por normalizado (x.normalizado)
     
-    // 1) Candidatos desde RAW (puede venir como "PC0002", "PC0002 - BYPASS", etc.)
-    const rawProcField = cleanReminder(pickRaw(raw,'Procedimiento')); // campo clásico
+    const norm = (x.normalizado && typeof x.normalizado === 'object') ? x.normalizado : {};
+    
+    // 1) RAW: probar varias keys típicas
+    const rawProcField = cleanReminder(
+      pickRaw(raw,'Procedimiento') ||
+      pickRaw(raw,'Procedimiento / Cirugía') ||
+      pickRaw(raw,'Procedimiento/Cirugía') ||
+      pickRaw(raw,'Prestación') ||
+      pickRaw(raw,'Prestacion') ||
+      pickRaw(raw,'Cirugía') ||
+      pickRaw(raw,'Cirugia') ||
+      pickRaw(raw,'Nombre Cirugía') ||
+      pickRaw(raw,'Nombre Cirugia') ||
+      pickRaw(raw,'Nombre Procedimiento')
+    );
+    
     const rawPC = extractPC(rawProcField);
     
-    // 2) Candidatos desde el item (por si Producción guarda el código/id en otro lado)
+    // 2) IDs/códigos desde item (x)
     const procIdFromX = cleanReminder(
       x.procedimientoId ||
       x.procId ||
-      x.procedimiento ||          // a veces guardan el código acá
-      x.codigoProcedimiento ||    // alternativo
-      x.procedimientoCodigo ||    // alternativo
-      x.codigo ||                 // genérico
+      x.cirugiaId ||
+      x.ambulatorioId ||
+      x.procedimientoCodigo ||
+      x.codigoProcedimiento ||
+      x.codigo ||
+      x.procedimiento ||       // a veces guardan el código acá
       ''
     );
+    
     const xPC = extractPC(procIdFromX);
     
-    // 3) Candidatos desde resolución manual (resolved/selected) — aquí suele estar lo “corregido”
+    // 3) IDs/códigos desde normalizado (si existe)
+    const procIdFromNorm = cleanReminder(
+      norm.procedimientoId ||
+      norm.procId ||
+      norm.cirugiaId ||
+      norm.ambulatorioId ||
+      norm.codigoProcedimiento ||
+      norm.procedimientoCodigo ||
+      norm.codigo ||
+      norm.procedimiento ||
+      ''
+    );
+    
+    const normPC = extractPC(procIdFromNorm);
+    
+    // 4) IDs/códigos desde resolución manual (resolved/selected)
+    const resolvedObj = (x.resolved && typeof x.resolved === 'object') ? x.resolved : {};
+    const selObj = (x._selectedIds && typeof x._selectedIds === 'object') ? x._selectedIds : {};
+    
     const resolvedProcAny = cleanReminder(
-      resolved.procedimientoId ||
-      resolved.procId ||
-      resolved.cirugiaId ||            // ✅ CLAVE: usar cirugiaId si falta procedimientoId
-      resolved.ambulatorioId ||
-      resolved.procedimiento ||        // alternativo
-      resolved.codigoProcedimiento ||  // alternativo
+      resolvedObj.procedimientoId ||
+      resolvedObj.procId ||
+      resolvedObj.cirugiaId ||
+      resolvedObj.ambulatorioId ||
+      resolvedObj.codigoProcedimiento ||
+      resolvedObj.procedimiento ||
       ''
     );
     const resolvedPC = extractPC(resolvedProcAny);
     
     const selectedProcAny = cleanReminder(
-      sel.procedimientoId ||
-      sel.procId ||
-      sel.cirugiaId ||                 // ✅ CLAVE: usar cirugiaId si falta procedimientoId
-      sel.ambulatorioId ||
-      sel.procedimiento ||             // alternativo
-      sel.codigoProcedimiento ||       // alternativo
+      selObj.procedimientoId ||
+      selObj.procId ||
+      selObj.cirugiaId ||
+      selObj.ambulatorioId ||
+      selObj.codigoProcedimiento ||
+      selObj.procedimiento ||
       ''
     );
     const selectedPC = extractPC(selectedProcAny);
     
-    // 4) Legacy directos
-    const legacyAny = cleanReminder(
-      x.cirugiaId ||
-      x.ambulatorioId ||
-      ''
-    );
-    const legacyPC = extractPC(legacyAny);
+    // 5) Nombre (fallback) desde x / normalizado / raw
+    const cirugiaNameRaw = toUpperSafe(cleanReminder(
+      x.cirugia ||
+      x.cirugiaNombre ||
+      x.nombreCirugia ||
+      x.procedimientoNombre ||
+      x.nombreProcedimiento ||
+      norm.cirugia ||
+      norm.cirugiaNombre ||
+      norm.procedimientoNombre ||
+      rawProcField // si venía texto en Procedimiento, úsalo como nombre
+    ));
     
     // ✅ Regla de oro:
-    // - PRIORIDAD 1: código PC (porque tu catálogo tiene índice por codigo -> byCodigo)
-    // - PRIORIDAD 2: id directo (por si coincide con docId)
-    // - PRIORIDAD 3: nombre (último recurso)
+    // - PRIORIDAD 1: código PC
+    // - PRIORIDAD 2: id directo
+    // - PRIORIDAD 3: nombre
     const procCodeCandidate =
       resolvedPC ||
       selectedPC ||
+      normPC ||
       xPC ||
       rawPC ||
-      legacyPC ||
       '';
     
     const procIdCandidate =
       resolvedProcAny ||
       selectedProcAny ||
+      procIdFromNorm ||
       procIdFromX ||
-      legacyAny ||
       '';
-    
-    // Texto/nombre que llega desde producción (fallback final por nombre)
-    const cirugiaNameRaw = toUpperSafe(cleanReminder(
-      x.cirugia ||
-      x.procedimientoNombre ||
-      pickRaw(raw,'Cirugía') ||
-      pickRaw(raw,'Procedimiento') // a veces el “Procedimiento” viene como nombre
-    ));
     
     // ✅ Lookup robusto
     const procDoc =
-      // 1) por CÓDIGO PC (más confiable en tu caso)
       (procCodeCandidate && state.procedimientosByCodigo?.get(procCodeCandidate)) ||
-    
-      // 2) por docId (si alguna vez guardaste docId real)
       (procIdCandidate && state.procedimientosById.get(String(procIdCandidate).trim())) ||
-    
-      // 3) por nombre
       (cirugiaNameRaw && state.procedimientosByName.get(normalize(cirugiaNameRaw))) ||
-    
       null;
     
     // ✅ Para mostrar en UI/export:
@@ -1856,23 +1883,28 @@ function buildLiquidaciones(){
       if(!clinicaId) alerts.push('clinicaId vacío (import)');
       else if(!clinicaExists) alerts.push('Clínica no existe en catálogo');
 
-      if(!procedimientoExists){
-        alerts.push('Procedimiento no mapeado (catálogo)');
+      // Si NO viene ningún procedimiento por ningún lado → es problema del item (import/producción), no del catálogo
+      const procVacio = !procCodeCandidate && !procIdCandidate && !cirugiaNameRaw;
       
-        // 🔎 DEBUG: ver qué está llegando realmente en ese item
+      if(procVacio){
+        alerts.push('Procedimiento vacío en Producción (import)');
+        console.log('[PROC VACIO]', {
+          prodId: row.id,
+          keysX: Object.keys(x || {}),
+          keysRaw: Object.keys(raw || {}),
+          normalizado: (x.normalizado && typeof x.normalizado === 'object') ? x.normalizado : null,
+          resolved: x.resolved || null,
+          selected: x._selectedIds || null
+        });
+      
+      } else if(!procedimientoExists){
+        alerts.push('Procedimiento no mapeado (catálogo)');
         console.log('[PROC NO MAP]', {
           prodId: row.id,
-      
-          // lo nuevo:
           procCodeCandidate,
           procIdCandidate,
-          procRealId,
-      
-          // fuentes útiles:
-          rawProcedimiento: pickRaw(raw,'Procedimiento'),
-          rawCirugia: pickRaw(raw,'Cirugía'),
+          rawProcField,
           cirugiaNameRaw,
-      
           resolved: x.resolved || null,
           selected: x._selectedIds || null
         });
