@@ -2550,90 +2550,6 @@ function applyItemPatchToItemInMemory(it, patch){
   it._search = null;
 }
 
-// 2) Guardar 1 item: staged -> produccion_imports/.../items
-//                confirmada -> produccion/.../pacientes/.../items
-async function saveOneItemPatch(it, patch, options = {}){
-  if(!it) throw new Error('saveOneItemPatch: falta item');
-
-  // aplica en memoria
-  applyItemPatchToItemInMemory(it, patch);
-
-  // ✅ aprender mappings automáticamente si venían los metadatos
-  // (esto te “entrena” clínicas/cirugías/profesionales para las próximas filas)
-  await learnMappingsFromItemDecision(patch);
-
-  // Persistir según estado
-  if(state.status === 'staged'){
-    const importId = state.importId;
-    const itemId = it.itemId;
-    if(!importId || !itemId) throw new Error('saveOneItemPatch: falta importId/itemId');
-
-    const refStagingItem = doc(db, 'produccion_imports', importId, 'items', itemId);
-
-    await setDoc(refStagingItem, {
-      raw: it.raw,
-      normalizado: it.normalizado,
-
-      // ✅ CLAVE: persistir lo que elegiste en el modal
-      resolved: it.resolved || null,
-      _selectedIds: it._selectedIds || null,
-
-      actualizadoEl: serverTimestamp(),
-      actualizadoPor: state.user?.email || ''
-    }, { merge:true });
-
-    return;
-  }
-
-  if(state.status === 'confirmada'){
-    const n = it.normalizado || {};
-    const raw = it.raw || {};
-
-    const fechaISO = n.fechaISO || parseDateToISO(raw['Fecha'] || '');
-    const horaHM   = n.horaHM   || parseHora24(raw['Hora'] || '');
-    const rutKey   = normalizeRutKey(n.rut || raw['RUT'] || '');
-
-    if(!fechaISO || !horaHM || !rutKey) throw new Error('Falta Fecha/Hora/RUT para guardar en confirmada');
-
-    const YYYY = String(state.year);
-    const MM = pad(state.monthNum,2);
-    const timeId = `${fechaISO}_${horaHM}`;
-
-    const refItem = doc(db, 'produccion', YYYY, 'meses', MM, 'pacientes', rutKey, 'items', timeId);
-
-    await updateDoc(refItem, {
-      raw,
-      normalizado: n,
-
-      clinica: n.clinica ?? null,
-      cirugia: n.cirugia ?? null,
-      tipoPaciente: n.tipoPaciente ?? null,
-      profesionales: n.profesionales || {},
-
-      clinicaId: it.resolved?.clinicaId ?? null,
-      cirugiaId: it.resolved?.cirugiaId ?? null,
-
-      profesionalesId: {
-        cirujanoId: it.resolved?.cirujanoId ?? null,
-        anestesistaId: it.resolved?.anestesistaId ?? null,
-        ayudante1Id: it.resolved?.ayudante1Id ?? null,
-        ayudante2Id: it.resolved?.ayudante2Id ?? null,
-        arsenaleraId: it.resolved?.arsenaleraId ?? null
-      },
-
-      resolved: it.resolved || null,
-      _selectedIds: it._selectedIds || null,
-
-      actualizadoEl: serverTimestamp(),
-      actualizadoPor: state.user?.email || ''
-    });
-
-    return;
-  }
-
-  throw new Error(`Estado no soportado para guardar: ${state.status}`);
-}
-
 // value especial para “pendiente”
 const PEND_VALUE = '__PEND__';
 
@@ -3681,33 +3597,25 @@ async function saveOneItemPatch(it, patch, options = {}){
     });
   };
 
-
-  // ✅ Decisión final (AQUÍ está la corrección clave)
   // ✅ Decisión final
-  if (forceFinal) {
-    // Si forzamos final: guardamos en producción…
+  // Reglas:
+  // - forceFinal -> SIEMPRE a producción (y espejo a staging si existe)
+  // - confirmada -> producción (y espejo a staging si existe)
+  // - staged + Confirmado=Sí -> producción (y espejo a staging si existe)
+  // - staged normal -> staging
+  
+  const shouldGoFinal = forceFinal || (state.status === 'confirmada') || (state.status === 'staged' && confirmadoBool);
+  
+  if (shouldGoFinal) {
     await saveToFinal();
   
-    // …y si existe staging, lo mantenemos sincronizado (para que al F5 no “reviva” el CSV viejo)
+    // espejo a staging si existe (evita que al F5 “reviva” el estado anterior)
     if (state.importId && it.itemId) {
       await saveToStaging();
     }
-  
   } else {
-    if (state.status === 'staged') {
-      // staging normal
-      await saveToStaging();
-    }
-  
-    if (state.status === 'confirmada') {
-      // ✅ confirmada: guardamos en producción…
-      await saveToFinal();
-  
-      // ✅ …y también en staging para que loadStagingFromFirestore() refleje el cambio tras F5
-      if (state.importId && it.itemId) {
-        await saveToStaging();
-      }
-    }
+    // staged normal
+    await saveToStaging();
   }
 
   // ✅ Siempre refrescar UI después de guardar
@@ -3871,13 +3779,14 @@ requireAuth({
       }
     
       try{
-        // 1) (opcional) guarda también un “snapshot” de la cola para sobrevivir recargas
-        //    Si no quieres persistir la cola como doc, puedes comentar esta línea.
-        await upsertDirtyQueueDoc(state.importId);
-    
-        // 2) flush REAL: escribe cada ítem en su doc correspondiente (staging / definitivo según tu lógica)
-        await flushDirtyEdits(); // 👈 ESTE es el que tú querías agregar
-    
+        // 1) (opcional) persistir snapshot de cola si tienes esa función
+        if(typeof persistDirtyQueueNow === 'function'){
+          await persistDirtyQueueNow();
+        }
+      
+        // 2) flush REAL: escribe cada ítem en su doc final o staging
+        await flushDirtyEdits();
+      
         toast(`✅ Cola guardada (${n})`);
       }catch(err){
         console.error('btnGuardarCola error', err);
