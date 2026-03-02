@@ -3736,14 +3736,13 @@ requireAuth({
     /* -------------------------
        Cargar CSV
     ------------------------- */
-    
     // ✅ Archivo CSV (HTML usa id="fileCSV")
     let selectedCSVFile = null;
     
     $('fileCSV')?.addEventListener('change', async (e) => {
       selectedCSVFile = e.target.files?.[0] || null;
     
-      // feedback inmediato opcional
+      // (opcional) feedback inmediato
       if (selectedCSVFile) toast(`📄 Archivo: ${selectedCSVFile.name}`);
     });
     
@@ -3757,7 +3756,7 @@ requireAuth({
     
         await handleLoadCSV(selectedCSVFile);
     
-        // limpiar input
+        // limpiar input para permitir re-cargar el mismo archivo si quieres
         const f = $('fileCSV');
         if (f) f.value = '';
         selectedCSVFile = null;
