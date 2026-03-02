@@ -3746,7 +3746,7 @@ requireAuth({
     });
     
     // El botón ahora sí carga el CSV
-    $('btnCargarCSV')?.addEventListener('click', async () => {
+    $('btnCargar')?.addEventListener('click', async () => {
       if(!selectedCSVFile){
         toast('Selecciona un archivo CSV primero.');
         return;
