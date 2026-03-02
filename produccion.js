@@ -3736,11 +3736,30 @@ requireAuth({
     /* -------------------------
        Cargar CSV
     ------------------------- */
-    $('csvFile')?.addEventListener('change', async (e) => {
-      const f = e.target.files?.[0];
-      if (!f) return;
-      await handleLoadCSV(f);
-      e.target.value = ''; // permitir recargar el mismo archivo sin renombrar
+    
+    // Al seleccionar archivo NO carga automáticamente
+    // Solo guarda referencia
+    let selectedCSVFile = null;
+    
+    $('csvFile')?.addEventListener('change', (e) => {
+      selectedCSVFile = e.target.files?.[0] || null;
+    });
+    
+    // El botón ahora sí carga el CSV
+    $('btnCargarCSV')?.addEventListener('click', async () => {
+      if(!selectedCSVFile){
+        toast('Selecciona un archivo CSV primero.');
+        return;
+      }
+    
+      try{
+        await handleLoadCSV(selectedCSVFile);
+        selectedCSVFile = null;
+        $('csvFile').value = '';
+      }catch(err){
+        console.error('Error cargando CSV:', err);
+        toast('Error cargando CSV (ver consola).');
+      }
     });
     
     $('btnLimpiarCola')?.addEventListener('click', async () => {
