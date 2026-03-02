@@ -3737,28 +3737,34 @@ requireAuth({
        Cargar CSV
     ------------------------- */
     
-    // Al seleccionar archivo NO carga automáticamente
-    // Solo guarda referencia
+    // ✅ Archivo CSV (HTML usa id="fileCSV")
     let selectedCSVFile = null;
     
-    $('csvFile')?.addEventListener('change', (e) => {
+    $('fileCSV')?.addEventListener('change', async (e) => {
       selectedCSVFile = e.target.files?.[0] || null;
+    
+      // feedback inmediato opcional
+      if (selectedCSVFile) toast(`📄 Archivo: ${selectedCSVFile.name}`);
     });
     
-    // El botón ahora sí carga el CSV
+    // ✅ btnCargar: ahora sí usa el archivo seleccionado
     $('btnCargar')?.addEventListener('click', async () => {
-      if(!selectedCSVFile){
-        toast('Selecciona un archivo CSV primero.');
-        return;
-      }
+      try {
+        if (!selectedCSVFile) {
+          toast('Selecciona un archivo CSV primero.');
+          return;
+        }
     
-      try{
         await handleLoadCSV(selectedCSVFile);
+    
+        // limpiar input
+        const f = $('fileCSV');
+        if (f) f.value = '';
         selectedCSVFile = null;
-        $('csvFile').value = '';
-      }catch(err){
-        console.error('Error cargando CSV:', err);
-        toast('Error cargando CSV (ver consola).');
+    
+      } catch (err) {
+        console.error(err);
+        toast('Error cargando CSV. Revisa consola.');
       }
     });
     
