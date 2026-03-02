@@ -3249,6 +3249,37 @@ function closeItemModal(){
    state._editingItemRef = null; 
 }
 
+// =========================
+// Modal: wiring de cierre (✖️ / Cerrar / click afuera / ESC)
+// =========================
+let _itemModalWired = false;
+
+function wireItemModalClose(){
+  if(_itemModalWired) return; // evita duplicar listeners
+  _itemModalWired = true;
+
+  const btnX = $('btnItemClose');
+  const btnCerrar = $('btnItemCancelar');
+  const backdrop = $('modalItemBackdrop');
+
+  if(btnX) btnX.addEventListener('click', closeItemModal);
+  if(btnCerrar) btnCerrar.addEventListener('click', closeItemModal);
+
+  // click afuera (en el backdrop) cierra
+  if(backdrop){
+    backdrop.addEventListener('click', (e) => {
+      if(e.target === backdrop) closeItemModal();
+    });
+  }
+
+  // tecla ESC cierra si el modal está abierto
+  document.addEventListener('keydown', (e) => {
+    const bd = $('modalItemBackdrop');
+    const isOpen = bd && bd.style.display === 'block';
+    if(e.key === 'Escape' && isOpen) closeItemModal();
+  });
+}
+
 function collectItemPatchFromModal(){
   // Clínica
   const clinSel = $('edClinicaSel');
@@ -3651,6 +3682,9 @@ requireAuth({
     const whoEl = $('who');
     if (whoEl) whoEl.textContent = `Conectado: ${user.email}`;
     wireLogout();
+
+    // ✅ AGREGAR ESTA LÍNEA
+    wireItemModalClose();
 
     // ✅ Al entrar: por defecto muestra el MES PASADO (ej: enero 2026 → diciembre 2025)
     setDefaultToPreviousMonth();
