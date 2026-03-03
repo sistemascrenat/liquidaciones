@@ -2016,6 +2016,74 @@ async function loadStagingFromFirestore(importId){
   }
 }
 
+// ✅ Reemplazo del mes (soft-replace):
+// Marca como "reemplazada" TODA la producción del mismo año/mes (sin borrar),
+// para que la nueva importación quede como la vigente.
+async function reemplazarMesAntesDeConfirmar(YYYY, MM, newImportId){
+  const ano = Number(YYYY) || 0;
+  const mesNum = Number(MM) || 0; // OJO: aquí MM viene "01".."12" -> Number("01") = 1 ✅
+
+  if(!ano || !mesNum) return 0;
+
+  const cg = collectionGroup(db, 'items');
+  let last = null;
+  let total = 0;
+
+  // Si quieres marcar SOLO los "activa", deja este where.
+  // Si quieres marcar también otros estados anteriores, elimina este where.
+  const baseWheres = [
+    where('ano','==', ano),
+    where('mesNum','==', mesNum),
+    where('estado','==','activa')
+  ];
+
+  while(true){
+    const qy = last
+      ? query(
+          cg,
+          ...baseWheres,
+          orderBy('__name__'),
+          startAfter(last),
+          limit(300)
+        )
+      : query(
+          cg,
+          ...baseWheres,
+          orderBy('__name__'),
+          limit(300)
+        );
+
+    const snap = await getDocs(qy);
+    if(snap.empty) break;
+
+    const batch = writeBatch(db);
+
+    snap.forEach(d=>{
+      // ⚠️ Evita marcar como reemplazados los que ya pertenezcan al import nuevo
+      // (por si estás re-confirmando o re-ejecutando flujo)
+      const data = d.data() || {};
+      if(clean(data.importId) === clean(newImportId)) return;
+
+      batch.set(d.ref, {
+        estado: 'reemplazada',
+        reemplazadoEl: serverTimestamp(),
+        reemplazadoPor: state.user?.email || '',
+        reemplazadoPorImportId: newImportId || null,
+
+        // opcional: trazabilidad genérica
+        actualizadoEl: serverTimestamp(),
+        actualizadoPor: state.user?.email || ''
+      }, { merge:true });
+
+      total++;
+    });
+
+    await batch.commit();
+    last = snap.docs[snap.docs.length - 1];
+  }
+
+  return total;
+}
 
 /* =========================
    Confirmar / Anular
