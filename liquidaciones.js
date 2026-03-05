@@ -105,14 +105,21 @@ function fmtDateISOorDMY(v){
 function tipoPacienteNorm(v){
   const x = normalize(v);
 
-  // 🔥 CANÓNICO (DEBE CALZAR CON cirugias.js)
+  // 🔥 CANÓNICO (DEBE CALZAR CON el tarifario / cirugias.js)
   if(x.includes('fona')) return 'fonasa';
+
+  // ✅ MLE (Modalidad Libre Elección)
+  // Soporta entradas tipo: "MLE", "M.L.E", "MODALIDAD LIBRE ELECCION", "LIBRE ELECCION"
+  if(x === 'mle' || x.includes('m.l.e') || x.includes('libre eleccion') || x.includes('libre elección')) {
+    return 'mle';
+  }
+
+  // Particular / Isapre
   if(x.includes('isap')) return 'particular_isapre';
   if(x.includes('part')) return 'particular_isapre';
 
   return x || '';
 }
-
 function pillHtml(kind, text){
   // kind: ok | warn | bad
   const cls = kind === 'ok' ? 'ok' : (kind === 'warn' ? 'warn' : (kind === 'bad' ? 'bad' : ''));
@@ -219,7 +226,7 @@ async function generarPDFLiquidacionProfesional(agg){
   
     if(!tp || tp === 'sin_tipo') return 'SIN TIPO';
     if(tp.includes('fona')) return 'FONASA';
-  
+    if(tp === 'mle' || tp.includes('mle') || tp.includes('libre eleccion') || tp.includes('libre elección')) return 'MLE';
     // equivalencias que quieres unificar
     if(tp.includes('isap')) return 'ISAPRE';
     if(tp.includes('part')) return 'PARTICULAR';
@@ -511,19 +518,43 @@ async function generarPDFLiquidacionProfesional(agg){
   // Encabezado azul + líneas marcadas
   // =========================
 
-  // Agrupar líneas por rol
+  // Agrupar líneas por rol (✅ PDF: AYUDANTE 1 + 2 se unifican en "AYUDANTE")
   const linesAll = [...(agg?.lines || [])];
 
-  const roleOrderIds = (Array.isArray(ROLE_SPEC) ? ROLE_SPEC.map(r=>r.roleId) : []);
-  const roleLabelById = new Map(linesAll.map(l=>[l.roleId, l.roleNombre]));
+  // ✅ Normaliza roleId SOLO para el resumen PDF
+  const resumenRoleId = (rid) => {
+    const r = String(rid || '').trim();
+    if(r === 'r_ayudante_1' || r === 'r_ayudante_2') return 'r_ayudante';
+    return r || 'sin_rol';
+  };
 
+  // ✅ Etiqueta SOLO para el resumen PDF
+  const resumenRoleLabel = (rid) => {
+    if(rid === 'r_ayudante') return 'AYUDANTE';
+    // fallback: usa lo que venga en la línea (en mayúscula)
+    // (si hay mezclas, igual quedará consistente por roleId real)
+    const any = linesAll.find(l => String(l.roleId||'').trim() === rid);
+    return (any?.roleNombre || rid || '').toString().toUpperCase();
+  };
+
+  // ✅ Orden de roles SOLO para el resumen PDF
+  // (si quieres otro orden, lo ajustamos acá)
+  const roleOrderIds = [
+    'r_cirujano',
+    'r_anestesista',
+    'r_ayudante',     // 👈 unificado
+    'r_arsenalera'
+  ];
+
+  // groups por roleId resumen
   const groups = new Map();
   for(const l of linesAll){
-    const rid = l.roleId || 'sin_rol';
-    if(!groups.has(rid)) groups.set(rid, []);
-    groups.get(rid).push(l);
+    const gid = resumenRoleId(l.roleId);
+    if(!groups.has(gid)) groups.set(gid, []);
+    groups.get(gid).push(l);
   }
 
+  // ordenar: primero los conocidos, luego extras
   const roleIdsSorted = [
     ...roleOrderIds.filter(id=>groups.has(id)),
     ...[...groups.keys()].filter(id=>!roleOrderIds.includes(id)).sort()
@@ -537,7 +568,7 @@ async function generarPDFLiquidacionProfesional(agg){
     const ls = groups.get(rid) || [];
     if (!ls.length) continue;
 
-    const rolName = (roleLabelById.get(rid) || rid || '').toString().toUpperCase();
+    const rolName = resumenRoleLabel(rid);
 
     // título del rol como “fila separadora”
     resumenRows.push({ kind:'role', rol: rolName });
@@ -785,19 +816,25 @@ async function generarPDFLiquidacionProfesional(agg){
   {
     const lines = Array.isArray(agg?.lines) ? agg.lines : [];
   
-    // Sumas por bucket (según tu normalización: fonasa | particular_isapre)
-    const sumPartIsap = lines.reduce((acc, l) => {
+    // ✅ Regla pagos:
+    // - Día 27: SOLO Fonasa del Cirujano (roleId === 'r_cirujano')
+    // - Día 5 : Todo lo demás (Particular/Isapre, MLE, y Fonasa de otros roles)
+    const baseDia27 = lines.reduce((acc, l) => {
       const tp = String(l?.tipoPaciente || '').toLowerCase().trim();
       const isFonasa = tp.includes('fona');
+      const isCirujano = String(l?.roleId || '') === 'r_cirujano';
       const m = Number(l?.monto || 0) || 0;
-      return isFonasa ? acc : (acc + m);
+      return (isFonasa && isCirujano) ? (acc + m) : acc;
     }, 0);
-  
-    const sumFonasa = lines.reduce((acc, l) => {
+
+    const baseDia5 = lines.reduce((acc, l) => {
       const tp = String(l?.tipoPaciente || '').toLowerCase().trim();
       const isFonasa = tp.includes('fona');
+      const isCirujano = String(l?.roleId || '') === 'r_cirujano';
       const m = Number(l?.monto || 0) || 0;
-      return isFonasa ? (acc + m) : acc;
+
+      // Todo lo que NO sea "Fonasa Cirujano"
+      return (isFonasa && isCirujano) ? acc : (acc + m);
     }, 0);
   
     // Bono y descuento (ya calculados arriba)
@@ -807,8 +844,8 @@ async function generarPDFLiquidacionProfesional(agg){
     // ✅ Reparto para que el desglose sume EXACTO el totalAPagar:
     // Particular/Isapre: Particular - Descuento + Bono
     // Fonasa: Fonasa
-    let montoPart = Math.round(sumPartIsap - desc + bono);
-    let montoFona = Math.round(sumFonasa);
+    let montoPart = Math.round(baseDia5 - desc + bono); // día 5 (incluye MLE + Fonasa no-cirujano)
+    let montoFona = Math.round(baseDia27);              // día 27 (Fonasa cirujano)
   
     // Si por descuento el montoPart quedara negativo, lo “arrastra” a Fonasa (sin dejar negativos)
     if (montoPart < 0) {
@@ -817,7 +854,7 @@ async function generarPDFLiquidacionProfesional(agg){
     }
   
     // Mostrar tabla solo si hay algo que desglosar (o si hay total a pagar)
-    const shouldShow = (Number(totalAPagar || 0) > 0) || (sumPartIsap > 0) || (sumFonasa > 0) || (bono > 0) || (desc > 0);
+    const shouldShow = (Number(totalAPagar || 0) > 0) || (baseDia5 > 0) || (baseDia27 > 0) || (bono > 0) || (desc > 0);
   
     if (shouldShow) {
   
@@ -827,8 +864,8 @@ async function generarPDFLiquidacionProfesional(agg){
       const fechaPagoTxt = (day) => `${day} DE ${MES_TXT} ${ANO_TXT}`;
   
       // armado asunto (sin mencionar bono si no aplica)
-      const asuntoPart = bono > 0 ? 'PARTICULAR O ISAPRE + BONO' : 'PARTICULAR O ISAPRE';
-      const asuntoFona = 'FONASA';
+      const asuntoPart = 'PAGO DE PROCEDIMIENTOS';
+      const asuntoFona = 'PAGO DE PROCEDIMIENTOS FONASA';
   
       // medidas tabla
       const headH3 = 22;
@@ -1564,6 +1601,26 @@ function resolveTipoPacienteKey(pacientesObj, tipoPaciente){
       // ✅ equivalentes "legacy" que pueden existir como key real en el tarifario
       'particular',
       'isapre'
+    );
+
+      // ✅ Bucket "MLE": aceptar equivalencias en ambos sentidos
+  const esBucketMLE =
+    tpn === 'mle' ||
+    tpn.includes('mle') ||
+    tpn.includes('libre eleccion') ||
+    tpn.includes('libre elección') ||
+    tpn.replace(/[^a-z0-9]+/g,'').includes('modalidadlibreeleccion');
+
+  if(esBucketMLE){
+    candidates.push(
+      'mle',
+      'MLE',
+      'M.L.E',
+      'm.l.e',
+      'Modalidad Libre Eleccion',
+      'MODALIDAD LIBRE ELECCION',
+      'Libre Eleccion',
+      'LIBRE ELECCION'
     );
   }
 
