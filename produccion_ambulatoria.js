@@ -359,11 +359,11 @@ tbody.appendChild(tr)
    PROCESAR
 ====================== */
 
-$("btnProcesar").onclick = async()=>{
+$("btnCargar").onclick = async()=>{
 
 if(!dataReservo.length && !dataMK.length){
 
-alert("Debes cargar archivos")
+alert("Debes cargar al menos un archivo")
 
 return
 
