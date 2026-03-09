@@ -89,6 +89,43 @@ function asNumberLoose(v){
   const s = (v ?? '').toString().replace(/[^\d]/g,'');
   return Number(s || 0) || 0;
 }
+
+function parseDecimalFlexible(v){
+  let s = (v ?? '').toString().trim();
+  if(!s) return 0;
+
+  // quita espacios
+  s = s.replace(/\s+/g, '');
+
+  // si trae coma y punto, asumimos:
+  // - el último símbolo es el decimal
+  // - el otro es separador de miles
+  const lastComma = s.lastIndexOf(',');
+  const lastDot = s.lastIndexOf('.');
+
+  if(lastComma >= 0 && lastDot >= 0){
+    if(lastComma > lastDot){
+      // 39.123,45 -> 39123.45
+      s = s.replace(/\./g, '').replace(',', '.');
+    } else {
+      // 39,123.45 -> 39123.45
+      s = s.replace(/,/g, '');
+    }
+  } else if(lastComma >= 0){
+    // solo coma -> usar coma como decimal
+    s = s.replace(',', '.');
+  } else {
+    // solo punto -> se mantiene como decimal
+    // ej: 39123.45
+  }
+
+  // dejar solo números, signo y punto decimal
+  s = s.replace(/[^0-9.-]/g, '');
+
+  const n = Number(s);
+  return Number.isFinite(n) ? n : 0;
+}
+
 function clp(n){
   const x = Number(n || 0) || 0;
   const s = Math.round(x).toString();
@@ -2733,11 +2770,16 @@ requireAuth({
       if(e.target === $('ufBackdrop')) closeUF();
     });
 
-    
     $('btnUfGuardar')?.addEventListener('click', async ()=>{
       try{
-        const v = asNumberLoose($('ufValor').value);
-        if(!v || v < 1000){ toast('UF inválida (ej: 37000)'); return; }
+        const raw = $('ufValor').value;
+        const v = parseDecimalFlexible(raw);
+    
+        if(!v || v < 1000){
+          toast('UF inválida (ej: 37000,45)');
+          return;
+        }
+    
         await saveUFDelMes(v);
         toast('UF guardada');
         $('ufBackdrop').style.display = 'none';
