@@ -1,0 +1,454 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Clínica Rennat — Producción Ambulatoria</title>
+  <link rel="icon" type="image/png" href="logoCR.png">
+
+  <!-- CSS global -->
+  <link rel="stylesheet" href="estilos.css"/>
+
+  <style>
+    /* ✅ Mantener el mismo ancho del sidebar que en el resto del sistema */
+    :root{
+      --sidebar-w: 260px;
+    }
+
+    .appShell{
+      display:flex;
+      min-height:100vh;
+      background:var(--bg,#f4f6fb);
+    }
+    #sidebar-slot{
+      flex: 0 0 var(--sidebar-w);
+      width: var(--sidebar-w);
+    }
+    .content{
+      flex:1;
+      padding:22px;
+      min-width: 0;
+    }
+
+    .topbar { display:flex; align-items:flex-start; justify-content:space-between; gap:14px; margin-bottom:14px; }
+    .h1 { font-size:22px; font-weight:900; margin:0; }
+    .sub { color:var(--muted,#6b7280); margin-top:4px; font-size:13px; }
+    .pillCount { background:var(--accent-soft,#e0fffa); border:1px solid #bdeee8; padding:6px 10px; border-radius:999px; font-size:12px; }
+
+    .card { background:var(--card,#fff); border:1px solid rgba(0,0,0,.06); border-radius:14px; box-shadow:0 8px 24px rgba(15,23,42,.06); padding:14px; }
+    .grid2 { display:grid; grid-template-columns: 1fr 1fr; gap:12px; }
+    .grid3 { display:grid; grid-template-columns: 1fr 1fr 1fr; gap:12px; }
+
+    .field label { display:block; font-size:12px; color:var(--muted,#6b7280); margin-bottom:6px; font-weight:700; }
+    .field input, .field select {
+      width:100%; height:38px; border-radius:10px;
+      border:1px solid rgba(0,0,0,.12); padding:0 10px;
+      background:#fff; outline:none;
+    }
+
+    .rowActions { display:flex; gap:10px; align-items:flex-end; justify-content:flex-start; flex-wrap:wrap; }
+    .btn { height:38px; border-radius:10px; padding:0 14px; border:1px solid rgba(0,0,0,.12); background:#fff; cursor:pointer; font-weight:800; }
+    .btn.primary { background:var(--bg-strong,#00a89d); color:#fff; border-color:transparent; }
+    .btn.danger { background:#e11d48; color:#fff; border-color:transparent; }
+    .btn.soft { background:var(--accent-soft,#e0fffa); border-color:#bdeee8; }
+    .btn:disabled { opacity:.55; cursor:not-allowed; }
+    .btn.small{ height:34px; padding:0 10px; border-radius:10px; }
+
+    .tableWrap { margin-top:14px; overflow:auto; border-radius:12px; border:1px solid rgba(0,0,0,.08); }
+    table { width:100%; border-collapse:collapse; min-width:3200px; background:#fff; }
+    th, td { padding:10px 10px; border-bottom:1px solid rgba(0,0,0,.06); vertical-align:top; font-size:12px; white-space:nowrap; }
+    th { text-align:left; font-size:11px; color:var(--muted,#6b7280); text-transform:uppercase; letter-spacing:.04em; background:#fafafa; position:sticky; top:0; z-index:1; }
+    td.wrap { white-space:normal; min-width:220px; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+    .muted { color:var(--muted,#6b7280); }
+    .ok { color:#15803d; font-weight:900; }
+    .warn { color:#b45309; font-weight:900; }
+    .tiny { font-size:11px; }
+    .divider { height:1px; background:rgba(0,0,0,.06); margin:12px 0; }
+
+    .pill { display:inline-flex; align-items:center; gap:6px; padding:4px 10px; border-radius:999px; border:1px solid rgba(0,0,0,.08); background:#fff; font-weight:800; font-size:12px; }
+    .pill.ok { background:#ecfdf5; border-color:#bbf7d0; color:#065f46; }
+    .pill.warn { background:#fffbeb; border-color:#fde68a; color:#92400e; }
+    .pill.info { background:#eff6ff; border-color:#bfdbfe; color:#1d4ed8; }
+
+    .modalBackdrop{
+      position:fixed; inset:0;
+      display:none;
+      background:rgba(15,23,42,.45);
+      z-index:1000;
+      padding:18px;
+      overflow:auto;
+    }
+    .modalCard{
+      width:min(1200px,96vw);
+      max-height: 90vh;
+      background:#fff;
+      border-radius:16px;
+      border:1px solid rgba(0,0,0,.08);
+      box-shadow:0 18px 60px rgba(0,0,0,.25);
+      display:flex;
+      flex-direction:column;
+      overflow:hidden;
+      margin:auto;
+    }
+    .modalHead{
+      display:flex; justify-content:space-between; align-items:flex-start; gap:12px;
+      padding:14px 14px;
+      border-bottom:1px solid rgba(0,0,0,.08);
+      background:#fff;
+      flex:0 0 auto;
+    }
+    .modalBody{
+      padding:14px;
+      overflow:auto;
+      flex:1 1 auto;
+      min-height:0;
+    }
+    .modalFoot{
+      display:flex; align-items:center; gap:10px;
+      padding:12px 14px;
+      border-top:1px solid rgba(0,0,0,.08);
+      background:#fafafa;
+      flex:0 0 auto;
+    }
+
+    .iconBtn{ width:38px; height:38px; border-radius:10px; border:1px solid rgba(0,0,0,.12); background:#fff; cursor:pointer; font-weight:900; }
+    .miniRow{ display:grid; grid-template-columns: 1.2fr 1fr auto; gap:10px; align-items:end; padding:10px; border:1px solid rgba(0,0,0,.08); border-radius:12px; }
+    .miniRow + .miniRow{ margin-top:10px; }
+    .sectionTitle{ font-weight:900; margin:0 0 8px 0; }
+    .help{ font-size:12px; color:var(--muted,#6b7280); margin-top:4px; }
+    .linkBtn{ border:0; background:none; padding:0; color:var(--bg-dark,#008477); font-weight:900; cursor:pointer; text-decoration:underline; }
+
+    .pagerRow{ display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end; margin-bottom:10px; }
+    .pagerTabs{ display:flex; gap:6px; flex-wrap:wrap; align-items:center; }
+
+    .matchGrid{
+      display:grid;
+      grid-template-columns: 1fr 1fr;
+      gap:12px;
+    }
+    .matchCol{
+      border:1px solid rgba(0,0,0,.08);
+      border-radius:12px;
+      padding:12px;
+      background:#fff;
+    }
+    .kv{
+      display:grid;
+      grid-template-columns: 180px 1fr;
+      gap:8px 10px;
+      align-items:start;
+      font-size:12px;
+    }
+    .kv .k{
+      color:var(--muted,#6b7280);
+      font-weight:700;
+    }
+    .kv .v{
+      word-break:break-word;
+    }
+    .badge{
+      display:inline-block;
+      padding:3px 8px;
+      border-radius:999px;
+      font-size:11px;
+      font-weight:800;
+      border:1px solid rgba(0,0,0,.08);
+      background:#fff;
+    }
+    .badge.warn{
+      background:#fffbeb;
+      border-color:#fde68a;
+      color:#92400e;
+    }
+    .badge.ok{
+      background:#ecfdf5;
+      border-color:#bbf7d0;
+      color:#065f46;
+    }
+    .badge.info{
+      background:#eff6ff;
+      border-color:#bfdbfe;
+      color:#1d4ed8;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="appShell">
+    <!-- Sidebar común -->
+    <div id="sidebar-slot"></div>
+
+    <main class="content">
+      <div class="topbar">
+        <div>
+          <h1 class="h1">Carga de Producción Ambulatoria Mensual</h1>
+          <div class="sub" id="who">Conectado: —</div>
+        </div>
+        <div class="pillCount" id="countPill">0 filas</div>
+      </div>
+
+      <!-- Importación -->
+      <section class="card">
+        <div class="grid3">
+          <div class="field">
+            <label>Mes</label>
+            <select id="mes">
+              <option>Enero</option><option>Febrero</option><option>Marzo</option><option>Abril</option>
+              <option>Mayo</option><option>Junio</option><option>Julio</option><option>Agosto</option>
+              <option>Septiembre</option><option>Octubre</option><option>Noviembre</option><option>Diciembre</option>
+            </select>
+          </div>
+
+          <div class="field">
+            <label>Año</label>
+            <input id="ano" type="number" min="2020" max="2100" />
+          </div>
+
+          <div class="field">
+            <label>Importación</label>
+            <select id="importSelect">
+              <option value="">(Selecciona una importación del mes)</option>
+            </select>
+            <input id="importId" type="hidden" />
+          </div>
+        </div>
+
+        <div class="divider"></div>
+
+        <div class="rowActions">
+          <div class="field" style="min-width:320px;">
+            <label>Archivo Reservo (.xls, .xlsx, .csv)</label>
+            <input id="fileReservo" type="file" accept=".xls,.xlsx,.csv"/>
+          </div>
+
+          <div class="field" style="min-width:320px;">
+            <label>Archivo MK (.xls, .xlsx, .csv)</label>
+            <input id="fileMK" type="file" accept=".xls,.xlsx,.csv"/>
+          </div>
+
+          <button class="btn primary" id="btnCargar" type="button">Cargar archivos</button>
+
+          <button class="btn" id="btnCargarImport" type="button" title="Carga una importación existente para verla y editar staging">
+            Cargar Import
+          </button>
+
+          <button class="btn soft" id="btnResolver" type="button" disabled>Resolver pendientes</button>
+          <button class="btn soft" id="btnConfirmar" type="button" disabled>Confirmar importación</button>
+          <button class="btn danger" id="btnAnular" type="button" disabled>Anular importación</button>
+
+          <span class="pill ok" id="dirtyPill">Cambios en cola: 0</span>
+          <button class="btn soft" id="btnGuardarCola" type="button">Guardar cola</button>
+          <button id="btnLimpiarCola" type="button" class="btn">Limpiar cola</button>
+
+          <span class="muted tiny" id="statusInfo">—</span>
+        </div>
+
+        <div class="divider"></div>
+
+        <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+          <span class="pill" id="pillPendientes">Pendientes: 0</span>
+          <span class="pill ok" id="pillReservoValidos">Reservo válidos: 0</span>
+          <span class="pill ok" id="pillMKValidos">MK válidos: 0</span>
+          <span class="pill warn" id="pillAlertas">Alertas: 0</span>
+          <span class="pill info" id="pillCoincidencias">Coincidencias: 0</span>
+          <span class="pill ok" id="pillFusionados">Fusionados: 0</span>
+          <span class="pill" id="pillProf">Profesionales: 0</span>
+          <span class="muted tiny" id="hintResolver">Cargar Reservo + MK → resolver pendientes → confirmar.</span>
+        </div>
+      </section>
+
+      <!-- Preview -->
+      <section class="card" style="margin-top:14px;">
+        <div class="muted tiny" style="margin-bottom:8px;">
+          Vista previa (staging). Buscas sobre todas las filas y navegas de 60 en 60.
+        </div>
+
+        <div class="pagerRow">
+          <div class="field" style="min-width:340px; margin:0;">
+            <label>Buscar (todas las filas)</label>
+            <input id="q" placeholder="Ej: rut, paciente, profesional, tratamiento, artículo, previsión, etc." />
+          </div>
+
+          <span class="muted tiny" id="pagerInfo" style="align-self:flex-end;">—</span>
+          <span style="flex:1"></span>
+
+          <div style="display:flex; gap:8px; align-items:flex-end;">
+            <button class="btn small" id="btnPrev" type="button">⬅️</button>
+            <div id="pagerTabs" class="pagerTabs"></div>
+            <button class="btn small" id="btnNext" type="button">➡️</button>
+          </div>
+        </div>
+
+        <div class="tableWrap">
+          <table>
+            <thead id="thead"></thead>
+            <tbody id="tbody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- MODAL Resolver -->
+      <div id="modalResolverBackdrop" class="modalBackdrop">
+        <div class="modalCard" role="dialog" aria-modal="true">
+          <div class="modalHead">
+            <div>
+              <div class="h1" style="margin:0;font-size:18px;">Resolver pendientes</div>
+              <div class="muted" style="font-size:12px;margin-top:2px;" id="resolverSub">
+                Revisa coincidencias Reservo ↔ MK, alertas de estado y homologación de profesionales/prestaciones.
+              </div>
+            </div>
+            <button class="iconBtn" id="btnResolverClose" type="button" aria-label="Cerrar" title="Cerrar">✖️</button>
+          </div>
+
+          <div class="modalBody">
+            <div class="card" style="padding:12px;">
+              <div class="mini muted">Resumen</div>
+              <div id="resolverResumen" style="font-weight:900;margin-top:6px;"></div>
+              <div class="help" style="margin-top:8px;">
+                Una coincidencia probable se detecta por <b>RUT normalizado</b> + <b>fecha</b> + similitud de <b>profesional</b> o <b>prestación</b>.
+              </div>
+            </div>
+
+            <div style="height:12px;"></div>
+
+            <!-- Coincidencias -->
+            <section class="card" style="padding:12px;">
+              <div class="sectionTitle">Coincidencias Reservo ↔ MK</div>
+              <div class="muted tiny" style="margin-bottom:8px;">
+                Aquí decides si dos registros corresponden a la misma atención o si deben quedar separados.
+              </div>
+              <div id="resolverCoincidenciasList"></div>
+            </section>
+
+            <div style="height:12px;"></div>
+
+            <div class="grid2">
+              <!-- Profesionales -->
+              <section class="card" style="padding:12px;">
+                <div class="sectionTitle">Profesionales</div>
+                <div class="muted tiny" style="margin-bottom:8px;">
+                  Se sugieren desde la base de datos de profesionales. Basta una palabra útil en común para sugerir, pero se confirma manualmente.
+                </div>
+                <div id="resolverProfesionalesList"></div>
+              </section>
+
+              <!-- Prestaciones -->
+              <section class="card" style="padding:12px;">
+                <div class="sectionTitle">Prestaciones</div>
+                <div class="muted tiny" style="margin-bottom:8px;">
+                  Relación entre <b>Tratamiento</b> (Reservo) y <b>D Artículo</b> (MK).
+                </div>
+                <div id="resolverPrestacionesList"></div>
+              </section>
+            </div>
+
+            <div style="height:12px;"></div>
+
+            <!-- Alertas -->
+            <section class="card" style="padding:12px;">
+              <div class="sectionTitle">Alertas de estado y datos</div>
+              <div class="muted tiny" style="margin-bottom:8px;">
+                Revisa casos como: <b>pagado y no atendido</b>, <b>atendido y no pagado</b>, RUT incompleto o datos dudosos.
+              </div>
+              <div id="resolverAlertasList"></div>
+            </section>
+          </div>
+
+          <div class="modalFoot">
+            <button class="btn" id="btnResolverCancelar" type="button">Cerrar</button>
+            <span style="flex:1"></span>
+            <button class="btn primary" id="btnResolverRevisar" type="button">Recalcular pendientes</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- MODAL Detalle Item -->
+      <div id="modalItemBackdrop" class="modalBackdrop">
+        <div class="modalCard" role="dialog" aria-modal="true">
+          <div class="modalHead">
+            <div>
+              <div class="h1" style="margin:0;font-size:18px;">Detalle de item</div>
+              <div class="muted" style="font-size:12px;margin-top:2px;" id="itemSub">—</div>
+            </div>
+            <button class="iconBtn" id="btnItemClose" type="button" aria-label="Cerrar" title="Cerrar">✖️</button>
+          </div>
+
+          <div class="modalBody">
+            <div id="itemForm"></div>
+          </div>
+
+          <div class="modalFoot">
+            <button class="btn" id="btnItemCancelar" type="button">Cerrar</button>
+            <span style="flex:1"></span>
+            <button class="btn soft" id="btnGuardarTodo" type="button">Agregar a cola</button>
+            <button class="btn primary" id="btnGuardarItem" type="button">Guardar item</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- MODAL Match / Fusión -->
+      <div id="modalMatchBackdrop" class="modalBackdrop">
+        <div class="modalCard" role="dialog" aria-modal="true">
+          <div class="modalHead">
+            <div>
+              <div class="h1" style="margin:0;font-size:18px;">Confirmar coincidencia</div>
+              <div class="muted" style="font-size:12px;margin-top:2px;" id="matchSub">
+                Revisa ambos registros y confirma si corresponden a la misma atención.
+              </div>
+            </div>
+            <button class="iconBtn" id="btnMatchClose" type="button" aria-label="Cerrar" title="Cerrar">✖️</button>
+          </div>
+
+          <div class="modalBody">
+            <div class="matchGrid">
+              <div class="matchCol">
+                <div class="sectionTitle">Registro Reservo</div>
+                <div id="matchReservo"></div>
+              </div>
+
+              <div class="matchCol">
+                <div class="sectionTitle">Registro MK</div>
+                <div id="matchMK"></div>
+              </div>
+            </div>
+
+            <div style="height:12px;"></div>
+
+            <section class="card" style="padding:12px;">
+              <div class="sectionTitle">Resultado de revisión</div>
+
+              <div class="grid2">
+                <div class="field">
+                  <label>Profesional consolidado</label>
+                  <select id="matchProfesionalSelect">
+                    <option value="">(Selecciona profesional)</option>
+                  </select>
+                </div>
+
+                <div class="field">
+                  <label>Observación de revisión</label>
+                  <input id="matchObservacion" type="text" placeholder="Ej: mismo RUT y fecha, confirmado manualmente" />
+                </div>
+              </div>
+
+              <div class="help">
+                Al confirmar la fusión, se conservan los datos originales de ambos archivos y además se guarda el estado consolidado.
+              </div>
+            </section>
+          </div>
+
+          <div class="modalFoot">
+            <button class="btn" id="btnMatchSeparar" type="button">Mantener separados</button>
+            <span style="flex:1"></span>
+            <button class="btn primary" id="btnMatchFusionar" type="button">Confirmar fusión</button>
+          </div>
+        </div>
+      </div>
+
+      <script type="module" src="layout.js"></script>
+      <script type="module" src="produccion_ambulatoria.js"></script>
+    </main>
+  </div>
+</body>
+</html>
