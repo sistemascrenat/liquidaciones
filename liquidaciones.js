@@ -573,36 +573,49 @@ async function generarPDFLiquidacionProfesional(agg){
     // título del rol como “fila separadora”
     resumenRows.push({ kind:'role', rol: rolName });
 
-    // agrupar por tipoPaciente
-    const byTipo = new Map();
+    // agrupar por tipoPaciente (✅ SIEMPRE mostrar PARTICULAR/ISAPRE, MLE y FONASA aunque sean 0)
+    const byTipo = new Map([
+      ['particular_isapre', { casos: 0, subtotal: 0 }],
+      ['mle',               { casos: 0, subtotal: 0 }],
+      ['fonasa',            { casos: 0, subtotal: 0 }]
+    ]);
+
     for (const l of ls) {
-      const tp = (l.tipoPaciente || '').toString().toLowerCase().trim() || 'sin_tipo';
-      if (!byTipo.has(tp)) byTipo.set(tp, { casos: 0, subtotal: 0 });
-      const o = byTipo.get(tp);
-      o.casos += 1;
-      o.subtotal += (Number(l.monto || 0) || 0);
+      const tp = tipoPacienteNorm(l.tipoPaciente || '');
+
+      // solo acumulamos en los buckets válidos
+      if (byTipo.has(tp)) {
+        const o = byTipo.get(tp);
+        o.casos += 1;
+        o.subtotal += (Number(l.monto || 0) || 0);
+      }
     }
 
-    const tiposSorted = [...byTipo.keys()].sort((a,b)=> a.localeCompare(b));
+    // ✅ Orden fijo
+    const tiposSorted = ['particular_isapre', 'mle', 'fonasa'];
 
     let roleCasos = 0;
     let roleSubtotal = 0;
 
     for (const tp of tiposSorted) {
-      const o = byTipo.get(tp);
+      const o = byTipo.get(tp) || { casos: 0, subtotal: 0 };
+
       roleCasos += o.casos;
       roleSubtotal += o.subtotal;
 
-      let tpLabel = tipoPacienteHumano(tp);
-      if (tpLabel === 'ISAPRE' || tpLabel === 'PARTICULAR') tpLabel = 'PARTICULAR O ISAPRE';
+      let tpLabel = '';
+      if (tp === 'particular_isapre') tpLabel = 'PARTICULAR O ISAPRE';
+      else if (tp === 'mle') tpLabel = 'MLE';
+      else if (tp === 'fonasa') tpLabel = 'FONASA';
+      else tpLabel = tipoPacienteHumano(tp);
 
-      resumenRows.push({ kind:'row', tipo: tpLabel, cant: o.casos, sub: o.subtotal });
+      resumenRows.push({
+        kind:'row',
+        tipo: tpLabel,
+        cant: o.casos,
+        sub: o.subtotal
+      });
     }
-
-    resumenRows.push({ kind:'subtotal', tipo:'SUBTOTAL', cant: roleCasos, sub: roleSubtotal });
-
-    subtotalByRole.push({ rid, rolName, casos: roleCasos, sub: roleSubtotal });
-  }
 
   // Medidas tabla resumen
   const headH = 24;
