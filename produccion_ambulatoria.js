@@ -40,6 +40,10 @@ let dataMK = []
 let profesionales = []
 let consolidado = []
 
+let stateFusion = {
+actual: null
+}
+
 /* ======================
    NORMALIZAR RUT
 ====================== */
@@ -312,7 +316,7 @@ m.coincidencia = r
 }
 
 /* ======================
-   FUSIONAR
+   FUSIONAR / DETALLE
 ====================== */
 
 function fusionarRegistro(reg){
@@ -321,6 +325,131 @@ if(!reg.coincidencia) return
 
 reg.fusionado = true
 reg.coincidencia.fusionado = true
+
+}
+
+function abrirDetalle(reg){
+
+const modal = $("modalItemBackdrop")
+const itemSub = $("itemSub")
+const itemForm = $("itemForm")
+
+if(!modal || !itemSub || !itemForm){
+  console.warn("No existe el modal de detalle en el HTML")
+  return
+}
+
+itemSub.textContent = `${reg.origen || ""} · ${reg.fecha || ""} · ${reg.rut || ""}`
+
+itemForm.innerHTML = `
+  <div class="grid2">
+
+    <section class="card" style="padding:12px;">
+      <div class="sectionTitle">Datos consolidados</div>
+      <div class="kv">
+        <div class="k">Origen</div><div class="v">${reg.origen || ""}</div>
+        <div class="k">Fecha</div><div class="v">${reg.fecha || ""}</div>
+        <div class="k">Fecha normalizada</div><div class="v">${reg.fechaNorm || ""}</div>
+        <div class="k">RUT</div><div class="v">${reg.rut || ""}</div>
+        <div class="k">RUT normalizado</div><div class="v">${reg.rutNorm || ""}</div>
+        <div class="k">Paciente</div><div class="v">${reg.paciente || ""}</div>
+        <div class="k">Profesional</div><div class="v">${reg.profesional || ""}</div>
+        <div class="k">Profesional detectado</div><div class="v">${reg.profesionalDetectado || "—"}</div>
+        <div class="k">Prestación</div><div class="v">${reg.prestacion || ""}</div>
+        <div class="k">Valor</div><div class="v">${reg.valor ?? ""}</div>
+        <div class="k">Alerta</div><div class="v">${reg.alerta || "—"}</div>
+        <div class="k">Fusionado</div><div class="v">${reg.fusionado ? "Sí" : "No"}</div>
+      </div>
+    </section>
+
+    <section class="card" style="padding:12px;">
+      <div class="sectionTitle">Datos originales</div>
+      <pre style="white-space:pre-wrap; font-size:12px; margin:0;">${JSON.stringify(reg.dataReservo || reg.dataMK || {}, null, 2)}</pre>
+    </section>
+
+  </div>
+`
+
+modal.style.display = "block"
+
+}
+
+function cerrarDetalle(){
+
+const modal = $("modalItemBackdrop")
+const itemForm = $("itemForm")
+
+if(modal) modal.style.display = "none"
+if(itemForm) itemForm.innerHTML = ""
+
+}
+
+function abrirFusion(reg){
+
+if(!reg.coincidencia){
+  alert("Este registro no tiene coincidencia para fusionar.")
+  return
+}
+
+const modal = $("modalMatchBackdrop")
+const sub = $("matchSub")
+const boxReservo = $("matchReservo")
+const boxMK = $("matchMK")
+const profSelect = $("matchProfesionalSelect")
+const obs = $("matchObservacion")
+
+if(!modal || !sub || !boxReservo || !boxMK || !profSelect || !obs){
+  console.warn("No existe el modal de fusión en el HTML")
+  return
+}
+
+const a = reg.origen === "Reservo" ? reg : reg.coincidencia
+const b = reg.origen === "MK" ? reg : reg.coincidencia
+
+sub.textContent = `Coincidencia por RUT ${a.rut || ""} y fecha ${a.fechaNorm || a.fecha || ""}`
+
+boxReservo.innerHTML = `
+  <div class="kv">
+    <div class="k">Origen</div><div class="v">${a.origen || ""}</div>
+    <div class="k">Fecha</div><div class="v">${a.fecha || ""}</div>
+    <div class="k">RUT</div><div class="v">${a.rut || ""}</div>
+    <div class="k">Paciente</div><div class="v">${a.paciente || ""}</div>
+    <div class="k">Profesional</div><div class="v">${a.profesional || ""}</div>
+    <div class="k">Prestación</div><div class="v">${a.prestacion || ""}</div>
+    <div class="k">Valor</div><div class="v">${a.valor ?? ""}</div>
+    <div class="k">Alerta</div><div class="v">${a.alerta || "—"}</div>
+  </div>
+`
+
+boxMK.innerHTML = `
+  <div class="kv">
+    <div class="k">Origen</div><div class="v">${b.origen || ""}</div>
+    <div class="k">Fecha</div><div class="v">${b.fecha || ""}</div>
+    <div class="k">RUT</div><div class="v">${b.rut || ""}</div>
+    <div class="k">Paciente</div><div class="v">${b.paciente || ""}</div>
+    <div class="k">Profesional</div><div class="v">${b.profesional || ""}</div>
+    <div class="k">Prestación</div><div class="v">${b.prestacion || ""}</div>
+    <div class="k">Valor</div><div class="v">${b.valor ?? ""}</div>
+    <div class="k">Alerta</div><div class="v">${b.alerta || "—"}</div>
+  </div>
+`
+
+profSelect.innerHTML = `<option value="">(Selecciona profesional)</option>` +
+  profesionales.map(p => `<option value="${p.id}">${p.nombre || p.nombreProfesional || p.id}</option>`).join("")
+
+obs.value = ""
+
+modal.style.display = "block"
+
+stateFusion.actual = reg
+
+}
+
+function cerrarFusion(){
+
+const modal = $("modalMatchBackdrop")
+if(modal) modal.style.display = "none"
+stateFusion.actual = null
 
 }
 
@@ -382,15 +511,13 @@ let btnDetalle = tr.querySelector(".btnDetalle")
 
 if(btnFusionar){
   btnFusionar.onclick = ()=>{
-    fusionarRegistro(r)
-    render()
+    abrirFusion(r)
   }
 }
 
 if(btnDetalle){
   btnDetalle.onclick = ()=>{
-    console.log("Detalle:", r)
-    alert("Luego conectamos este botón al modal de detalle.")
+    abrirDetalle(r)
   }
 }
 
@@ -471,6 +598,33 @@ $("who").textContent = `Conectado: ${user.email}`
 
 wireLogout()
 setDefaultToPreviousMonth()
+
+if($("btnItemClose")) $("btnItemClose").onclick = cerrarDetalle
+if($("btnItemCancelar")) $("btnItemCancelar").onclick = cerrarDetalle
+
+if($("modalItemBackdrop")){
+  $("modalItemBackdrop").addEventListener("click", (e)=>{
+    if(e.target === $("modalItemBackdrop")) cerrarDetalle()
+  })
+}
+
+if($("btnMatchClose")) $("btnMatchClose").onclick = cerrarFusion
+if($("btnMatchSeparar")) $("btnMatchSeparar").onclick = cerrarFusion
+
+if($("btnMatchFusionar")){
+  $("btnMatchFusionar").onclick = ()=>{
+    if(!stateFusion.actual) return
+    fusionarRegistro(stateFusion.actual)
+    cerrarFusion()
+    render()
+  }
+}
+
+if($("modalMatchBackdrop")){
+  $("modalMatchBackdrop").addEventListener("click", (e)=>{
+    if(e.target === $("modalMatchBackdrop")) cerrarFusion()
+  })
+}
 
 }
 })
