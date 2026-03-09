@@ -330,51 +330,76 @@ reg.coincidencia.fusionado = true
 
 function render(){
 
-let tbody = $("tabla").querySelector("tbody")
+let thead = $("thead")
+let tbody = $("tbody")
+
+if(!thead || !tbody) return
+
+thead.innerHTML = `
+<tr>
+<td>#</td>
+<td>Origen</td>
+<td>Fecha</td>
+<td>Rut</td>
+<td>Paciente</td>
+<td>Profesional</td>
+<td>Prestación</td>
+<td>Valor</td>
+<td>Alerta</td>
+<td>Acciones</td>
+</tr>
+`
 
 tbody.innerHTML = ""
 
-for(let r of consolidado){
+for(let i=0;i<consolidado.length;i++){
 
+let r = consolidado[i]
 let tr = document.createElement("tr")
 
 if(r.alerta) tr.classList.add("alerta")
-
 if(r.coincidencia) tr.classList.add("coincidencia")
-
 if(r.fusionado) tr.classList.add("fusionado")
 
 tr.innerHTML = `
-
-<td>${r.origen}</td>
-<td>${r.fecha}</td>
-<td>${r.rut}</td>
-<td>${r.paciente}</td>
-<td>${r.profesional}</td>
-<td>${r.prestacion}</td>
-<td>${r.valor}</td>
+<td>${i+1}</td>
+<td>${r.origen || ""}</td>
+<td>${r.fecha || ""}</td>
+<td>${r.rut || ""}</td>
+<td>${r.paciente || ""}</td>
+<td>${r.profesional || ""}</td>
+<td>${r.prestacion || ""}</td>
+<td>${r.valor ?? ""}</td>
 <td>${r.alerta || ""}</td>
-
 <td>
-
-<button class="btnFusionar">Fusionar</button>
-<button class="btnDetalle">Más info</button>
-
+  <button class="btnFusionar" type="button">Fusionar</button>
+  <button class="btnDetalle" type="button">Más info</button>
 </td>
-
 `
 
 let btnFusionar = tr.querySelector(".btnFusionar")
+let btnDetalle = tr.querySelector(".btnDetalle")
 
-btnFusionar.onclick = ()=>{
+if(btnFusionar){
+  btnFusionar.onclick = ()=>{
+    fusionarRegistro(r)
+    render()
+  }
+}
 
-fusionarRegistro(r)
-render()
-
+if(btnDetalle){
+  btnDetalle.onclick = ()=>{
+    console.log("Detalle:", r)
+    alert("Luego conectamos este botón al modal de detalle.")
+  }
 }
 
 tbody.appendChild(tr)
 
+}
+
+if($("countPill")){
+$("countPill").textContent = `${consolidado.length} filas`
 }
 
 }
