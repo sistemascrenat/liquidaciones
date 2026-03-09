@@ -1,4 +1,6 @@
 import { db } from './firebase-init.js'
+import { requireAuth } from './auth.js'
+import { setActiveNav, wireLogout } from './ui.js'
 import { loadSidebar } from './layout.js'
 
 import {
@@ -6,9 +8,28 @@ collection,
 getDocs
 } from "https://www.gstatic.com/firebasejs/11.7.3/firebase-firestore.js"
 
-await loadSidebar({ active: 'produccion_ambulatoria' })
-
 const $ = id => document.getElementById(id)
+
+/* ======================
+   DEFAULT MES / AÑO
+====================== */
+
+function setDefaultToPreviousMonth(){
+
+const meses = [
+"Enero","Febrero","Marzo","Abril","Mayo","Junio",
+"Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"
+]
+
+const d = new Date()
+
+d.setDate(1)
+d.setMonth(d.getMonth()-1)
+
+if($("mes")) $("mes").value = meses[d.getMonth()]
+if($("ano")) $("ano").value = String(d.getFullYear())
+
+}
 
 /* ======================
    DATA
@@ -407,4 +428,24 @@ if(!file) return
 
 dataMK = await leerExcel(file)
 
+})
+
+/* ======================
+   BOOT
+====================== */
+
+requireAuth({
+onUser: async(user)=>{
+
+await loadSidebar({ active: 'produccion_ambulatoria' })
+setActiveNav('produccion_ambulatoria')
+
+if($("who")){
+$("who").textContent = `Conectado: ${user.email}`
+}
+
+wireLogout()
+setDefaultToPreviousMonth()
+
+}
 })
