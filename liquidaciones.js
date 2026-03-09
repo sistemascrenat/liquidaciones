@@ -617,6 +617,21 @@ async function generarPDFLiquidacionProfesional(agg){
       });
     }
 
+    resumenRows.push({
+      kind:'subtotal',
+      tipo:'SUBTOTAL',
+      cant: roleCasos,
+      sub: roleSubtotal
+    });
+
+    subtotalByRole.push({
+      rid,
+      rolName,
+      casos: roleCasos,
+      sub: roleSubtotal
+    });
+  }
+
   // Medidas tabla resumen
   const headH = 24;
   const resRowH = 20;
