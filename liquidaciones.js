@@ -1598,12 +1598,13 @@ function resolveTipoPacienteKey(pacientesObj, tipoPaciente){
       'PARTICULAR / ISAPRE',
       'particularisapre',
 
-      // ✅ equivalentes "legacy" que pueden existir como key real en el tarifario
+      // equivalentes legacy
       'particular',
       'isapre'
     );
+  }
 
-      // ✅ Bucket "MLE": aceptar equivalencias en ambos sentidos
+  // ✅ Bucket "MLE": aceptar equivalencias en ambos sentidos
   const esBucketMLE =
     tpn === 'mle' ||
     tpn.includes('mle') ||
@@ -1636,7 +1637,6 @@ function resolveTipoPacienteKey(pacientesObj, tipoPaciente){
 
   return null;
 }
-
 
 /* =========================
    Tarifario: procedimientos.tarifas[clinicaId].pacientes[tipo].honorarios[roleId]
