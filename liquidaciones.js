@@ -634,23 +634,13 @@ async function generarPDFLiquidacionProfesional(agg){
   drawCellTextRight(page1, 'SUBTOTAL', M + colTipoW + colCantW, y, colSubW, headH, 10, true, rgb(1,1,1), 8);
 
   // filas
-  // filas
   let yCursor = y - headH;
-  let extraGap = 0; // espacio acumulado SOLO entre bloques de roles
-  const roleGap = 10;
-
   for(let i=0; i<resumenRows.length; i++){
     const r = resumenRows[i];
-
-    // ✅ el espacio va ANTES de cada nuevo bloque "role", excepto el primero
-    if(r.kind === 'role' && i > 0){
-      extraGap += roleGap;
-    }
-
-    const yTop = yCursor - i*resRowH - extraGap;
+    const yTop = yCursor - i*resRowH;
 
     // si nos pasamos del espacio, cortamos
-    if((y - (headH + (i+1)*resRowH + extraGap)) < (M + 90)) break;
+    if((y - (headH + (i+1)*resRowH)) < (M + 90)) break;
 
     // línea horizontal de fila
     drawHLine2(page1, M, yTop, boxW, 1, BORDER_SOFT);
@@ -665,7 +655,7 @@ async function generarPDFLiquidacionProfesional(agg){
         resRowH,
         10,
         true,
-        RENNAT_BLUE_SOFT,
+        RENNAT_BLUE_SOFT, // 👈 azul grisáceo
         8
       );
 
@@ -712,13 +702,14 @@ async function generarPDFLiquidacionProfesional(agg){
         subtotalColor,
         8
       );
+
     }
   }
 
   // bajamos cursor real (altura usada)
-  const usedRows = resumenRows.length;
-  y = y - (headH + usedRows*resRowH + extraGap) - 16;
-  
+  const usedRows = Math.min(resumenRows.length, Math.floor((resHFinal - headH)/resRowH));
+  y = y - (headH + usedRows*resRowH) - 16;
+
   // =========================
   // ✅ TOTAL + AJUSTES + TOTAL A PAGAR
   // =========================
