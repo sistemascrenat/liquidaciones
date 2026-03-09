@@ -1,9 +1,12 @@
 import { db } from './firebase-init.js'
+import { loadSidebar } from './layout.js'
 
 import {
 collection,
 getDocs
 } from "https://www.gstatic.com/firebasejs/11.7.3/firebase-firestore.js"
+
+await loadSidebar({ active: 'produccion_ambulatoria' })
 
 const $ = id => document.getElementById(id)
 
