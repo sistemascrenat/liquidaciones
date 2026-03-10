@@ -15,9 +15,10 @@
   <style>
     /* ✅ Mantener el mismo ancho del sidebar que en el resto del sistema */
     :root{
-      --sidebar-w: 260px;
+      --sidebar-w: 260px; /* si en tu estilos.css usas otro, cambia aquí y quedará fijo */
     }
 
+    /* Estructura base: NO re-estilamos el sidebar interno, solo su slot */
     .appShell{
       display:flex;
       min-height:100vh;
@@ -58,7 +59,7 @@
     .btn.small{ height:34px; padding:0 10px; border-radius:10px; }
 
     .tableWrap { margin-top:14px; overflow:auto; border-radius:12px; border:1px solid rgba(0,0,0,.08); }
-    table { width:100%; border-collapse:collapse; min-width:3200px; background:#fff; }
+    table { width:100%; border-collapse:collapse; min-width:2600px; background:#fff; }
     th, td { padding:10px 10px; border-bottom:1px solid rgba(0,0,0,.06); vertical-align:top; font-size:12px; white-space:nowrap; }
     th { text-align:left; font-size:11px; color:var(--muted,#6b7280); text-transform:uppercase; letter-spacing:.04em; background:#fafafa; position:sticky; top:0; z-index:1; }
     td.wrap { white-space:normal; min-width:220px; }
@@ -72,8 +73,8 @@
     .pill { display:inline-flex; align-items:center; gap:6px; padding:4px 10px; border-radius:999px; border:1px solid rgba(0,0,0,.08); background:#fff; font-weight:800; font-size:12px; }
     .pill.ok { background:#ecfdf5; border-color:#bbf7d0; color:#065f46; }
     .pill.warn { background:#fffbeb; border-color:#fde68a; color:#92400e; }
-    .pill.info { background:#eff6ff; border-color:#bfdbfe; color:#1d4ed8; }
 
+    /* ✅ Modal resolver con scroll interno */
     .modalBackdrop{
       position:fixed; inset:0;
       display:none;
@@ -83,7 +84,7 @@
       overflow:auto;
     }
     .modalCard{
-      width:min(1200px,96vw);
+      width:min(1040px,96vw);
       max-height: 90vh;
       background:#fff;
       border-radius:16px;
@@ -116,7 +117,7 @@
     }
 
     .iconBtn{ width:38px; height:38px; border-radius:10px; border:1px solid rgba(0,0,0,.12); background:#fff; cursor:pointer; font-weight:900; }
-    .miniRow{ display:grid; grid-template-columns: 1.2fr 1fr auto; gap:10px; align-items:end; padding:10px; border:1px solid rgba(0,0,0,.08); border-radius:12px; }
+    .miniRow{ display:grid; grid-template-columns: 1.3fr 1fr auto; gap:10px; align-items:end; padding:10px; border:1px solid rgba(0,0,0,.08); border-radius:12px; }
     .miniRow + .miniRow{ margin-top:10px; }
     .sectionTitle{ font-weight:900; margin:0 0 8px 0; }
     .help{ font-size:12px; color:var(--muted,#6b7280); margin-top:4px; }
@@ -125,17 +126,7 @@
     .pagerRow{ display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end; margin-bottom:10px; }
     .pagerTabs{ display:flex; gap:6px; flex-wrap:wrap; align-items:center; }
 
-    .matchGrid{
-      display:grid;
-      grid-template-columns: 1fr 1fr;
-      gap:12px;
-    }
-    .matchCol{
-      border:1px solid rgba(0,0,0,.08);
-      border-radius:12px;
-      padding:12px;
-      background:#fff;
-    }
+    /* utilidades del modal detalle */
     .kv{
       display:grid;
       grid-template-columns: 180px 1fr;
@@ -150,30 +141,6 @@
     .kv .v{
       word-break:break-word;
     }
-    .badge{
-      display:inline-block;
-      padding:3px 8px;
-      border-radius:999px;
-      font-size:11px;
-      font-weight:800;
-      border:1px solid rgba(0,0,0,.08);
-      background:#fff;
-    }
-    .badge.warn{
-      background:#fffbeb;
-      border-color:#fde68a;
-      color:#92400e;
-    }
-    .badge.ok{
-      background:#ecfdf5;
-      border-color:#bbf7d0;
-      color:#065f46;
-    }
-    .badge.info{
-      background:#eff6ff;
-      border-color:#bfdbfe;
-      color:#1d4ed8;
-    }
   </style>
 </head>
 
@@ -185,7 +152,7 @@
     <main class="content">
       <div class="topbar">
         <div>
-          <h1 class="h1">Carga de Producción Ambulatoria Mensual</h1>
+          <h1 class="h1">Carga de Producción Ambulatoria Mensual:</h1>
           <div class="sub" id="who">Conectado: —</div>
         </div>
         <div class="pillCount" id="countPill">0 filas</div>
@@ -220,12 +187,12 @@
         <div class="divider"></div>
 
         <div class="rowActions">
-          <div class="field" style="min-width:320px;">
+          <div class="field" style="min-width:380px;">
             <label>Archivo Reservo (.xls, .xlsx, .csv)</label>
             <input id="fileReservo" type="file" accept=".xls,.xlsx,.csv"/>
           </div>
 
-          <div class="field" style="min-width:320px;">
+          <div class="field" style="min-width:380px;">
             <label>Archivo MK (.xls, .xlsx, .csv)</label>
             <input id="fileMK" type="file" accept=".xls,.xlsx,.csv"/>
           </div>
@@ -298,7 +265,7 @@
             <div>
               <div class="h1" style="margin:0;font-size:18px;">Resolver pendientes</div>
               <div class="muted" style="font-size:12px;margin-top:2px;" id="resolverSub">
-                Revisa coincidencias Reservo ↔ MK, alertas de estado y homologación de profesionales/prestaciones.
+                Revisa alertas de estado y resuelve profesionales / procedimientos faltantes.
               </div>
             </div>
             <button class="iconBtn" id="btnResolverClose" type="button" aria-label="Cerrar" title="Cerrar">✖️</button>
@@ -317,9 +284,9 @@
 
             <!-- Coincidencias -->
             <section class="card" style="padding:12px;">
-              <div class="sectionTitle">Coincidencias Reservo ↔ MK</div>
+              <div class="sectionTitle">Resumen de revisión</div>
               <div class="muted tiny" style="margin-bottom:8px;">
-                Aquí decides si dos registros corresponden a la misma atención o si deben quedar separados.
+                Aquí verás los ítems con alertas y los que siguen pendientes de profesional o procedimiento.
               </div>
               <div id="resolverCoincidenciasList"></div>
             </section>
