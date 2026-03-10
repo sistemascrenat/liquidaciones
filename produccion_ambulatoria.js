@@ -4,8 +4,8 @@ import { setActiveNav, wireLogout } from './ui.js'
 import { loadSidebar } from './layout.js'
 
 import {
-collection,
-getDocs
+  collection,
+  getDocs
 } from "https://www.gstatic.com/firebasejs/11.7.3/firebase-firestore.js"
 
 const $ = id => document.getElementById(id)
@@ -14,21 +14,18 @@ const $ = id => document.getElementById(id)
    DEFAULT MES / AÑO
 ====================== */
 
-function setDefaultToPreviousMonth(){
+function setDefaultToPreviousMonth() {
+  const meses = [
+    "Enero","Febrero","Marzo","Abril","Mayo","Junio",
+    "Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"
+  ]
 
-const meses = [
-"Enero","Febrero","Marzo","Abril","Mayo","Junio",
-"Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"
-]
+  const d = new Date()
+  d.setDate(1)
+  d.setMonth(d.getMonth() - 1)
 
-const d = new Date()
-
-d.setDate(1)
-d.setMonth(d.getMonth()-1)
-
-if($("mes")) $("mes").value = meses[d.getMonth()]
-if($("ano")) $("ano").value = String(d.getFullYear())
-
+  if ($("mes")) $("mes").value = meses[d.getMonth()]
+  if ($("ano")) $("ano").value = String(d.getFullYear())
 }
 
 /* ======================
@@ -42,843 +39,1079 @@ let procedimientos = []
 let consolidado = []
 
 let stateEdicion = {
-actual: null
+  actual: null
+}
+
+let manualOverrides = {}
+
+let uiState = {
+  q: "",
+  page: 0,
+  pageSize: 60
 }
 
 /* ======================
-   NORMALIZAR RUT
+   HELPERS
 ====================== */
 
-function normalizarRut(rut){
+function clean(v) {
+  return (v ?? "").toString().trim()
+}
 
-if(!rut) return ""
+function escapeHtml(str) {
+  return String(str ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+}
 
-return rut
-.toString()
-.replace(/\./g,"")
-.replace(/-/g,"")
-.trim()
-.toUpperCase()
+function normalizarTexto(t) {
+  return clean(t)
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .toUpperCase()
+}
 
+function normalizarRut(rut) {
+  if (!rut) return ""
+  return rut
+    .toString()
+    .replace(/\./g, "")
+    .replace(/-/g, "")
+    .replace(/\s+/g, "")
+    .trim()
+    .toUpperCase()
+}
+
+function normalizarPaciente(t) {
+  return normalizarTexto(t).replace(/\s+/g, " ").trim()
+}
+
+function normalizarFecha(fecha) {
+  if (fecha === null || fecha === undefined || fecha === "") return ""
+
+  try {
+    if (typeof fecha === "number" && window.XLSX?.SSF?.parse_date_code) {
+      const p = window.XLSX.SSF.parse_date_code(fecha)
+      if (p && p.y && p.m && p.d) {
+        const mm = String(p.m).padStart(2, "0")
+        const dd = String(p.d).padStart(2, "0")
+        return `${p.y}-${mm}-${dd}`
+      }
+    }
+
+    const t = clean(fecha)
+
+    let m = t.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/)
+    if (m) {
+      return `${m[1]}-${String(m[2]).padStart(2,'0')}-${String(m[3]).padStart(2,'0')}`
+    }
+
+    m = t.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/)
+    if (m) {
+      return `${m[3]}-${String(m[2]).padStart(2,'0')}-${String(m[1]).padStart(2,'0')}`
+    }
+
+    const d = new Date(t)
+    if (!isNaN(d)) return d.toISOString().slice(0, 10)
+
+    return ""
+  } catch {
+    return ""
+  }
+}
+
+function normalizarMonto(v) {
+  if (v === null || v === undefined) return 0
+  if (typeof v === "number") return Number.isFinite(v) ? v : 0
+
+  let s = String(v).trim()
+  if (!s || s === "-") return 0
+
+  s = s.replace(/\$/g, "").replace(/\s+/g, "")
+
+  // negativos con paréntesis
+  if (/^\(.*\)$/.test(s)) {
+    s = "-" + s.slice(1, -1)
+  }
+
+  // si trae ambos separadores, usa el último como decimal
+  const lastDot = s.lastIndexOf(".")
+  const lastComma = s.lastIndexOf(",")
+
+  if (lastDot !== -1 && lastComma !== -1) {
+    if (lastDot > lastComma) {
+      s = s.replace(/,/g, "")
+    } else {
+      s = s.replace(/\./g, "").replace(",", ".")
+    }
+  } else if (lastComma !== -1) {
+    const parts = s.split(",")
+    if (parts.length === 2 && parts[1].length <= 2) {
+      s = s.replace(",", ".")
+    } else {
+      s = s.replace(/,/g, "")
+    }
+  } else if (lastDot !== -1) {
+    const parts = s.split(".")
+    if (!(parts.length === 2 && parts[1].length <= 2)) {
+      s = s.replace(/\./g, "")
+    }
+  }
+
+  const n = Number(s)
+  return Number.isFinite(n) ? n : 0
+}
+
+function leerExcel(file) {
+  return new Promise(resolve => {
+    const reader = new FileReader()
+
+    reader.onload = e => {
+      const data = new Uint8Array(e.target.result)
+      const workbook = XLSX.read(data, { type: 'array' })
+      const sheet = workbook.Sheets[workbook.SheetNames[0]]
+      const json = XLSX.utils.sheet_to_json(sheet, { defval: '' })
+      resolve(json)
+    }
+
+    reader.readAsArrayBuffer(file)
+  })
 }
 
 /* ======================
-   NORMALIZAR FECHA
+   CARGA CATÁLOGOS
 ====================== */
 
-function normalizarFecha(fecha){
+async function cargarProfesionales() {
+  const snap = await getDocs(collection(db, "profesionales"))
 
-if(!fecha) return ""
-
-try{
-
-let d = new Date(fecha)
-
-if(isNaN(d)) return ""
-
-return d.toISOString().slice(0,10)
-
-}catch{
-
-return ""
-
+  profesionales = snap.docs.map(d => ({
+    id: d.id,
+    ...d.data()
+  }))
 }
 
+async function cargarProcedimientos() {
+  const snap = await getDocs(collection(db, "procedimientos"))
+
+  procedimientos = snap.docs.map(d => ({
+    id: d.id,
+    ...d.data()
+  }))
 }
 
 /* ======================
-   NORMALIZAR TEXTO
+   BÚSQUEDA CATÁLOGOS
 ====================== */
 
-function normalizarTexto(t){
+function nombreProfesionalCatalogo(p) {
+  return p?.nombreProfesional || p?.nombre || p?.nombreCompleto || p?.id || ""
+}
 
-if(!t) return ""
+function nombreProcedimientoCatalogo(p) {
+  return p?.nombre || p?.procedimiento || p?.descripcion || p?.id || ""
+}
 
-return t
-.toString()
-.trim()
-.toUpperCase()
+function buscarProfesional(texto) {
+  const t = normalizarTexto(texto)
+  if (!t) return null
 
+  return profesionales.find(p => {
+    const nombre = normalizarTexto(nombreProfesionalCatalogo(p))
+    if (!nombre) return false
+    const palabras = nombre.split(" ").filter(Boolean)
+    return palabras.some(w => w.length > 2 && t.includes(w))
+  }) || null
+}
+
+function buscarProcedimiento(texto) {
+  const t = normalizarTexto(texto)
+  if (!t) return null
+
+  return procedimientos.find(p => {
+    const nombre = normalizarTexto(nombreProcedimientoCatalogo(p))
+    if (!nombre) return false
+    return nombre === t || t.includes(nombre) || nombre.includes(t)
+  }) || null
 }
 
 /* ======================
-   LEER EXCEL
+   REVISIÓN / APLICACIÓN
 ====================== */
 
-function leerExcel(file){
+function construirReview({ profesionalId, procedimientoId, alertas = [] }) {
+  const pendienteProfesional = !profesionalId
+  const pendienteProcedimiento = !procedimientoId
 
-return new Promise(resolve=>{
-
-const reader = new FileReader()
-
-reader.onload = e => {
-
-const data = new Uint8Array(e.target.result)
-
-const workbook = XLSX.read(data,{type:'array'})
-
-const sheet = workbook.Sheets[workbook.SheetNames[0]]
-
-const json = XLSX.utils.sheet_to_json(sheet,{defval:''})
-
-resolve(json)
-
+  return {
+    estadoRevision: (!pendienteProfesional && !pendienteProcedimiento) ? "ok" : "pendiente",
+    pendientes: {
+      profesional: pendienteProfesional,
+      procedimiento: pendienteProcedimiento
+    },
+    alertas
+  }
 }
 
-reader.readAsArrayBuffer(file)
-
-})
-
+function construirAplicacion(estado, motivo) {
+  return { estado, motivo }
 }
 
 /* ======================
-   CARGAR PROFESIONALES
+   RESERVO: ESTADOS
 ====================== */
 
-async function cargarProfesionales(){
+function clasificarEstadoCitaReservo(v) {
+  const t = normalizarTexto(v)
+  if (!t) return "otro"
+  if (t.includes("ATENDID")) return "atendido"
+  return "no_atendido"
+}
 
-const snap = await getDocs(collection(db,"profesionales"))
+function clasificarEstadoPagoReservo(v) {
+  const t = normalizarTexto(v)
+  if (!t) return "otro"
+  if (t.includes("NO PAG")) return "no_pagado"
+  if (t.includes("PAGAD")) return "pagado"
+  return "otro"
+}
 
-profesionales = snap.docs.map(d=>({
-id:d.id,
-...d.data()
-}))
+function evaluarAplicacionReservo(raw) {
+  const estadoCita = clasificarEstadoCitaReservo(raw["Estado cita"])
+  const estadoPago = clasificarEstadoPagoReservo(raw["Estado pago"])
 
+  const alertas = []
+
+  if (estadoCita === "atendido" && estadoPago === "pagado") {
+    return {
+      aplicacion: construirAplicacion("aplica", "Atendido y pagado"),
+      alertas
+    }
+  }
+
+  if (estadoCita === "atendido" && estadoPago !== "pagado") {
+    return {
+      aplicacion: construirAplicacion("no_aplica", "Atendido sin pago"),
+      alertas
+    }
+  }
+
+  if (estadoCita !== "atendido" && estadoPago === "pagado") {
+    alertas.push("Inconsistencia: pagado sin atendido")
+    return {
+      aplicacion: construirAplicacion("revisar", "Pagado sin atendido"),
+      alertas
+    }
+  }
+
+  return {
+    aplicacion: construirAplicacion("no_aplica", "No atendido y sin pago"),
+    alertas
+  }
 }
 
 /* ======================
-   CARGAR PROCEDIMIENTOS
+   MK: APLICACIÓN
 ====================== */
 
-async function cargarProcedimientos(){
-
-const snap = await getDocs(collection(db,"procedimientos"))
-
-procedimientos = snap.docs.map(d=>({
-id:d.id,
-...d.data()
-}))
-
-}
-/* ======================
-   BUSCAR PROFESIONAL
-====================== */
-
-function buscarProfesional(texto){
-
-texto = normalizarTexto(texto)
-if(!texto) return null
-
-return profesionales.find(p=>{
-
-let nombre =
-  normalizarTexto(p.nombreProfesional) ||
-  normalizarTexto(p.nombre) ||
-  normalizarTexto(p.nombreCompleto)
-
-if(!nombre) return false
-
-let palabras = nombre.split(" ").filter(Boolean)
-
-return palabras.some(w => w.length > 2 && texto.includes(w))
-
-}) || null
-
+function claveMK(item) {
+  return [
+    item.fechaNorm || "",
+    item.rutNorm || "",
+    normalizarTexto(item.profesional || ""),
+    normalizarTexto(item.prestacion || ""),
+    normalizarPaciente(item.paciente || ""),
+    String(Math.abs(item.valor || 0))
+  ].join("|")
 }
 
-/* ======================
-   BUSCAR PROCEDIMIENTO
-====================== */
+function evaluarAplicacionMK(itemsMK) {
+  const grupos = new Map()
 
-function buscarProcedimiento(texto){
+  for (const it of itemsMK) {
+    const key = claveMK(it)
+    if (!grupos.has(key)) grupos.set(key, [])
+    grupos.get(key).push(it)
+  }
 
-texto = normalizarTexto(texto)
-if(!texto) return null
+  for (const [, group] of grupos.entries()) {
+    const positives = group.filter(x => x.valor > 0).sort((a,b) => a.sourceIndex - b.sourceIndex)
+    const negatives = group.filter(x => x.valor < 0).sort((a,b) => a.sourceIndex - b.sourceIndex)
+    const zeros = group.filter(x => x.valor === 0)
 
-return procedimientos.find(p=>{
+    // ceros
+    for (const z of zeros) {
+      z.aplicacion = construirAplicacion("no_aplica", "Valor cero")
+    }
 
-let nombre =
-  normalizarTexto(p.nombre) ||
-  normalizarTexto(p.procedimiento) ||
-  normalizarTexto(p.descripcion)
+    // emparejar anulaciones
+    const pares = Math.min(positives.length, negatives.length)
 
-if(!nombre) return false
+    for (let i = 0; i < pares; i++) {
+      positives[i].aplicacion = construirAplicacion("no_aplica", "Positivo anulado por negativo")
+      negatives[i].aplicacion = construirAplicacion("no_aplica", "Negativo de anulación")
+    }
 
-return nombre === texto || texto.includes(nombre) || nombre.includes(texto)
+    for (let i = pares; i < positives.length; i++) {
+      positives[i].aplicacion = construirAplicacion("aplica", "Positivo sin anulación")
+    }
 
-}) || null
+    for (let i = pares; i < negatives.length; i++) {
+      negatives[i].aplicacion = construirAplicacion("revisar", "Negativo sin positivo equivalente")
+      negatives[i]._extraAlertas = [...(negatives[i]._extraAlertas || []), "Inconsistencia: negativo sin positivo equivalente"]
+    }
+  }
 
+  return itemsMK
 }
 
 /* ======================
-   ESTADO DE REVISIÓN
+   MANUAL OVERRIDES
 ====================== */
 
-function construirReview({ profesionalId, procedimientoId, alertas = [] }){
+function aplicarManualOverrides(items) {
+  for (const it of items) {
+    const ov = manualOverrides[it.itemId]
+    if (!ov) continue
 
-const pendienteProfesional = !profesionalId
-const pendienteProcedimiento = !procedimientoId
+    if (Object.prototype.hasOwnProperty.call(ov, "profesionalId")) {
+      const p = profesionales.find(x => x.id === ov.profesionalId) || null
+      it.resolved.profesionalId = p?.id || null
+      it.resolved.profesionalNombre = p ? nombreProfesionalCatalogo(p) : null
+      it.resolved.confirmadoManualProfesional = !!ov.profesionalId
+    }
 
-return {
-estadoRevision: (!pendienteProfesional && !pendienteProcedimiento) ? "ok" : "pendiente",
-pendientes: {
-profesional: pendienteProfesional,
-procedimiento: pendienteProcedimiento
-},
-alertas
-}
+    if (Object.prototype.hasOwnProperty.call(ov, "procedimientoId")) {
+      const p = procedimientos.find(x => x.id === ov.procedimientoId) || null
+      it.resolved.procedimientoId = p?.id || null
+      it.resolved.procedimientoNombre = p ? nombreProcedimientoCatalogo(p) : null
+      it.resolved.confirmadoManualProcedimiento = !!ov.procedimientoId
+    }
 
-}
+    it.profesionalDetectado = it.resolved.profesionalNombre
+    it.procedimientoDetectado = it.resolved.procedimientoNombre
 
-/* ======================
-   ALERTAS RESERVO
-====================== */
-
-function alertaReservo(r){
-
-let estadoCita = normalizarTexto(r["Estado cita"])
-let estadoPago = normalizarTexto(r["Estado pago"])
-
-if(estadoCita.includes("ATEND") && estadoPago.includes("PAG")){
-
-return null
-
-}
-
-if(estadoPago.includes("PAG") && !estadoCita.includes("ATEND")){
-
-return "Pagado pero no atendido"
-
-}
-
-if(estadoCita.includes("ATEND") && !estadoPago.includes("PAG")){
-
-return "Atendido pero no pagado"
-
-}
-
-return "Estado inconsistente"
-
+    it.review = construirReview({
+      profesionalId: it.resolved.profesionalId,
+      procedimientoId: it.resolved.procedimientoId,
+      alertas: it.review?.alertas || []
+    })
+  }
 }
 
 /* ======================
    PROCESAR RESERVO
 ====================== */
 
-function procesarReservo(){
+function procesarReservo() {
+  return dataReservo.map((r, i) => {
+    const profesionalDetectado = buscarProfesional(r["Profesional"])
+    const procedimientoDetectado = buscarProcedimiento(r["Tratamiento"])
 
-return dataReservo.map((r, i)=>{
+    const evalApp = evaluarAplicacionReservo(r)
+    const alertas = [...evalApp.alertas]
 
-let profesionalDetectado = buscarProfesional(r["Profesional"])
-let procedimientoDetectado = buscarProcedimiento(r["Tratamiento"])
+    if (!normalizarRut(r["Rut"])) alertas.push("RUT vacío o inválido")
+    if (!normalizarTexto(r["Profesional"])) alertas.push("Profesional vacío")
+    if (!normalizarTexto(r["Tratamiento"])) alertas.push("Procedimiento vacío")
 
-let alertas = []
-let alerta = alertaReservo(r)
-if(alerta) alertas.push(alerta)
+    const resolved = {
+      profesionalId: profesionalDetectado?.id || null,
+      profesionalNombre: profesionalDetectado ? nombreProfesionalCatalogo(profesionalDetectado) : null,
 
-const resolved = {
-profesionalId: profesionalDetectado?.id || null,
-profesionalNombre: profesionalDetectado?.nombreProfesional || profesionalDetectado?.nombre || profesionalDetectado?.nombreCompleto || null,
+      procedimientoId: procedimientoDetectado?.id || null,
+      procedimientoNombre: procedimientoDetectado ? nombreProcedimientoCatalogo(procedimientoDetectado) : null,
 
-procedimientoId: procedimientoDetectado?.id || null,
-procedimientoNombre: procedimientoDetectado?.nombre || procedimientoDetectado?.procedimiento || procedimientoDetectado?.descripcion || null,
+      autoProfesional: !!profesionalDetectado,
+      autoProcedimiento: !!procedimientoDetectado,
+      confirmadoManualProfesional: false,
+      confirmadoManualProcedimiento: false
+    }
 
-autoProfesional: !!profesionalDetectado,
-autoProcedimiento: !!procedimientoDetectado,
-confirmadoManualProfesional: false,
-confirmadoManualProcedimiento: false
-}
+    return {
+      itemId: `RES_${String(i + 1).padStart(4, "0")}`,
+      sourceIndex: i,
+      origen: "Reservo",
 
-return {
+      fecha: r["Fecha"],
+      fechaNorm: normalizarFecha(r["Fecha"]),
 
-itemId: `RES_${String(i+1).padStart(4,"0")}`,
-origen:"Reservo",
+      rut: r["Rut"],
+      rutNorm: normalizarRut(r["Rut"]),
 
-fecha:r["Fecha"],
-fechaNorm:normalizarFecha(r["Fecha"]),
+      paciente: r["Paciente"],
+      pacienteNorm: normalizarPaciente(r["Paciente"]),
 
-rut:r["Rut"],
-rutNorm:normalizarRut(r["Rut"]),
+      profesional: r["Profesional"],
+      profesionalNorm: normalizarTexto(r["Profesional"]),
+      profesionalDetectado: resolved.profesionalNombre,
 
-paciente:r["Paciente"],
+      prestacion: r["Tratamiento"],
+      procedimientoNorm: normalizarTexto(r["Tratamiento"]),
+      procedimientoDetectado: resolved.procedimientoNombre,
 
-profesional:r["Profesional"],
-profesionalDetectado: resolved.profesionalNombre,
+      valor: normalizarMonto(r["Valor"]),
 
-prestacion:r["Tratamiento"],
-procedimientoDetectado: resolved.procedimientoNombre,
+      dataReservo: r,
+      dataMK: null,
 
-valor:Number(r["Valor"]) || 0,
-
-dataReservo:r,
-dataMK:null,
-
-resolved,
-review: construirReview({
-profesionalId: resolved.profesionalId,
-procedimientoId: resolved.procedimientoId,
-alertas
-})
-
-}
-
-})
-
+      resolved,
+      aplicacion: evalApp.aplicacion,
+      review: construirReview({
+        profesionalId: resolved.profesionalId,
+        procedimientoId: resolved.procedimientoId,
+        alertas
+      })
+    }
+  })
 }
 
 /* ======================
    PROCESAR MK
 ====================== */
 
-function procesarMK(){
+function procesarMK() {
+  let items = dataMK.map((r, i) => {
+    const profesionalDetectado = buscarProfesional(r["D Médico"])
+    const procedimientoDetectado = buscarProcedimiento(r["D Artículo"])
 
-return dataMK
-.filter(r=> Number(r["Total"]) > 0 )
-.map((r, i)=>{
+    const alertas = []
+    if (!normalizarRut(r["Rut"])) alertas.push("RUT vacío o inválido")
+    if (!normalizarTexto(r["D Médico"])) alertas.push("Profesional vacío")
+    if (!normalizarTexto(r["D Artículo"])) alertas.push("Procedimiento vacío")
 
-let profesionalDetectado = buscarProfesional(r["D Médico"])
-let procedimientoDetectado = buscarProcedimiento(r["D Artículo"])
+    const resolved = {
+      profesionalId: profesionalDetectado?.id || null,
+      profesionalNombre: profesionalDetectado ? nombreProfesionalCatalogo(profesionalDetectado) : null,
 
-let alertas = []
+      procedimientoId: procedimientoDetectado?.id || null,
+      procedimientoNombre: procedimientoDetectado ? nombreProcedimientoCatalogo(procedimientoDetectado) : null,
 
-if(!normalizarRut(r["Rut"])) alertas.push("RUT vacío o inválido")
-if(!normalizarTexto(r["D Médico"])) alertas.push("Profesional vacío")
-if(!normalizarTexto(r["D Artículo"])) alertas.push("Procedimiento vacío")
+      autoProfesional: !!profesionalDetectado,
+      autoProcedimiento: !!procedimientoDetectado,
+      confirmadoManualProfesional: false,
+      confirmadoManualProcedimiento: false
+    }
 
-const resolved = {
-profesionalId: profesionalDetectado?.id || null,
-profesionalNombre: profesionalDetectado?.nombreProfesional || profesionalDetectado?.nombre || profesionalDetectado?.nombreCompleto || null,
+    return {
+      itemId: `MK_${String(i + 1).padStart(4, "0")}`,
+      sourceIndex: i,
+      origen: "MK",
 
-procedimientoId: procedimientoDetectado?.id || null,
-procedimientoNombre: procedimientoDetectado?.nombre || procedimientoDetectado?.procedimiento || procedimientoDetectado?.descripcion || null,
+      fecha: r["Fecha"],
+      fechaNorm: normalizarFecha(r["Fecha"]),
 
-autoProfesional: !!profesionalDetectado,
-autoProcedimiento: !!procedimientoDetectado,
-confirmadoManualProfesional: false,
-confirmadoManualProcedimiento: false
+      rut: r["Rut"],
+      rutNorm: normalizarRut(r["Rut"]),
+
+      paciente: r["Paciente"],
+      pacienteNorm: normalizarPaciente(r["Paciente"]),
+
+      profesional: r["D Médico"],
+      profesionalNorm: normalizarTexto(r["D Médico"]),
+      profesionalDetectado: resolved.profesionalNombre,
+
+      prestacion: r["D Artículo"],
+      procedimientoNorm: normalizarTexto(r["D Artículo"]),
+      procedimientoDetectado: resolved.procedimientoNombre,
+
+      valor: normalizarMonto(r["Total"]),
+
+      dataReservo: null,
+      dataMK: r,
+
+      resolved,
+      aplicacion: construirAplicacion("no_aplica", "Sin evaluar"),
+      _baseAlertas: alertas,
+      _extraAlertas: [],
+      review: construirReview({
+        profesionalId: resolved.profesionalId,
+        procedimientoId: resolved.procedimientoId,
+        alertas
+      })
+    }
+  })
+
+  items = evaluarAplicacionMK(items)
+
+  items.forEach(it => {
+    const finalAlerts = [...(it._baseAlertas || []), ...(it._extraAlertas || [])]
+    it.review = construirReview({
+      profesionalId: it.resolved.profesionalId,
+      procedimientoId: it.resolved.procedimientoId,
+      alertas: finalAlerts
+    })
+    delete it._baseAlertas
+    delete it._extraAlertas
+  })
+
+  return items
 }
 
-return {
+/* ======================
+   RECALCULAR TODO
+====================== */
 
-itemId: `MK_${String(i+1).padStart(4,"0")}`,
-origen:"MK",
+function recalcularTodo() {
+  const reservos = procesarReservo()
+  const mks = procesarMK()
 
-fecha:r["Fecha"],
-fechaNorm:normalizarFecha(r["Fecha"]),
+  consolidado = [...reservos, ...mks]
 
-rut:r["Rut"],
-rutNorm:normalizarRut(r["Rut"]),
-
-paciente:r["Paciente"],
-
-profesional:r["D Médico"],
-profesionalDetectado: resolved.profesionalNombre,
-
-prestacion:r["D Artículo"],
-procedimientoDetectado: resolved.procedimientoNombre,
-
-valor:Number(r["Total"]) || 0,
-
-dataReservo:null,
-dataMK:r,
-
-resolved,
-review: construirReview({
-profesionalId: resolved.profesionalId,
-procedimientoId: resolved.procedimientoId,
-alertas
-})
-
-}
-
-})
-
+  aplicarManualOverrides(consolidado)
+  render()
 }
 
 /* ======================
    DETALLE / EDICIÓN
 ====================== */
 
-function abrirDetalle(reg){
+function abrirDetalle(reg) {
+  const modal = $("modalItemBackdrop")
+  const itemSub = $("itemSub")
+  const itemForm = $("itemForm")
 
-const modal = $("modalItemBackdrop")
-const itemSub = $("itemSub")
-const itemForm = $("itemForm")
-
-if(!modal || !itemSub || !itemForm){
-  console.warn("No existe el modal de detalle en el HTML")
-  return
-}
-
-stateEdicion.actual = reg
-
-itemSub.textContent = `${reg.origen || ""} · ${reg.fecha || ""} · ${reg.rut || ""}`
-
-const opcionesProfesionales = profesionales.map(p=>{
-  const nombre = p.nombreProfesional || p.nombre || p.nombreCompleto || p.id
-  const selected = reg.resolved?.profesionalId === p.id ? "selected" : ""
-  return `<option value="${p.id}" ${selected}>${nombre}</option>`
-}).join("")
-
-const opcionesProcedimientos = procedimientos.map(p=>{
-  const nombre = p.nombre || p.procedimiento || p.descripcion || p.id
-  const selected = reg.resolved?.procedimientoId === p.id ? "selected" : ""
-  return `<option value="${p.id}" ${selected}>${nombre}</option>`
-}).join("")
-
-itemForm.innerHTML = `
-  <div class="grid2">
-
-    <section class="card" style="padding:12px;">
-      <div class="sectionTitle">Resolución del item</div>
-      <div class="kv">
-        <div class="k">Origen</div><div class="v">${reg.origen || ""}</div>
-        <div class="k">Fecha</div><div class="v">${reg.fecha || ""}</div>
-        <div class="k">RUT</div><div class="v">${reg.rut || ""}</div>
-        <div class="k">Paciente</div><div class="v">${reg.paciente || ""}</div>
-        <div class="k">Profesional archivo</div><div class="v">${reg.profesional || ""}</div>
-        <div class="k">Procedimiento archivo</div><div class="v">${reg.prestacion || ""}</div>
-        <div class="k">Estado revisión</div><div class="v">${reg.review?.estadoRevision || "pendiente"}</div>
-        <div class="k">Alertas</div><div class="v">${(reg.review?.alertas || []).join(" · ") || "—"}</div>
-      </div>
-
-      <div style="height:12px;"></div>
-
-      <div class="field">
-        <label>Asociar profesional</label>
-        <select id="detalleProfesionalId">
-          <option value="">(Selecciona profesional)</option>
-          ${opcionesProfesionales}
-        </select>
-      </div>
-
-      <div class="field" style="margin-top:10px;">
-        <label>Asociar procedimiento</label>
-        <select id="detalleProcedimientoId">
-          <option value="">(Selecciona procedimiento)</option>
-          ${opcionesProcedimientos}
-        </select>
-      </div>
-
-      <div style="display:flex; justify-content:flex-end; margin-top:12px;">
-        <button id="btnMoreInfo" type="button" class="btn soft">Editar más información</button>
-      </div>
-    </section>
-
-    <section class="card" style="padding:12px;">
-      <div class="sectionTitle">Datos originales</div>
-      <pre style="white-space:pre-wrap; font-size:12px; margin:0;">${JSON.stringify(reg.dataReservo || reg.dataMK || {}, null, 2)}</pre>
-    </section>
-
-  </div>
-`
-
-modal.style.display = "block"
-
-if($("btnMoreInfo")){
-  $("btnMoreInfo").onclick = ()=>{
-    abrirMasInformacion(reg)
-  }
-}
-
-}
-
-function guardarDetalle(){
-
-if(!stateEdicion.actual) return
-
-const reg = stateEdicion.actual
-
-const profesionalId = $("detalleProfesionalId")?.value || ""
-const procedimientoId = $("detalleProcedimientoId")?.value || ""
-
-const profesional = profesionales.find(p => p.id === profesionalId) || null
-const procedimiento = procedimientos.find(p => p.id === procedimientoId) || null
-
-/* =========================
-   Guardar edición de campos extra
-========================= */
-
-const extraInputs = document.querySelectorAll("[data-extra-key]")
-
-if(extraInputs.length){
-
-  const target = reg.dataReservo ? reg.dataReservo : reg.dataMK
-
-  extraInputs.forEach(inp=>{
-    const key = inp.getAttribute("data-extra-key")
-    if(!key || !target) return
-    target[key] = inp.value
-  })
-
-  /* recalcular algunos campos principales si fueron editados */
-  const raw = target || {}
-
-  reg.fecha = raw["Fecha"] ?? reg.fecha
-  reg.fechaNorm = normalizarFecha(raw["Fecha"] ?? reg.fecha)
-
-  reg.rut = raw["Rut"] ?? reg.rut
-  reg.rutNorm = normalizarRut(raw["Rut"] ?? reg.rut)
-
-  reg.paciente = raw["Paciente"] ?? reg.paciente
-
-  if(reg.origen === "Reservo"){
-    reg.profesional = raw["Profesional"] ?? reg.profesional
-    reg.prestacion = raw["Tratamiento"] ?? reg.prestacion
-    reg.valor = Number(raw["Valor"]) || 0
-
-    const alerta = alertaReservo(raw)
-    reg.review = construirReview({
-      profesionalId: reg.resolved?.profesionalId || null,
-      procedimientoId: reg.resolved?.procedimientoId || null,
-      alertas: alerta ? [alerta] : []
-    })
-  }else{
-    reg.profesional = raw["D Médico"] ?? reg.profesional
-    reg.prestacion = raw["D Artículo"] ?? reg.prestacion
-    reg.valor = Number(raw["Total"]) || 0
-
-    const alertasMK = []
-    if(!normalizarRut(raw["Rut"])) alertasMK.push("RUT vacío o inválido")
-    if(!normalizarTexto(raw["D Médico"])) alertasMK.push("Profesional vacío")
-    if(!normalizarTexto(raw["D Artículo"])) alertasMK.push("Procedimiento vacío")
-
-    reg.review = construirReview({
-      profesionalId: reg.resolved?.profesionalId || null,
-      procedimientoId: reg.resolved?.procedimientoId || null,
-      alertas: alertasMK
-    })
+  if (!modal || !itemSub || !itemForm) {
+    console.warn("No existe el modal de detalle en el HTML")
+    return
   }
 
-}
+  stateEdicion.actual = reg
 
-/* =========================
-   Guardar resolución manual
-========================= */
+  const opcionesProfesionales = profesionales.map(p => {
+    const nombre = nombreProfesionalCatalogo(p)
+    const selected = reg.resolved?.profesionalId === p.id ? "selected" : ""
+    return `<option value="${p.id}" ${selected}>${escapeHtml(nombre)}</option>`
+  }).join("")
 
-reg.resolved = {
-...(reg.resolved || {}),
-profesionalId: profesional?.id || null,
-profesionalNombre: profesional?.nombreProfesional || profesional?.nombre || profesional?.nombreCompleto || null,
+  const opcionesProcedimientos = procedimientos.map(p => {
+    const nombre = nombreProcedimientoCatalogo(p)
+    const selected = reg.resolved?.procedimientoId === p.id ? "selected" : ""
+    return `<option value="${p.id}" ${selected}>${escapeHtml(nombre)}</option>`
+  }).join("")
 
-procedimientoId: procedimiento?.id || null,
-procedimientoNombre: procedimiento?.nombre || procedimiento?.procedimiento || procedimiento?.descripcion || null,
+  itemSub.textContent = `${reg.origen || ""} · ${reg.fecha || ""} · ${reg.rut || ""}`
 
-confirmadoManualProfesional: !!profesional,
-confirmadoManualProcedimiento: !!procedimiento
-}
-
-reg.profesionalDetectado = reg.resolved.profesionalNombre
-reg.procedimientoDetectado = reg.resolved.procedimientoNombre
-
-reg.review = construirReview({
-profesionalId: reg.resolved.profesionalId,
-procedimientoId: reg.resolved.procedimientoId,
-alertas: reg.review?.alertas || []
-})
-
-cerrarDetalle()
-render()
-
-}
-
-function abrirMasInformacion(reg){
-
-const itemForm = $("itemForm")
-if(!itemForm) return
-
-const original = reg.dataReservo || reg.dataMK || {}
-
-const filas = Object.keys(original).map(key=>{
-
-const value = original[key] ?? ""
-
-return `
-  <div class="field" style="margin-bottom:10px;">
-    <label>${key}</label>
-    <input type="text" data-extra-key="${key}" value="${String(value).replaceAll('"','&quot;')}">
-  </div>
-`
-
-}).join("")
-
-itemForm.innerHTML = `
-  <div class="card" style="padding:12px;">
-    <div class="sectionTitle">Editar más información</div>
-    <div class="help" style="margin-bottom:10px;">
-      Aquí puedes editar los campos originales del registro. Luego presiona “Guardar item”.
-    </div>
+  itemForm.innerHTML = `
     <div class="grid2">
-      ${filas}
+
+      <section class="card" style="padding:12px;">
+        <div class="sectionTitle">Resolución del item</div>
+
+        <div class="kv">
+          <div class="k">Origen</div><div class="v">${escapeHtml(reg.origen || "")}</div>
+          <div class="k">Fecha</div><div class="v">${escapeHtml(reg.fecha || "")}</div>
+          <div class="k">RUT</div><div class="v">${escapeHtml(reg.rut || "")}</div>
+          <div class="k">Paciente</div><div class="v">${escapeHtml(reg.paciente || "")}</div>
+          <div class="k">Profesional archivo</div><div class="v">${escapeHtml(reg.profesional || "")}</div>
+          <div class="k">Procedimiento archivo</div><div class="v">${escapeHtml(reg.prestacion || "")}</div>
+          <div class="k">Estado revisión</div><div class="v">${reg.review?.estadoRevision === "ok" ? "OK" : "Pendiente"}</div>
+          <div class="k">Aplicación</div><div class="v">${escapeHtml(reg.aplicacion?.estado || "—")}</div>
+          <div class="k">Motivo</div><div class="v">${escapeHtml(reg.aplicacion?.motivo || "—")}</div>
+          <div class="k">Alertas</div><div class="v">${escapeHtml((reg.review?.alertas || []).join(" · ") || "—")}</div>
+        </div>
+
+        <div style="height:12px;"></div>
+
+        <div class="field">
+          <label>Asociar profesional</label>
+          <select id="detalleProfesionalId">
+            <option value="">(Selecciona profesional)</option>
+            ${opcionesProfesionales}
+          </select>
+        </div>
+
+        <div class="field" style="margin-top:10px;">
+          <label>Asociar procedimiento</label>
+          <select id="detalleProcedimientoId">
+            <option value="">(Selecciona procedimiento)</option>
+            ${opcionesProcedimientos}
+          </select>
+        </div>
+
+        <div style="display:flex; justify-content:flex-end; margin-top:12px;">
+          <button id="btnMoreInfo" type="button" class="btn soft">Editar más información</button>
+        </div>
+      </section>
+
+      <section class="card" style="padding:12px;">
+        <div class="sectionTitle">Datos originales</div>
+        <pre style="white-space:pre-wrap; font-size:12px; margin:0;">${escapeHtml(JSON.stringify(reg.dataReservo || reg.dataMK || {}, null, 2))}</pre>
+      </section>
+
     </div>
-  </div>
-`
+  `
 
+  modal.style.display = "block"
+
+  if ($("btnMoreInfo")) {
+    $("btnMoreInfo").onclick = () => abrirMasInformacion(reg)
+  }
 }
 
-function cerrarDetalle(){
+function abrirMasInformacion(reg) {
+  const itemForm = $("itemForm")
+  if (!itemForm) return
 
-const modal = $("modalItemBackdrop")
-const itemForm = $("itemForm")
+  const original = reg.dataReservo || reg.dataMK || {}
 
-if(modal) modal.style.display = "none"
-if(itemForm) itemForm.innerHTML = ""
+  const filas = Object.keys(original).map(key => {
+    const value = original[key] ?? ""
+    return `
+      <div class="field" style="margin-bottom:10px;">
+        <label>${escapeHtml(key)}</label>
+        <input type="text" data-extra-key="${escapeHtml(key)}" value="${escapeHtml(String(value))}">
+      </div>
+    `
+  }).join("")
 
-stateEdicion.actual = null
+  itemForm.innerHTML = `
+    <div class="card" style="padding:12px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom:10px;">
+        <div>
+          <div class="sectionTitle">Editar más información</div>
+          <div class="help">Aquí puedes editar los campos originales del registro. Luego presiona “Guardar item”.</div>
+        </div>
+        <button id="btnVolverDetalle" type="button" class="btn">← Volver a resolución</button>
+      </div>
 
+      <div class="grid2">
+        ${filas}
+      </div>
+    </div>
+  `
+
+  if ($("btnVolverDetalle")) {
+    $("btnVolverDetalle").onclick = () => abrirDetalle(reg)
+  }
 }
 
-function abrirFusion(reg){
+function guardarDetalle() {
+  if (!stateEdicion.actual) return
 
-if(!reg.coincidencia){
-  alert("Este registro no tiene coincidencia para fusionar.")
-  return
+  const reg = stateEdicion.actual
+
+  // guardar edición raw si estás en "más información"
+  const extraInputs = document.querySelectorAll("[data-extra-key]")
+  if (extraInputs.length) {
+    const target = reg.dataReservo ? reg.dataReservo : reg.dataMK
+
+    extraInputs.forEach(inp => {
+      const key = inp.getAttribute("data-extra-key")
+      if (!key || !target) return
+      target[key] = inp.value
+    })
+  }
+
+  // guardar overrides manuales si estás en la vista de resolución
+  const profSel = $("detalleProfesionalId")
+  const procSel = $("detalleProcedimientoId")
+
+  if (profSel || procSel) {
+    manualOverrides[reg.itemId] = {
+      ...(manualOverrides[reg.itemId] || {}),
+      ...(profSel ? { profesionalId: profSel.value || null } : {}),
+      ...(procSel ? { procedimientoId: procSel.value || null } : {})
+    }
+  }
+
+  cerrarDetalle()
+  recalcularTodo()
 }
 
-const modal = $("modalMatchBackdrop")
-const sub = $("matchSub")
-const boxReservo = $("matchReservo")
-const boxMK = $("matchMK")
-const profSelect = $("matchProfesionalSelect")
-const obs = $("matchObservacion")
+function cerrarDetalle() {
+  const modal = $("modalItemBackdrop")
+  const itemForm = $("itemForm")
 
-if(!modal || !sub || !boxReservo || !boxMK || !profSelect || !obs){
-  console.warn("No existe el modal de fusión en el HTML")
-  return
+  if (modal) modal.style.display = "none"
+  if (itemForm) itemForm.innerHTML = ""
+
+  stateEdicion.actual = null
 }
 
-const a = reg.origen === "Reservo" ? reg : reg.coincidencia
-const b = reg.origen === "MK" ? reg : reg.coincidencia
+/* ======================
+   RESOLVER PENDIENTES
+====================== */
 
-sub.textContent = `Coincidencia por RUT ${a.rut || ""} y fecha ${a.fechaNorm || a.fecha || ""}`
-
-boxReservo.innerHTML = `
-  <div class="kv">
-    <div class="k">Origen</div><div class="v">${a.origen || ""}</div>
-    <div class="k">Fecha</div><div class="v">${a.fecha || ""}</div>
-    <div class="k">RUT</div><div class="v">${a.rut || ""}</div>
-    <div class="k">Paciente</div><div class="v">${a.paciente || ""}</div>
-    <div class="k">Profesional</div><div class="v">${a.profesional || ""}</div>
-    <div class="k">Prestación</div><div class="v">${a.prestacion || ""}</div>
-    <div class="k">Valor</div><div class="v">${a.valor ?? ""}</div>
-    <div class="k">Alerta</div><div class="v">${a.alerta || "—"}</div>
-  </div>
-`
-
-boxMK.innerHTML = `
-  <div class="kv">
-    <div class="k">Origen</div><div class="v">${b.origen || ""}</div>
-    <div class="k">Fecha</div><div class="v">${b.fecha || ""}</div>
-    <div class="k">RUT</div><div class="v">${b.rut || ""}</div>
-    <div class="k">Paciente</div><div class="v">${b.paciente || ""}</div>
-    <div class="k">Profesional</div><div class="v">${b.profesional || ""}</div>
-    <div class="k">Prestación</div><div class="v">${b.prestacion || ""}</div>
-    <div class="k">Valor</div><div class="v">${b.valor ?? ""}</div>
-    <div class="k">Alerta</div><div class="v">${b.alerta || "—"}</div>
-  </div>
-`
-
-profSelect.innerHTML = `<option value="">(Selecciona profesional)</option>` +
-  profesionales.map(p => `<option value="${p.id}">${p.nombre || p.nombreProfesional || p.id}</option>`).join("")
-
-obs.value = ""
-
-modal.style.display = "block"
-
-stateFusion.actual = reg
-
+function rowMiniHTML(it, extra = "") {
+  return `
+    <div class="miniRow">
+      <div>
+        <div><b>${escapeHtml(it.origen)}</b> · ${escapeHtml(it.fecha || "")} · ${escapeHtml(it.rut || "")}</div>
+        <div class="muted tiny">${escapeHtml(it.paciente || "")}</div>
+        <div class="tiny">Prof: ${escapeHtml(it.profesional || "")} · Proc: ${escapeHtml(it.prestacion || "")}</div>
+        ${extra ? `<div class="tiny warn" style="margin-top:4px;">${escapeHtml(extra)}</div>` : ""}
+      </div>
+      <div class="tiny">
+        <div><b>Revisión:</b> ${escapeHtml(it.review?.estadoRevision || "pendiente")}</div>
+        <div><b>Aplicación:</b> ${escapeHtml(it.aplicacion?.estado || "—")}</div>
+        <div><b>Motivo:</b> ${escapeHtml(it.aplicacion?.motivo || "—")}</div>
+      </div>
+      <div>
+        <button class="btn small" type="button" data-edit-item="${escapeHtml(it.itemId)}">Editar</button>
+      </div>
+    </div>
+  `
 }
 
-function cerrarFusion(){
+function bindEditButtonsIn(container) {
+  if (!container) return
+  container.querySelectorAll("[data-edit-item]").forEach(btn => {
+    btn.onclick = () => {
+      const id = btn.getAttribute("data-edit-item")
+      const it = consolidado.find(x => x.itemId === id)
+      if (!it) return
+      cerrarResolver()
+      abrirDetalle(it)
+    }
+  })
+}
 
-const modal = $("modalMatchBackdrop")
-if(modal) modal.style.display = "none"
-stateFusion.actual = null
+function renderResolver() {
+  const resumen = $("resolverResumen")
+  const listResumen = $("resolverCoincidenciasList")
+  const listProf = $("resolverProfesionalesList")
+  const listProc = $("resolverPrestacionesList")
+  const listAlert = $("resolverAlertasList")
 
+  if (!resumen || !listResumen || !listProf || !listProc || !listAlert) return
+
+  const pendientes = consolidado.filter(x => x.review?.estadoRevision === "pendiente")
+  const pendProf = consolidado.filter(x => x.review?.pendientes?.profesional)
+  const pendProc = consolidado.filter(x => x.review?.pendientes?.procedimiento)
+  const conAlerta = consolidado.filter(x => (x.review?.alertas || []).length > 0)
+  const revisarApp = consolidado.filter(x => x.aplicacion?.estado === "revisar")
+  const noAplica = consolidado.filter(x => x.aplicacion?.estado === "no_aplica")
+
+  resumen.textContent =
+    `Items: ${consolidado.length} · Pendientes: ${pendientes.length} · ` +
+    `Aplican: ${consolidado.filter(x => x.aplicacion?.estado === "aplica").length} · ` +
+    `No aplica: ${noAplica.length} · Revisar: ${revisarApp.length}`
+
+  listResumen.innerHTML = revisarApp.length
+    ? revisarApp.map(it => rowMiniHTML(it, (it.review?.alertas || []).join(" · ") || it.aplicacion?.motivo || "")).join("")
+    : `<div class="muted tiny">No hay ítems marcados para revisar por inconsistencia.</div>`
+
+  listProf.innerHTML = pendProf.length
+    ? pendProf.map(it => rowMiniHTML(it, "Falta asociar profesional")).join("")
+    : `<div class="muted tiny">No hay pendientes de profesional.</div>`
+
+  listProc.innerHTML = pendProc.length
+    ? pendProc.map(it => rowMiniHTML(it, "Falta asociar procedimiento")).join("")
+    : `<div class="muted tiny">No hay pendientes de procedimiento.</div>`
+
+  listAlert.innerHTML = conAlerta.length
+    ? conAlerta.map(it => rowMiniHTML(it, (it.review?.alertas || []).join(" · "))).join("")
+    : `<div class="muted tiny">No hay alertas.</div>`
+
+  bindEditButtonsIn(listResumen)
+  bindEditButtonsIn(listProf)
+  bindEditButtonsIn(listProc)
+  bindEditButtonsIn(listAlert)
+}
+
+function abrirResolver() {
+  const modal = $("modalResolverBackdrop")
+  if (!modal) return
+  renderResolver()
+  modal.style.display = "block"
+}
+
+function cerrarResolver() {
+  const modal = $("modalResolverBackdrop")
+  if (modal) modal.style.display = "none"
+}
+
+/* ======================
+   FILTRO / PAGINACIÓN
+====================== */
+
+function itemSearchText(it) {
+  return [
+    it.itemId,
+    it.origen,
+    it.fecha,
+    it.rut,
+    it.rutNorm,
+    it.paciente,
+    it.profesional,
+    it.prestacion,
+    it.valor,
+    it.review?.estadoRevision,
+    it.aplicacion?.estado,
+    it.aplicacion?.motivo,
+    ...(it.review?.alertas || [])
+  ].map(x => normalizarTexto(x)).join(" | ")
+}
+
+function filteredItems() {
+  const q = normalizarTexto(uiState.q)
+  if (!q) return consolidado
+  return consolidado.filter(it => itemSearchText(it).includes(q))
 }
 
 /* ======================
    RENDER TABLA
 ====================== */
 
-function render(){
+function render() {
+  const thead = $("thead")
+  const tbody = $("tbody")
 
-let thead = $("thead")
-let tbody = $("tbody")
+  if (!thead || !tbody) return
 
-if(!thead || !tbody) return
+  thead.innerHTML = `
+    <tr>
+      <th>#</th>
+      <th>Origen</th>
+      <th>Fecha</th>
+      <th>Rut</th>
+      <th>Paciente</th>
+      <th>Profesional archivo</th>
+      <th>Procedimiento archivo</th>
+      <th>Valor</th>
+      <th>Revisión</th>
+      <th>Aplicación</th>
+      <th>Motivo</th>
+      <th>Alertas</th>
+      <th>Acciones</th>
+    </tr>
+  `
 
-thead.innerHTML = `
-<tr>
-<td>#</td>
-<td>Origen</td>
-<td>Fecha</td>
-<td>Rut</td>
-<td>Paciente</td>
-<td>Profesional archivo</td>
-<td>Procedimiento archivo</td>
-<td>Valor</td>
-<td>Estado</td>
-<td>Alertas</td>
-<td>Acciones</td>
-</tr>
-`
+  const items = filteredItems()
+  const totalPages = Math.max(1, Math.ceil(items.length / uiState.pageSize))
+  if (uiState.page >= totalPages) uiState.page = totalPages - 1
+  if (uiState.page < 0) uiState.page = 0
 
-tbody.innerHTML = ""
+  const from = uiState.page * uiState.pageSize
+  const to = from + uiState.pageSize
+  const pageItems = items.slice(from, to)
 
-let pendientes = 0
-let alertas = 0
-let ok = 0
+  tbody.innerHTML = ""
 
-for(let i=0;i<consolidado.length;i++){
+  for (let i = 0; i < pageItems.length; i++) {
+    const r = pageItems[i]
+    const tr = document.createElement("tr")
 
-let r = consolidado[i]
-let tr = document.createElement("tr")
+    const estado = r.review?.estadoRevision || "pendiente"
+    const alertasTexto = (r.review?.alertas || []).join(" · ")
 
-const estado = r.review?.estadoRevision || "pendiente"
-const alertasTexto = (r.review?.alertas || []).join(" · ")
+    tr.innerHTML = `
+      <td>${from + i + 1}</td>
+      <td>${escapeHtml(r.origen || "")}</td>
+      <td>${escapeHtml(r.fecha || "")}</td>
+      <td>${escapeHtml(r.rut || "")}</td>
+      <td>${escapeHtml(r.paciente || "")}</td>
+      <td>${escapeHtml(r.profesional || "")}</td>
+      <td>${escapeHtml(r.prestacion || "")}</td>
+      <td>${escapeHtml(r.valor ?? "")}</td>
+      <td>${estado === "ok" ? `<span class="ok">OK</span>` : `<span class="warn">Pendiente</span>`}</td>
+      <td>${escapeHtml(r.aplicacion?.estado || "—")}</td>
+      <td class="wrap">${escapeHtml(r.aplicacion?.motivo || "—")}</td>
+      <td class="wrap">${escapeHtml(alertasTexto || "—")}</td>
+      <td>
+        <button class="btnDetalle btn small" type="button">Editar</button>
+      </td>
+    `
 
-if(estado === "pendiente") pendientes++
-else ok++
+    const btnDetalle = tr.querySelector(".btnDetalle")
+    if (btnDetalle) {
+      btnDetalle.onclick = () => abrirDetalle(r)
+    }
 
-if((r.review?.alertas || []).length) alertas++
-
-tr.innerHTML = `
-<td>${i+1}</td>
-<td>${r.origen || ""}</td>
-<td>${r.fecha || ""}</td>
-<td>${r.rut || ""}</td>
-<td>${r.paciente || ""}</td>
-<td>${r.profesional || ""}</td>
-<td>${r.prestacion || ""}</td>
-<td>${r.valor ?? ""}</td>
-<td>${estado === "ok" ? `<span class="ok">OK</span>` : `<span class="warn">Pendiente</span>`}</td>
-<td>${alertasTexto || "—"}</td>
-<td>
-  <button class="btnDetalle" type="button">Editar</button>
-</td>
-`
-
-let btnDetalle = tr.querySelector(".btnDetalle")
-
-if(btnDetalle){
-  btnDetalle.onclick = ()=>{
-    abrirDetalle(r)
+    tbody.appendChild(tr)
   }
-}
 
-tbody.appendChild(tr)
-
-}
-
-if($("countPill")){
-  $("countPill").textContent = `${consolidado.length} filas`
-}
-
-if($("pillPendientes")){
-  $("pillPendientes").textContent = `Pendientes: ${pendientes}`
-}
-
-if($("pillAlertas")){
-  $("pillAlertas").textContent = `Alertas: ${alertas}`
-}
-
-if($("pillProf")){
+  // pills globales
+  const pendientes = consolidado.filter(x => x.review?.estadoRevision === "pendiente").length
+  const alertas = consolidado.filter(x => (x.review?.alertas || []).length > 0).length
+  const ok = consolidado.filter(x => x.review?.estadoRevision === "ok").length
+  const noAplica = consolidado.filter(x => x.aplicacion?.estado === "no_aplica").length
   const pendProf = consolidado.filter(x => x.review?.pendientes?.profesional).length
-  $("pillProf").textContent = `Profesionales: ${pendProf}`
+  const reservoAplica = consolidado.filter(x => x.origen === "Reservo" && x.aplicacion?.estado === "aplica").length
+  const mkAplica = consolidado.filter(x => x.origen === "MK" && x.aplicacion?.estado === "aplica").length
+
+  if ($("countPill")) $("countPill").textContent = `${consolidado.length} filas`
+  if ($("pillPendientes")) $("pillPendientes").textContent = `Pendientes: ${pendientes}`
+  if ($("pillAlertas")) $("pillAlertas").textContent = `Alertas: ${alertas}`
+  if ($("pillProf")) $("pillProf").textContent = `Profesionales: ${pendProf}`
+  if ($("pillCoincidencias")) $("pillCoincidencias").textContent = `OK: ${ok}`
+  if ($("pillFusionados")) $("pillFusionados").textContent = `No aplica: ${noAplica}`
+  if ($("pillReservoValidos")) $("pillReservoValidos").textContent = `Reservo válidos: ${reservoAplica}`
+  if ($("pillMKValidos")) $("pillMKValidos").textContent = `MK válidos: ${mkAplica}`
+
+  if ($("pagerInfo")) {
+    $("pagerInfo").textContent = `${items.length} resultados · página ${uiState.page + 1} de ${totalPages}`
+  }
+
+  if ($("statusInfo")) {
+    $("statusInfo").textContent = consolidado.length
+      ? `Catálogos: ${profesionales.length} profesionales · ${procedimientos.length} procedimientos`
+      : "—"
+  }
+
+  if ($("btnResolver")) $("btnResolver").disabled = consolidado.length === 0
+  if ($("btnConfirmar")) $("btnConfirmar").disabled = consolidado.length === 0
+  if ($("btnAnular")) $("btnAnular").disabled = consolidado.length === 0
+
+  renderPagerTabs(totalPages)
 }
 
-if($("pillCoincidencias")){
-  $("pillCoincidencias").textContent = `OK: ${ok}`
-}
+function renderPagerTabs(totalPages) {
+  const wrap = $("pagerTabs")
+  if (!wrap) return
 
-if($("pillFusionados")){
-  $("pillFusionados").textContent = `Procedimientos: ${procedimientos.length}`
-}
+  wrap.innerHTML = ""
 
-if($("pillReservoValidos")){
-  $("pillReservoValidos").textContent = `Reservo válidos: ${consolidado.filter(x => x.origen === "Reservo").length}`
-}
-
-if($("pillMKValidos")){
-  $("pillMKValidos").textContent = `MK válidos: ${consolidado.filter(x => x.origen === "MK").length}`
-}
-
+  for (let i = 0; i < totalPages; i++) {
+    const btn = document.createElement("button")
+    btn.type = "button"
+    btn.className = "btn small"
+    btn.textContent = String(i + 1)
+    if (i === uiState.page) {
+      btn.classList.add("primary")
+    }
+    btn.onclick = () => {
+      uiState.page = i
+      render()
+    }
+    wrap.appendChild(btn)
+  }
 }
 
 /* ======================
    PROCESAR
 ====================== */
 
-$("btnCargar").onclick = async()=>{
+async function procesarArchivos() {
+  if (!dataReservo.length && !dataMK.length) {
+    alert("Debes cargar al menos un archivo")
+    return
+  }
 
-if(!dataReservo.length && !dataMK.length){
-alert("Debes cargar al menos un archivo")
-return
-}
+  await cargarProfesionales()
+  await cargarProcedimientos()
 
-await cargarProfesionales()
-await cargarProcedimientos()
-
-let reservos = procesarReservo()
-let mks = procesarMK()
-
-consolidado = [...reservos,...mks]
-
-render()
-
+  uiState.page = 0
+  recalcularTodo()
 }
 
 /* ======================
-   CARGA ARCHIVOS
+   EVENTOS
 ====================== */
 
-$("fileReservo").addEventListener("change", async e=>{
+if ($("btnCargar")) {
+  $("btnCargar").onclick = procesarArchivos
+}
 
-let file = e.target.files[0]
+if ($("fileReservo")) {
+  $("fileReservo").addEventListener("change", async e => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    dataReservo = await leerExcel(file)
+  })
+}
 
-if(!file) return
+if ($("fileMK")) {
+  $("fileMK").addEventListener("change", async e => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    dataMK = await leerExcel(file)
+  })
+}
 
-dataReservo = await leerExcel(file)
+if ($("q")) {
+  $("q").addEventListener("input", e => {
+    uiState.q = e.target.value || ""
+    uiState.page = 0
+    render()
+  })
+}
 
-})
+if ($("btnPrev")) {
+  $("btnPrev").onclick = () => {
+    uiState.page = Math.max(0, uiState.page - 1)
+    render()
+  }
+}
 
-$("fileMK").addEventListener("change", async e=>{
+if ($("btnNext")) {
+  $("btnNext").onclick = () => {
+    const totalPages = Math.max(1, Math.ceil(filteredItems().length / uiState.pageSize))
+    uiState.page = Math.min(totalPages - 1, uiState.page + 1)
+    render()
+  }
+}
 
-let file = e.target.files[0]
+/* resolver */
+if ($("btnResolver")) $("btnResolver").onclick = abrirResolver
+if ($("btnResolverClose")) $("btnResolverClose").onclick = cerrarResolver
+if ($("btnResolverCancelar")) $("btnResolverCancelar").onclick = cerrarResolver
+if ($("btnResolverRevisar")) $("btnResolverRevisar").onclick = renderResolver
 
-if(!file) return
+if ($("modalResolverBackdrop")) {
+  $("modalResolverBackdrop").addEventListener("click", e => {
+    if (e.target === $("modalResolverBackdrop")) cerrarResolver()
+  })
+}
 
-dataMK = await leerExcel(file)
+/* detalle */
+if ($("btnItemClose")) $("btnItemClose").onclick = cerrarDetalle
+if ($("btnItemCancelar")) $("btnItemCancelar").onclick = cerrarDetalle
+if ($("btnGuardarItem")) $("btnGuardarItem").onclick = guardarDetalle
 
-})
+if ($("btnGuardarTodo")) {
+  $("btnGuardarTodo").onclick = guardarDetalle
+}
+
+if ($("modalItemBackdrop")) {
+  $("modalItemBackdrop").addEventListener("click", e => {
+    if (e.target === $("modalItemBackdrop")) cerrarDetalle()
+  })
+}
+
+/* botones aún no implementados con persistencia */
+if ($("btnCargarImport")) {
+  $("btnCargarImport").onclick = () => {
+    console.warn("Cargar Import aún no está implementado con Firestore en esta versión.")
+  }
+}
+
+if ($("btnConfirmar")) {
+  $("btnConfirmar").onclick = () => {
+    console.warn("Confirmar importación aún no está implementado con Firestore en esta versión.")
+  }
+}
+
+if ($("btnAnular")) {
+  $("btnAnular").onclick = () => {
+    console.warn("Anular importación aún no está implementado con Firestore en esta versión.")
+  }
+}
+
+if ($("btnLimpiarCola")) {
+  $("btnLimpiarCola").onclick = () => {
+    manualOverrides = {}
+    recalcularTodo()
+  }
+}
 
 /* ======================
    BOOT
 ====================== */
 
 requireAuth({
-onUser: async(user)=>{
+  onUser: async (user) => {
+    await loadSidebar({ active: 'produccion_ambulatoria' })
+    setActiveNav('produccion_ambulatoria')
 
-await loadSidebar({ active: 'produccion_ambulatoria' })
-setActiveNav('produccion_ambulatoria')
+    if ($("who")) {
+      $("who").textContent = `Conectado: ${user.email}`
+    }
 
-if($("who")){
-$("who").textContent = `Conectado: ${user.email}`
-}
-
-wireLogout()
-setDefaultToPreviousMonth()
-
-if($("btnItemClose")) $("btnItemClose").onclick = cerrarDetalle
-if($("btnItemCancelar")) $("btnItemCancelar").onclick = cerrarDetalle
-if($("btnGuardarItem")) $("btnGuardarItem").onclick = guardarDetalle
-
-if($("modalItemBackdrop")){
-  $("modalItemBackdrop").addEventListener("click", (e)=>{
-    if(e.target === $("modalItemBackdrop")) cerrarDetalle()
-  })
-}
-
-}
+    wireLogout()
+    setDefaultToPreviousMonth()
+    render()
+  }
 })
