@@ -459,6 +459,10 @@ itemForm.innerHTML = `
           ${opcionesProcedimientos}
         </select>
       </div>
+
+      <div style="display:flex; justify-content:flex-end; margin-top:12px;">
+        <button id="btnMoreInfo" type="button" class="btn soft">Editar más información</button>
+      </div>
     </section>
 
     <section class="card" style="padding:12px;">
@@ -470,6 +474,12 @@ itemForm.innerHTML = `
 `
 
 modal.style.display = "block"
+
+if($("btnMoreInfo")){
+  $("btnMoreInfo").onclick = ()=>{
+    abrirMasInformacion(reg)
+  }
+}
 
 }
 
@@ -484,6 +494,67 @@ const procedimientoId = $("detalleProcedimientoId")?.value || ""
 
 const profesional = profesionales.find(p => p.id === profesionalId) || null
 const procedimiento = procedimientos.find(p => p.id === procedimientoId) || null
+
+/* =========================
+   Guardar edición de campos extra
+========================= */
+
+const extraInputs = document.querySelectorAll("[data-extra-key]")
+
+if(extraInputs.length){
+
+  const target = reg.dataReservo ? reg.dataReservo : reg.dataMK
+
+  extraInputs.forEach(inp=>{
+    const key = inp.getAttribute("data-extra-key")
+    if(!key || !target) return
+    target[key] = inp.value
+  })
+
+  /* recalcular algunos campos principales si fueron editados */
+  const raw = target || {}
+
+  reg.fecha = raw["Fecha"] ?? reg.fecha
+  reg.fechaNorm = normalizarFecha(raw["Fecha"] ?? reg.fecha)
+
+  reg.rut = raw["Rut"] ?? reg.rut
+  reg.rutNorm = normalizarRut(raw["Rut"] ?? reg.rut)
+
+  reg.paciente = raw["Paciente"] ?? reg.paciente
+
+  if(reg.origen === "Reservo"){
+    reg.profesional = raw["Profesional"] ?? reg.profesional
+    reg.prestacion = raw["Tratamiento"] ?? reg.prestacion
+    reg.valor = Number(raw["Valor"]) || 0
+
+    const alerta = alertaReservo(raw)
+    reg.review = construirReview({
+      profesionalId: reg.resolved?.profesionalId || null,
+      procedimientoId: reg.resolved?.procedimientoId || null,
+      alertas: alerta ? [alerta] : []
+    })
+  }else{
+    reg.profesional = raw["D Médico"] ?? reg.profesional
+    reg.prestacion = raw["D Artículo"] ?? reg.prestacion
+    reg.valor = Number(raw["Total"]) || 0
+
+    const alertasMK = []
+    if(!normalizarRut(raw["Rut"])) alertasMK.push("RUT vacío o inválido")
+    if(!normalizarTexto(raw["D Médico"])) alertasMK.push("Profesional vacío")
+    if(!normalizarTexto(raw["D Artículo"])) alertasMK.push("Procedimiento vacío")
+
+    reg.review = construirReview({
+      profesionalId: reg.resolved?.profesionalId || null,
+      procedimientoId: reg.resolved?.procedimientoId || null,
+      alertas: alertasMK
+    })
+  }
+
+}
+
+/* =========================
+   Guardar resolución manual
+========================= */
 
 reg.resolved = {
 ...(reg.resolved || {}),
@@ -508,6 +579,40 @@ alertas: reg.review?.alertas || []
 
 cerrarDetalle()
 render()
+
+}
+
+function abrirMasInformacion(reg){
+
+const itemForm = $("itemForm")
+if(!itemForm) return
+
+const original = reg.dataReservo || reg.dataMK || {}
+
+const filas = Object.keys(original).map(key=>{
+
+const value = original[key] ?? ""
+
+return `
+  <div class="field" style="margin-bottom:10px;">
+    <label>${key}</label>
+    <input type="text" data-extra-key="${key}" value="${String(value).replaceAll('"','&quot;')}">
+  </div>
+`
+
+}).join("")
+
+itemForm.innerHTML = `
+  <div class="card" style="padding:12px;">
+    <div class="sectionTitle">Editar más información</div>
+    <div class="help" style="margin-bottom:10px;">
+      Aquí puedes editar los campos originales del registro. Luego presiona “Guardar item”.
+    </div>
+    <div class="grid2">
+      ${filas}
+    </div>
+  </div>
+`
 
 }
 
