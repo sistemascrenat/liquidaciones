@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Clínica Rennat – Ambulatorios</title>
+  <link rel="icon" type="image/png" href="logoCR.png">
+  <link rel="stylesheet" href="estilos.css"/>
+</head>
+
+<body>
+  <div class="container">
+    <!-- SIDEBAR (inyectado) -->
+    <div id="sidebar-slot"></div>
+
+    <!-- MAIN -->
+    <main class="main">
+      <div class="topbar">
+        <div>
+          <div class="h1">Procedimientos Ambulatorios</div>
+          <div class="muted" id="who"></div>
+        </div>
+        <div class="badge" id="count">0 ambulatorios</div>
+      </div>
+
+      <!-- TOOLBAR -->
+      <section class="card" style="margin-bottom:14px;">
+        <div class="actions" style="gap:10px;">
+          <button class="btn primary" id="btnCrear">+ Crear Nuevo Ambulatorio</button>
+
+          <button class="btn" id="btnDescargarPlantilla">⬇️ Plantilla CSV</button>
+          <button class="btn" id="btnExportar">⬇️ Exportar CSV</button>
+          <button class="btn" id="btnImportar">⬆️ Importar CSV</button>
+          <input id="fileCSV" type="file" accept=".csv,text/csv" style="display:none;"/>
+
+          <span style="flex:1"></span>
+
+          <input
+            id="buscador"
+            placeholder="Buscar (código, nombre, rol, tarifa, etc). (,)=y, (-)=o"
+            style="max-width:520px;"
+          />
+        </div>
+      </section>
+
+      <!-- TABLE -->
+      <section class="card">
+        <div class="tableWrap">
+          <table class="simpleTable">
+            <thead>
+              <tr>
+                <th style="min-width:120px;">Código</th>
+                <th style="min-width:280px;">Ambulatorio</th>
+                <th style="min-width:260px;">Roles</th>
+                <th style="min-width:320px;">Tarifa</th>
+                <th style="min-width:90px;">Estado</th>
+                <th style="width:140px;">Acciones</th>
+              </tr>
+            </thead>
+            <tbody id="tbody"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div id="toast" class="toast"></div>
+
+  <!-- MODAL CREAR/EDITAR -->
+  <div id="modalProcBackdrop" class="modalBackdrop" style="display:none;">
+    <div class="modalCard" role="dialog" aria-modal="true">
+      <div class="modalHead">
+        <div>
+          <div class="h1" id="modalProcTitle" style="margin:0;font-size:18px;">Crear procedimiento ambulatorio</div>
+          <div class="muted" id="modalProcSub" style="font-size:12px;margin-top:2px;"></div>
+        </div>
+        <button class="iconBtn" id="btnProcClose" type="button" aria-label="Cerrar" title="Cerrar">✖️</button>
+      </div>
+
+      <div class="modalBody">
+        <div class="grid" style="grid-template-columns: 1fr 1fr; gap:12px;">
+          <div>
+            <label>Código</label>
+            <input id="procCodigo" placeholder="PA0001"/>
+          </div>
+
+          <div>
+            <label>Estado</label>
+            <select id="procEstado">
+              <option value="activa">Activa</option>
+              <option value="inactiva">Inactiva</option>
+            </select>
+          </div>
+
+          <div style="grid-column:1/-1;">
+            <label>Nombre procedimiento ambulatorio</label>
+            <input id="procNombre" placeholder="Ej: Endoscopía ambulatoria"/>
+          </div>
+
+          <div style="grid-column:1/-1;">
+            <label>Roles (selección múltiple)</label>
+            <div id="procRolesWrap" class="rolesWrap"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="modalFoot">
+        <button class="btn" id="btnProcCancelar" type="button">Cancelar</button>
+        <span style="flex:1"></span>
+        <button class="btn primary" id="btnProcGuardar" type="button">Guardar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL TARIFA -->
+  <div id="modalTarBackdrop" class="modalBackdrop" style="display:none;">
+    <div class="modalCard" role="dialog" aria-modal="true" style="width:min(1100px, 96vw);">
+      <div class="modalHead">
+        <div>
+          <div class="h1" id="modalTarTitle" style="margin:0;font-size:18px;">Tarifa ambulatoria</div>
+          <div class="muted" id="modalTarSub" style="font-size:12px;margin-top:2px;"></div>
+        </div>
+        <button class="iconBtn" id="btnTarClose" type="button" aria-label="Cerrar" title="Cerrar">✖️</button>
+      </div>
+
+      <div class="modalBody">
+        <div class="grid" style="grid-template-columns: 1.4fr .8fr; gap:14px;">
+          <section class="card" style="padding:14px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:10px;">
+              <div>
+                <div style="font-weight:900;">Honorarios médicos = HMQ</div>
+              </div>
+              <div class="pill" id="hmqPill">HMQ: $0</div>
+            </div>
+
+            <div style="height:10px;"></div>
+
+            <div id="tarRolesList" style="display:flex; flex-direction:column; gap:10px;"></div>
+          </section>
+
+          <section class="card" style="padding:14px;">
+            <div style="font-weight:900;">Costos del procedimiento</div>
+
+            <div style="height:10px;"></div>
+
+            <div class="grid" style="grid-template-columns: 1fr; gap:10px;">
+              <div>
+                <label>Precio (valor impuesto)</label>
+                <input id="tarPrecio" inputmode="numeric" placeholder="0"/>
+              </div>
+
+              <div>
+                <label>Derechos clínica</label>
+                <input id="tarDC" inputmode="numeric" placeholder="0"/>
+              </div>
+
+              <div>
+                <label>Insumos</label>
+                <input id="tarINS" inputmode="numeric" placeholder="0"/>
+              </div>
+            </div>
+
+            <div style="height:12px;"></div>
+
+            <div class="card" style="padding:12px; border-radius:14px;">
+              <div class="mini muted">Totales</div>
+              <div id="tarTotales" style="font-weight:900; line-height:1.35;"></div>
+            </div>
+
+            <div class="card" style="padding:12px; border-radius:14px;">
+              <div class="mini muted" style="margin-bottom:6px;">Resumen</div>
+              <div id="tarResumen" style="font-weight:900;"></div>
+            </div>
+
+            <div class="card" style="padding:12px; border-radius:14px;">
+              <div class="mini muted" style="margin-bottom:6px;">Utilidad</div>
+              <div id="tarUtilidad" style="font-weight:900;"></div>
+              <div class="mini muted" id="tarMargen" style="margin-top:6px;"></div>
+            </div>
+          </section>
+        </div>
+      </div>
+
+      <div class="modalFoot">
+        <button class="btn" id="btnTarCancelar" type="button">Cancelar</button>
+        <span style="flex:1"></span>
+        <button class="btn primary" id="btnTarGuardar" type="button">Guardar tarifa</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="layout.js"></script>
+  <script type="module" src="ambulatorios.js"></script>
+</body>
+</html>
