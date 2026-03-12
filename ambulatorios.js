@@ -11,7 +11,7 @@
 import { db } from './firebase-init.js';
 import { requireAuth } from './auth.js';
 import { setActiveNav, toast, wireLogout } from './ui.js';
-import { cleanReminder, toUpperSafe, parseCSV, toCSV } from './utils.js';
+import { cleanReminder, toUpperSafe } from './utils.js';
 import { loadSidebar } from './layout.js';
 
 import {
@@ -678,10 +678,9 @@ async function saveTarifario(){
 }
 
 /* =========================
-   CSV
+   XLSX
 ========================= */
-function download(filename, text, mime='text/plain'){
-  const blob = new Blob([text], { type: mime });
+function downloadBlob(filename, blob){
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
@@ -690,46 +689,51 @@ function download(filename, text, mime='text/plain'){
   setTimeout(()=> URL.revokeObjectURL(url), 1500);
 }
 
+function jsonToSheetWithWidths(rows){
+  const ws = XLSX.utils.json_to_sheet(rows);
+  const headers = rows.length ? Object.keys(rows[0]) : [];
+  ws['!cols'] = headers.map(h=>({
+    wch: Math.max(
+      String(h || '').length + 2,
+      ...rows.map(r => String(r?.[h] ?? '').length + 2)
+    )
+  }));
+  return ws;
+}
+
 function plantillaCSV(){
   const roleCols = state.rolesCatalog.map(r=> `hmq_${r.id}`);
-  const headers = [
-    'codigo','nombre','estado',
-    'rolesIds',
-    'precio',
-    'derechosClinica',
-    'insumos',
-    ...roleCols
-  ];
-
-  const example = {
+  const rows = [{
     codigo: 'PA0001',
     nombre: 'Procedimiento ejemplo',
     estado: 'activa',
     rolesIds: 'r_medico|r_anestesista|r_arsenalera',
-    precio: '350000',
-    derechosClinica: '50000',
-    insumos: '25000'
-  };
+    precio: 350000,
+    derechosClinica: 50000,
+    insumos: 25000,
+    ...Object.fromEntries(roleCols.map(c => [c, 0]))
+  }];
 
-  for(const rc of roleCols) example[rc] = '0';
-  if(roleCols[0]) example[roleCols[0]] = '120000';
+  if(roleCols[0]) rows[0][roleCols[0]] = 120000;
 
-  const csv = toCSV(headers, [example]);
-  download('plantilla_tarifas_ambulatorios.csv', csv, 'text/csv');
-  toast('Plantilla descargada');
+  const wb = XLSX.utils.book_new();
+  const ws = jsonToSheetWithWidths(rows);
+  XLSX.utils.book_append_sheet(wb, ws, 'Plantilla');
+
+  const arrayBuffer = XLSX.write(wb, { bookType:'xlsx', type:'array' });
+  downloadBlob(
+    'plantilla_tarifas_ambulatorios.xlsx',
+    new Blob([arrayBuffer], {
+      type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    })
+  );
+
+  toast('Plantilla XLSX descargada');
 }
 
 function exportCSV(){
   const roleCols = state.rolesCatalog.map(r=> `hmq_${r.id}`);
-  const headers = [
-    'codigo','nombre','estado',
-    'rolesIds',
-    'precio','costo','utilidad',
-    'derechosClinica','insumos','hmq_total',
-    ...roleCols
-  ];
-
-  const items = [];
+  const rows = [];
 
   for(const p of state.all){
     const t = p.tarifa || {};
@@ -746,84 +750,99 @@ function exportCSV(){
       nombre: p.nombre,
       estado: p.estado,
       rolesIds: (p.rolesIds || []).join('|'),
-      precio: String(precio),
-      costo: String(costo),
-      utilidad: String(utilidad),
-      derechosClinica: String(derechosClinica),
-      insumos: String(insumos),
-      hmq_total: String(hmq_total)
+      precio,
+      costo,
+      utilidad,
+      derechosClinica,
+      insumos,
+      hmq_total
     };
 
     for(const r of state.rolesCatalog){
-      const key = `hmq_${r.id}`;
-      row[key] = String(Number(honorarios[r.id] || 0) || 0);
+      row[`hmq_${r.id}`] = Number(honorarios[r.id] || 0) || 0;
     }
 
-    items.push(row);
+    rows.push(row);
   }
 
-  const csv = toCSV(headers, items);
-  download(`ambulatorios_tarifas_${new Date().toISOString().slice(0,10)}.csv`, csv, 'text/csv');
-  toast('CSV exportado');
+  const wb = XLSX.utils.book_new();
+  const ws = jsonToSheetWithWidths(rows.length ? rows : [{
+    codigo:'', nombre:'', estado:'', rolesIds:'',
+    precio:0, costo:0, utilidad:0, derechosClinica:0, insumos:0, hmq_total:0
+  }]);
+  XLSX.utils.book_append_sheet(wb, ws, 'Ambulatorios');
+
+  const arrayBuffer = XLSX.write(wb, { bookType:'xlsx', type:'array' });
+  downloadBlob(
+    `ambulatorios_tarifas_${new Date().toISOString().slice(0,10)}.xlsx`,
+    new Blob([arrayBuffer], {
+      type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    })
+  );
+
+  toast('XLSX exportado');
 }
 
 async function importCSV(file){
-  const text = await file.text();
-  const rows = parseCSV(text);
-  if(rows.length < 2){
-    toast('CSV vacío o inválido');
+  const buffer = await file.arrayBuffer();
+  const wb = XLSX.read(buffer, { type:'array' });
+  const firstSheetName = wb.SheetNames?.[0];
+  if(!firstSheetName){
+    toast('Archivo XLSX vacío');
     return;
   }
 
-  const headers = rows[0].map(h=>cleanReminder(h).toLowerCase());
-  const idx = (name)=> headers.indexOf(name.toLowerCase());
+  const ws = wb.Sheets[firstSheetName];
+  const rows = XLSX.utils.sheet_to_json(ws, { defval:'' });
 
-  const I = {
-    codigo: idx('codigo'),
-    nombre: idx('nombre'),
-    estado: idx('estado'),
-    rolesIds: idx('rolesids'),
-    precio: idx('precio'),
-    derechosClinica: idx('derechosclinica'),
-    insumos: idx('insumos')
-  };
-
-  if(I.codigo < 0 || I.nombre < 0){
-    toast('CSV debe incluir: codigo, nombre');
+  if(!rows.length){
+    toast('XLSX vacío o inválido');
     return;
   }
 
-  const roleCols = headers.filter(h=> h.startsWith('hmq_'));
+  const normalizedRows = rows.map(obj=>{
+    const out = {};
+    for(const k of Object.keys(obj || {})){
+      out[cleanReminder(k).toLowerCase()] = obj[k];
+    }
+    return out;
+  });
+
+  const first = normalizedRows[0] || {};
+  if(!('codigo' in first) || !('nombre' in first)){
+    toast('XLSX debe incluir columnas: codigo, nombre');
+    return;
+  }
+
+  const roleCols = Object.keys(first).filter(h=> h.startsWith('hmq_'));
 
   let upserts = 0, skipped = 0;
 
-  for(let r=1;r<rows.length;r++){
-    const row = rows[r];
-
-    const codigo = cleanReminder(row[I.codigo] ?? '').toUpperCase();
-    const nombre = cleanReminder(row[I.nombre] ?? '');
+  for(const row of normalizedRows){
+    const codigo = cleanReminder(row.codigo ?? '').toUpperCase();
+    const nombre = cleanReminder(row.nombre ?? '');
 
     if(!codigo || !/^PA\d{4}$/i.test(codigo) || !nombre){
       skipped++;
       continue;
     }
 
-    const estado = (cleanReminder(I.estado>=0 ? row[I.estado] : 'activa') || 'activa').toLowerCase();
+    const estado = (cleanReminder(row.estado ?? 'activa') || 'activa').toLowerCase();
     const rolesIds = uniq(
-      (cleanReminder(I.rolesIds>=0 ? row[I.rolesIds] : '') || '')
-        .split('|').map(x=>cleanReminder(x)).filter(Boolean)
+      (cleanReminder(row.rolesids ?? '') || '')
+        .split('|')
+        .map(x=>cleanReminder(x))
+        .filter(Boolean)
     );
 
-    const precio = Number(cleanReminder(I.precio>=0 ? row[I.precio] : '0') || 0) || 0;
-    const derechosClinica = Number(cleanReminder(I.derechosClinica>=0 ? row[I.derechosClinica] : '0') || 0) || 0;
-    const insumos = Number(cleanReminder(I.insumos>=0 ? row[I.insumos] : '0') || 0) || 0;
+    const precio = Number(row.precio || 0) || 0;
+    const derechosClinica = Number(row.derechosclinica || 0) || 0;
+    const insumos = Number(row.insumos || 0) || 0;
 
     const honorarios = {};
     for(const col of roleCols){
-      const j = idx(col);
-      if(j < 0) continue;
       const rid = col.replace(/^hmq_/,'');
-      const val = Number(cleanReminder(row[j] ?? '0') || 0) || 0;
+      const val = Number(row[col] || 0) || 0;
       if(val > 0) honorarios[rid] = val;
     }
 
@@ -855,7 +874,6 @@ async function importCSV(file){
   toast(`Import listo: ${upserts} guardados / ${skipped} omitidos`);
   await loadAll();
 }
-
 /* =========================
    Boot
 ========================= */
@@ -894,7 +912,7 @@ requireAuth({
 
     $('btnDescargarPlantilla')?.addEventListener('click', plantillaCSV);
     $('btnExportar')?.addEventListener('click', exportCSV);
-
+    
     $('btnImportar')?.addEventListener('click', ()=> $('fileCSV')?.click());
     $('fileCSV')?.addEventListener('change', async (e)=>{
       const file = e.target.files?.[0];
