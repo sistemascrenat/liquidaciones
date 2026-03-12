@@ -6,6 +6,7 @@
   <title>Clínica Rennat – Ambulatorios</title>
   <link rel="icon" type="image/png" href="logoCR.png">
   <link rel="stylesheet" href="estilos.css"/>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
 </head>
 
 <body>
@@ -28,10 +29,10 @@
         <div class="actions" style="gap:10px;">
           <button class="btn primary" id="btnCrear">+ Crear Nuevo Ambulatorio</button>
 
-          <button class="btn" id="btnDescargarPlantilla">⬇️ Plantilla CSV</button>
-          <button class="btn" id="btnExportar">⬇️ Exportar CSV</button>
-          <button class="btn" id="btnImportar">⬆️ Importar CSV</button>
-          <input id="fileCSV" type="file" accept=".csv,text/csv" style="display:none;"/>
+          <button class="btn" id="btnDescargarPlantilla">⬇️ Plantilla XLSX</button>
+          <button class="btn" id="btnExportar">⬇️ Exportar XLSX</button>
+          <button class="btn" id="btnImportar">⬆️ Importar XLSX</button>
+          <input id="fileCSV" type="file" accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" style="display:none;"/>
 
           <span style="flex:1"></span>
 
