@@ -1454,7 +1454,12 @@ function render() {
   if ($("btnResolver")) $("btnResolver").disabled = consolidado.length === 0;
   if ($("btnConfirmar")) {
     const totalConfirmables = consolidado.filter(esItemConfirmable).length;
-    $("btnConfirmar").disabled = !(stateImport.status === "staged" && totalConfirmables > 0);
+    const canConfirm = (stateImport.status === "staged" && totalConfirmables > 0);
+  
+    $("btnConfirmar").disabled = !canConfirm;
+    $("btnConfirmar").title = canConfirm
+      ? `Listo para confirmar (${totalConfirmables} items)`
+      : `Bloqueado: estado=${stateImport.status || "—"} / confirmables=${totalConfirmables}`;
   }
   if ($("btnAnular")) $("btnAnular").disabled = !(stateImport.importId && (stateImport.status === "staged" || stateImport.status === "confirmada"));
 
@@ -1493,32 +1498,38 @@ async function procesarArchivos() {
     return;
   }
 
-  await cargarProfesionales();
-  await cargarProcedimientos();
+  try {
+    await cargarProfesionales();
+    await cargarProcedimientos();
 
-  uiState.page = 0;
-  recalcularTodo();
+    stateImport.monthName = clean($("mes")?.value || "");
+    stateImport.monthNum = monthIndex(stateImport.monthName);
+    stateImport.year = Number($("ano")?.value || 0) || 0;
 
-  stateImport.monthName = clean($("mes")?.value || "");
-  stateImport.monthNum = monthIndex(stateImport.monthName);
-  stateImport.year = Number($("ano")?.value || 0) || 0;
+    if (!stateImport.monthNum || !stateImport.year) {
+      toast("Mes o año inválido");
+      return;
+    }
 
-  if (!stateImport.monthNum || !stateImport.year) {
-    toast("Mes o año inválido");
-    return;
+    stateImport.importId = makeImportId();
+    stateImport.status = "staged";
+
+    uiState.page = 0;
+    recalcularTodo();
+
+    await saveStagingToFirestore();
+    await fillImportSuggestions();
+
+    if ($("importSelect")) $("importSelect").value = stateImport.importId;
+    if ($("importId")) $("importId").value = stateImport.importId;
+
+    setStatus(`🟡 Staging listo: ${consolidado.length} filas · ImportID: ${stateImport.importId}`);
+    render();
+
+  } catch (err) {
+    console.error("Error en procesarArchivos():", err);
+    toast("No se pudo guardar el staging. Revisa la consola.");
   }
-
-  stateImport.importId = makeImportId();
-  stateImport.status = "staged";
-
-  await saveStagingToFirestore();
-  await fillImportSuggestions();
-
-  if ($("importSelect")) $("importSelect").value = stateImport.importId;
-  if ($("importId")) $("importId").value = stateImport.importId;
-
-  setStatus(`🟡 Staging listo: ${consolidado.length} filas · ImportID: ${stateImport.importId}`);
-  render();
 }
 
 /* ======================
