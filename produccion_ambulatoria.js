@@ -48,7 +48,8 @@ let uiState = {
   q: "",
   page: 0,
   pageSize: 60,
-  mostrarNoAplica: false
+  mostrarNoAplica: false,
+  resolverFiltro: "base" // base | pendientes | aplica | no_aplica | revisar | todos
 }
 
 /* ======================
@@ -818,6 +819,73 @@ function bindEditButtonsIn(container) {
   })
 }
 
+function getResolverBaseItems() {
+  return consolidado.filter(it =>
+    it.review?.estadoRevision === "pendiente" ||
+    it.aplicacion?.estado === "revisar"
+  )
+}
+
+function getResolverItemsByFiltro() {
+  const base = getResolverBaseItems()
+
+  switch (uiState.resolverFiltro) {
+    case "pendientes":
+      return base.filter(it => it.review?.estadoRevision === "pendiente")
+
+    case "aplica":
+      return consolidado.filter(it => it.aplicacion?.estado === "aplica")
+
+    case "no_aplica":
+      return consolidado.filter(it => it.aplicacion?.estado === "no_aplica")
+
+    case "revisar":
+      return consolidado.filter(it => it.aplicacion?.estado === "revisar")
+
+    case "todos":
+      return consolidado
+
+    case "base":
+    default:
+      return base
+  }
+}
+
+function resolverFiltroLabel() {
+  switch (uiState.resolverFiltro) {
+    case "pendientes": return "Pendientes"
+    case "aplica": return "Aplican"
+    case "no_aplica": return "No aplica"
+    case "revisar": return "Revisar"
+    case "todos": return "Todos"
+    case "base":
+    default:
+      return "Por resolver"
+  }
+}
+
+function resolverResumenLink(label, count, filtro) {
+  const activo = uiState.resolverFiltro === filtro
+  const style = activo
+    ? 'style="font-weight:900; text-decoration:underline;"'
+    : 'style="font-weight:800;"'
+
+  return `<button type="button" class="linkBtn" data-resolver-filter="${escapeHtml(filtro)}" ${style}>${escapeHtml(label)}: ${count}</button>`
+}
+
+function bindResolverResumenFiltros() {
+  const resumen = $("resolverResumen")
+  if (!resumen) return
+
+  resumen.querySelectorAll("[data-resolver-filter]").forEach(btn => {
+    btn.onclick = () => {
+      const filtro = btn.getAttribute("data-resolver-filter") || "base"
+      uiState.resolverFiltro = filtro
+      renderResolver()
+    }
+  })
+}
+
 function renderResolver() {
   const resumen = $("resolverResumen")
   const listResumen = $("resolverCoincidenciasList")
@@ -832,16 +900,30 @@ function renderResolver() {
   const pendProc = consolidado.filter(x => x.review?.pendientes?.procedimiento)
   const conAlerta = consolidado.filter(x => (x.review?.alertas || []).length > 0)
   const revisarApp = consolidado.filter(x => x.aplicacion?.estado === "revisar")
+  const aplica = consolidado.filter(x => x.aplicacion?.estado === "aplica")
   const noAplica = consolidado.filter(x => x.aplicacion?.estado === "no_aplica")
 
-  resumen.textContent =
-    `Items: ${consolidado.length} · Pendientes: ${pendientes.length} · ` +
-    `Aplican: ${consolidado.filter(x => x.aplicacion?.estado === "aplica").length} · ` +
-    `No aplica: ${noAplica.length} · Revisar: ${revisarApp.length}`
+  const resumenItems = getResolverItemsByFiltro()
 
-  listResumen.innerHTML = revisarApp.length
-    ? revisarApp.map(it => rowMiniHTML(it, (it.review?.alertas || []).join(" · ") || it.aplicacion?.motivo || "")).join("")
-    : `<div class="muted tiny">No hay ítems marcados para revisar por inconsistencia.</div>`
+  resumen.innerHTML = [
+    resolverResumenLink("Items", consolidado.length, "base"),
+    `<span> · </span>`,
+    resolverResumenLink("Pendientes", pendientes.length, "pendientes"),
+    `<span> · </span>`,
+    resolverResumenLink("Aplican", aplica.length, "aplica"),
+    `<span> · </span>`,
+    resolverResumenLink("No aplica", noAplica.length, "no_aplica"),
+    `<span> · </span>`,
+    resolverResumenLink("Revisar", revisarApp.length, "revisar"),
+    `<div class="help" style="margin-top:8px;">Filtro actual: <b>${escapeHtml(resolverFiltroLabel())}</b></div>`
+  ].join("")
+
+  listResumen.innerHTML = resumenItems.length
+    ? resumenItems.map(it => rowMiniHTML(
+        it,
+        (it.review?.alertas || []).join(" · ") || it.aplicacion?.motivo || ""
+      )).join("")
+    : `<div class="muted tiny">No hay ítems para el filtro seleccionado.</div>`
 
   listProf.innerHTML = pendProf.length
     ? pendProf.map(it => rowMiniHTML(it, "Falta asociar profesional")).join("")
@@ -855,6 +937,8 @@ function renderResolver() {
     ? conAlerta.map(it => rowMiniHTML(it, (it.review?.alertas || []).join(" · "))).join("")
     : `<div class="muted tiny">No hay alertas.</div>`
 
+  bindResolverResumenFiltros()
+
   bindEditButtonsIn(listResumen)
   bindEditButtonsIn(listProf)
   bindEditButtonsIn(listProc)
@@ -864,6 +948,8 @@ function renderResolver() {
 function abrirResolver() {
   const modal = $("modalResolverBackdrop")
   if (!modal) return
+
+  uiState.resolverFiltro = "base"
   renderResolver()
   modal.style.display = "block"
 }
