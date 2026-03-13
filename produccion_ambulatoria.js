@@ -1411,8 +1411,13 @@ function render() {
   }
 
   const pendientes = consolidado.filter(x => x.review?.estadoRevision === "pendiente").length;
+  const alertas = consolidado.filter(x => (x.review?.alertas || []).length > 0).length;
+  const ok = consolidado.filter(x => x.review?.estadoRevision === "ok").length;
   const noAplica = consolidado.filter(x => x.aplicacion?.estado === "no_aplica").length;
   const pendProf = consolidado.filter(x => x.review?.pendientes?.profesional).length;
+  const reservoAplica = consolidado.filter(x => x.origen === "Reservo" && x.aplicacion?.estado === "aplica").length;
+  const mkAplica = consolidado.filter(x => x.origen === "MK" && x.aplicacion?.estado === "aplica").length;
+  const confirmables = consolidado.filter(esItemConfirmable).length;
   
   if ($("countPill")) $("countPill").textContent = `${items.length} filas`;
   if ($("pillPendientes")) $("pillPendientes").textContent = `Pendientes: ${pendientes}`;
