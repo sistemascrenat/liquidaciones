@@ -1195,14 +1195,14 @@ function renderResolver() {
 
   if (!resumen || !listResumen || !listProf || !listProc || !listAlert) return;
 
-  const pendientes = consolidado.filter(x => x.review?.estadoRevision === "pendiente").length;
-  const alertas = consolidado.filter(x => (x.review?.alertas || []).length > 0).length;
-  const ok = consolidado.filter(x => x.review?.estadoRevision === "ok").length;
-  const noAplica = consolidado.filter(x => x.aplicacion?.estado === "no_aplica").length;
-  const pendProf = consolidado.filter(x => x.review?.pendientes?.profesional).length;
-  const reservoAplica = consolidado.filter(x => x.origen === "Reservo" && x.aplicacion?.estado === "aplica").length;
-  const mkAplica = consolidado.filter(x => x.origen === "MK" && x.aplicacion?.estado === "aplica").length;
-  const confirmables = consolidado.filter(esItemConfirmable).length;
+  // ✅ Aquí deben ser ARRAYS, no .length
+  const pendientes = consolidado.filter(x => x.review?.estadoRevision === "pendiente");
+  const pendProf = consolidado.filter(x => x.review?.pendientes?.profesional);
+  const pendProc = consolidado.filter(x => x.review?.pendientes?.procedimiento);
+  const conAlerta = consolidado.filter(x => (x.review?.alertas || []).length > 0);
+  const revisarApp = consolidado.filter(x => x.aplicacion?.estado === "revisar");
+  const aplica = consolidado.filter(x => x.aplicacion?.estado === "aplica");
+  const noAplica = consolidado.filter(x => x.aplicacion?.estado === "no_aplica");
 
   const resumenItems = getResolverItemsByFiltro();
 
@@ -1411,13 +1411,9 @@ function render() {
   }
 
   const pendientes = consolidado.filter(x => x.review?.estadoRevision === "pendiente").length;
-  const alertas = consolidado.filter(x => (x.review?.alertas || []).length > 0).length;
-  const ok = consolidado.filter(x => x.review?.estadoRevision === "ok").length;
   const noAplica = consolidado.filter(x => x.aplicacion?.estado === "no_aplica").length;
   const pendProf = consolidado.filter(x => x.review?.pendientes?.profesional).length;
-  const reservoAplica = consolidado.filter(x => x.origen === "Reservo" && x.aplicacion?.estado === "aplica").length;
-  const mkAplica = consolidado.filter(x => x.origen === "MK" && x.aplicacion?.estado === "aplica").length;
-
+  
   if ($("countPill")) $("countPill").textContent = `${items.length} filas`;
   if ($("pillPendientes")) $("pillPendientes").textContent = `Pendientes: ${pendientes}`;
   if ($("pillAlertas")) $("pillAlertas").textContent = `Alertas: ${alertas}`;
@@ -1426,7 +1422,6 @@ function render() {
   if ($("pillFusionados")) $("pillFusionados").textContent = `No aplica: ${noAplica}`;
   if ($("pillReservoValidos")) $("pillReservoValidos").textContent = `Reservo válidos: ${reservoAplica}`;
   if ($("pillMKValidos")) $("pillMKValidos").textContent = `MK válidos: ${mkAplica}`;
-  if ($("pillCoincidencias")) $("pillCoincidencias").textContent = `OK: ${ok} · Confirmables: ${confirmables}`;
 
   if ($("pagerInfo")) {
     $("pagerInfo").textContent =
