@@ -8,7 +8,7 @@
 import { db } from './firebase-init.js';
 import { requireAuth } from './auth.js';
 import { setActiveNav, toast, wireLogout } from './ui.js';
-import { cleanReminder, toUpperSafe, parseCSV, toCSV } from './utils.js';
+import { cleanReminder, toUpperSafe } from './utils.js';
 import { loadSidebar } from './layout.js';
 
 
@@ -800,31 +800,10 @@ function paint(){
 }
 
 /* =========================
-   CSV
+   XLSX
 ========================= */
-function download(filename, text, mime='text/plain'){
-  const blob = new Blob([text], { type: mime });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  a.click();
-  setTimeout(()=> URL.revokeObjectURL(url), 1500);
-}
-
-function exportCSV(){
-  const headers = [
-    'tipoPersona','estado',
-    'nombreProfesional','razonSocial',
-    'rut','rutEmpresa',
-    'correoPersonal','correoEmpresa',
-    'telefono','telefonoEmpresa',
-    'rolPrincipalId','rolesSecundariosIds',
-    'tieneDescuento','descuentoUF','descuentoRazon',
-    'tieneBono'
-  ];
-
-  const items = state.all.map(p=>({
+function exportXLSX(){
+  const items = state.all.map(p => ({
     tipoPersona: p.tipoPersona || 'natural',
     estado: p.estado || 'activo',
     nombreProfesional: p.nombreProfesional || '',
@@ -838,129 +817,192 @@ function exportCSV(){
     rolPrincipalId: p.rolPrincipalId || '',
     rolesSecundariosIds: (p.rolesSecundariosIds || []).join('|'),
     tieneDescuento: p.tieneDescuento ? 'true' : 'false',
-    descuentoUF: (Number(p.descuentoUF ?? 0) || 0).toString(),
+    descuentoUF: Number(p.descuentoUF ?? 0) || 0,
     descuentoRazon: p.descuentoRazon || '',
     tieneBono: p.tieneBono ? 'true' : 'false'
   }));
 
-  const csv = toCSV(headers, items);
-  download(`profesionales_${new Date().toISOString().slice(0,10)}.csv`, csv, 'text/csv');
-  toast('CSV exportado');
+  const ws = XLSX.utils.json_to_sheet(items, {
+    header: [
+      'tipoPersona','estado',
+      'nombreProfesional','razonSocial',
+      'rut','rutEmpresa',
+      'correoPersonal','correoEmpresa',
+      'telefono','telefonoEmpresa',
+      'rolPrincipalId','rolesSecundariosIds',
+      'tieneDescuento','descuentoUF','descuentoRazon',
+      'tieneBono'
+    ]
+  });
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Profesionales');
+  XLSX.writeFile(wb, `profesionales_${new Date().toISOString().slice(0,10)}.xlsx`);
+
+  toast('XLSX exportado');
 }
 
-function plantillaCSV(){
-  const csv =
-`tipoPersona,estado,nombreProfesional,razonSocial,rut,rutEmpresa,correoPersonal,correoEmpresa,telefono,telefonoEmpresa,rolPrincipalId,rolesSecundariosIds,tieneDescuento,descuentoUF,descuentoRazon,tieneBono
-natural,activo,Juan Pérez,,14.123.456-1,,juanperez@gmail.com,,+56988775599,,r_cirujano,r_asistente_cirujano|r_cirujano,false,0,,true
-juridica,activo,Andrea González,González SPA,17.321.765-4,77.998.233-1,andrea@correo.com,gonzalezspa@empresa.cl,+56988997755,+56222223333,r_cirujano,r_asistente_cirujano,false,0,,true
-`;
-  download('plantilla_profesionales.csv', csv, 'text/csv');
-  toast('Plantilla descargada');
+function plantillaXLSX(){
+  const rows = [
+    {
+      tipoPersona: 'natural',
+      estado: 'activo',
+      nombreProfesional: 'Juan Pérez',
+      razonSocial: '',
+      rut: '14.123.456-1',
+      rutEmpresa: '',
+      correoPersonal: 'juanperez@gmail.com',
+      correoEmpresa: '',
+      telefono: '+56988775599',
+      telefonoEmpresa: '',
+      rolPrincipalId: 'r_cirujano',
+      rolesSecundariosIds: 'r_asistente_cirujano|r_cirujano',
+      tieneDescuento: 'false',
+      descuentoUF: 0,
+      descuentoRazon: '',
+      tieneBono: 'true'
+    },
+    {
+      tipoPersona: 'juridica',
+      estado: 'activo',
+      nombreProfesional: 'Andrea González',
+      razonSocial: 'González SPA',
+      rut: '17.321.765-4',
+      rutEmpresa: '77.998.233-1',
+      correoPersonal: 'andrea@correo.com',
+      correoEmpresa: 'gonzalezspa@empresa.cl',
+      telefono: '+56988997755',
+      telefonoEmpresa: '+56222223333',
+      rolPrincipalId: 'r_cirujano',
+      rolesSecundariosIds: 'r_asistente_cirujano',
+      tieneDescuento: 'false',
+      descuentoUF: 0,
+      descuentoRazon: '',
+      tieneBono: 'true'
+    }
+  ];
+
+  const ws = XLSX.utils.json_to_sheet(rows, {
+    header: [
+      'tipoPersona','estado',
+      'nombreProfesional','razonSocial',
+      'rut','rutEmpresa',
+      'correoPersonal','correoEmpresa',
+      'telefono','telefonoEmpresa',
+      'rolPrincipalId','rolesSecundariosIds',
+      'tieneDescuento','descuentoUF','descuentoRazon',
+      'tieneBono'
+    ]
+  });
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Plantilla');
+  XLSX.writeFile(wb, 'plantilla_profesionales.xlsx');
+
+  toast('Plantilla XLSX descargada');
 }
 
-async function importCSV(file){
-  const text = await file.text();
-  const rows = parseCSV(text);
-  if(rows.length < 2){
-    toast('CSV vacío o inválido');
+function boolFromCell(v, fallback=false){
+  if(v === undefined || v === null || v === '') return fallback;
+  const s = String(v).trim().toLowerCase();
+  return ['true','1','si','sí','yes','x'].includes(s);
+}
+
+async function importXLSX(file){
+  const ab = await file.arrayBuffer();
+  const wb = XLSX.read(ab, { type: 'array' });
+
+  const firstSheetName = wb.SheetNames?.[0];
+  if(!firstSheetName){
+    toast('Archivo XLSX vacío o inválido');
     return;
   }
 
-  const headers = rows[0].map(h=>cleanReminder(h).toLowerCase());
-  const idx = (name)=> headers.indexOf(name.toLowerCase());
+  const ws = wb.Sheets[firstSheetName];
 
-  const I = {
-    tipoPersona: idx('tipopersona'),
-    estado: idx('estado'),
-    nombreProfesional: idx('nombreprofesional'),
-    razonSocial: idx('razonsocial'),
-    rut: idx('rut'),
-    rutEmpresa: idx('rutempresa'),
-    correoPersonal: idx('correopersonal'),
-    correoEmpresa: idx('correoempresa'),
-    telefono: idx('telefono'),
-    telefonoEmpresa: idx('telefonoempresa'),
-    rolPrincipalId: idx('rolprincipalid'),
-    rolesSecundariosIds: idx('rolessecundariosids'),
-    tieneDescuento: idx('tienedescuento'),
-    descuentoUF: idx('descuentouf'),
-    descuentoRazon: idx('descuentorazon'),
-    tieneBono: idx('tienebono')
-  };
+  // defval:'' => evita undefined y hace más estable la importación
+  const rows = XLSX.utils.sheet_to_json(ws, { defval: '' });
 
-  if(I.rut < 0 || I.nombreProfesional < 0){
-    toast('CSV debe incluir al menos: rut, nombreProfesional');
+  if(!rows.length){
+    toast('XLSX vacío o inválido');
     return;
   }
 
-  let upserts = 0, skipped = 0;
+  let upserts = 0;
+  let skipped = 0;
 
-  for(let r=1;r<rows.length;r++){
-    const row = rows[r];
+  for(const raw of rows){
+    // normaliza nombres de columnas por si vienen con mayúsculas/minúsculas distintas
+    const row = {};
+    Object.keys(raw).forEach(k => {
+      row[(cleanReminder(k) || '').toLowerCase()] = raw[k];
+    });
 
-    const rut = cleanReminder(row[I.rut] ?? '');
+    const rut = cleanReminder(row.rut ?? '');
     const rutId = rutToId(rut);
-    const nombreProfesional = cleanReminder(row[I.nombreProfesional] ?? '');
+    const nombreProfesional = cleanReminder(row.nombreprofesional ?? '');
 
-    if(!rutId || !nombreProfesional){ skipped++; continue; }
+    if(!rutId || !nombreProfesional){
+      skipped++;
+      continue;
+    }
 
-    const tipoPersona = (cleanReminder(I.tipoPersona>=0 ? row[I.tipoPersona] : 'natural') || 'natural').toLowerCase();
+    const tipoPersona = (cleanReminder(row.tipopersona ?? 'natural') || 'natural').toLowerCase();
     const isJ = (tipoPersona === 'juridica');
+
+    const rolPrincipalId = cleanReminder(row.rolprincipalid ?? '') || '';
+    const isCir = isCirujanoByRolPrincipalId(rolPrincipalId);
+
+    const tieneBonoRaw = cleanReminder(row.tienebono ?? '');
 
     const payload = {
       tipoPersona,
-      estado: (cleanReminder(I.estado>=0 ? row[I.estado] : 'activo') || 'activo').toLowerCase(),
-    
+      estado: (cleanReminder(row.estado ?? 'activo') || 'activo').toLowerCase(),
+
       rut,
       rutId,
-    
+
       nombreProfesional,
-      razonSocial: isJ ? (cleanReminder(I.razonSocial>=0 ? row[I.razonSocial] : '') || null) : null,
-      rutEmpresa: isJ ? (cleanReminder(I.rutEmpresa>=0 ? row[I.rutEmpresa] : '') || null) : null,
-    
-      correoPersonal: (cleanReminder(I.correoPersonal>=0 ? row[I.correoPersonal] : '') || null),
-      correoEmpresa: isJ ? (cleanReminder(I.correoEmpresa>=0 ? row[I.correoEmpresa] : '') || null) : null,
-    
-      telefono: (cleanReminder(I.telefono>=0 ? row[I.telefono] : '') || null),
-      telefonoEmpresa: isJ ? (cleanReminder(I.telefonoEmpresa>=0 ? row[I.telefonoEmpresa] : '') || null) : null,
-    
-      rolPrincipalId: (cleanReminder(I.rolPrincipalId>=0 ? row[I.rolPrincipalId] : '') || null),
+
+      razonSocial: isJ ? (cleanReminder(row.razonsocial ?? '') || null) : null,
+      rutEmpresa: isJ ? (cleanReminder(row.rutempresa ?? '') || null) : null,
+
+      correoPersonal: cleanReminder(row.correopersonal ?? '') || null,
+      correoEmpresa: isJ ? (cleanReminder(row.correoempresa ?? '') || null) : null,
+
+      telefono: cleanReminder(row.telefono ?? '') || null,
+      telefonoEmpresa: isJ ? (cleanReminder(row.telefonoempresa ?? '') || null) : null,
+
+      rolPrincipalId: rolPrincipalId || null,
+
       rolesSecundariosIds: uniq(
-        (cleanReminder(I.rolesSecundariosIds>=0 ? row[I.rolesSecundariosIds] : '') || '')
-          .split('|').map(x=>cleanReminder(x)).filter(Boolean)
+        (cleanReminder(row.rolessecundariosids ?? '') || '')
+          .split('|')
+          .map(x => cleanReminder(x))
+          .filter(Boolean)
       ),
-    
-      tieneDescuento: String(cleanReminder(I.tieneDescuento>=0 ? row[I.tieneDescuento] : 'false') || 'false').toLowerCase() === 'true',
-      descuentoUF: Number(cleanReminder(I.descuentoUF>=0 ? row[I.descuentoUF] : '0') || 0) || 0,
-      descuentoRazon: (cleanReminder(I.descuentoRazon>=0 ? row[I.descuentoRazon] : '') || null),
-    
-      // ✅ BONO: solo cirujano (default true si viene vacío)
+
+      tieneDescuento: boolFromCell(row.tienedescuento, false),
+      descuentoUF: Number(row.descuentouf ?? 0) || 0,
+      descuentoRazon: cleanReminder(row.descuentorazon ?? '') || null,
+
+      // bono: solo si es cirujano; si viene vacío y es cirujano => true
       tieneBono: (() => {
-        const rolPri = cleanReminder(I.rolPrincipalId>=0 ? row[I.rolPrincipalId] : '') || '';
-        const isCir = isCirujanoByRolPrincipalId(rolPri);
-    
-        const tieneBonoCsv = String(cleanReminder(I.tieneBono>=0 ? row[I.tieneBono] : '') || '').toLowerCase();
-    
         if(!isCir) return false;
-        if(!tieneBonoCsv) return true;          // vacío + cirujano => default true
-        return (tieneBonoCsv === 'true');       // si viene algo, respeta true/false
+        if(!tieneBonoRaw) return true;
+        return boolFromCell(tieneBonoRaw, true);
       })(),
-    
-      // ✅ Si NO es cirujano, limpiamos override
-      bonosTramosOverride: (() => {
-        const rolPri = cleanReminder(I.rolPrincipalId>=0 ? row[I.rolPrincipalId] : '') || '';
-        const isCir = isCirujanoByRolPrincipalId(rolPri);
-        return isCir ? undefined : [];
-      })(),
-    
+
       actualizadoEl: serverTimestamp(),
       actualizadoPor: state.user?.email || ''
     };
-    
-    // ⚠️ Limpieza: si bonosTramosOverride quedó undefined, lo removemos del payload
-    if(payload.bonosTramosOverride === undefined) delete payload.bonosTramosOverride;
 
-    await setDoc(doc(db,'profesionales',rutId), payload, { merge:true });
+    // Si NO es cirujano, limpia override
+    if(!isCir){
+      payload.bonosTramosOverride = [];
+    }
+
+    await setDoc(doc(db, 'profesionales', rutId), payload, { merge:true });
     upserts++;
   }
 
@@ -1225,21 +1267,21 @@ requireAuth({
       paint();
     });
 
-    // CSV
-    $('btnExportar').addEventListener('click', exportCSV);
-    $('btnDescargarPlantilla').addEventListener('click', plantillaCSV);
+    // XLSX
+    $('btnExportar').addEventListener('click', exportXLSX);
+    $('btnDescargarPlantilla').addEventListener('click', plantillaXLSX);
 
-    // ✅ Importar (botón real)
+    // ✅ Importar XLSX
     const btnImp = $('btnImportar');
     if(btnImp){
-      btnImp.addEventListener('click', ()=> $('fileCSV').click());
+      btnImp.addEventListener('click', ()=> $('fileXLSX').click());
     }
 
-    $('fileCSV').addEventListener('change', async (e)=>{
+    $('fileXLSX').addEventListener('change', async (e)=>{
       const file = e.target.files?.[0];
       e.target.value = '';
       if(!file) return;
-      await importCSV(file);
+      await importXLSX(file);
     });
 
     // Load
