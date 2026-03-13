@@ -47,7 +47,8 @@ let manualOverrides = {}
 let uiState = {
   q: "",
   page: 0,
-  pageSize: 60
+  pageSize: 60,
+  mostrarNoAplica: false
 }
 
 /* ======================
@@ -585,10 +586,12 @@ function abrirDetalle(reg) {
     return `<option value="${p.id}" ${selected}>${escapeHtml(nombre)}</option>`
   }).join("")
 
-  const opcionesProcedimientos = procedimientos.map(p => {
+  const procedimientosAmb = procedimientosAmbulatorios()
+
+  const opcionesProcedimientos = procedimientosAmb.map(p => {
     const nombre = nombreProcedimientoCatalogo(p)
     const selected = reg.resolved?.procedimientoId === p.id ? "selected" : ""
-    return `<option value="${p.id}" ${selected}>${escapeHtml(nombre)}</option>`
+    return `<option value="${p.id}" ${selected}>${escapeHtml(p.id)} · ${escapeHtml(nombre)}</option>`
   }).join("")
 
   itemSub.textContent = `${reg.origen || ""} · ${reg.fecha || ""} · ${reg.rut || ""}`
@@ -623,9 +626,18 @@ function abrirDetalle(reg) {
         </div>
 
         <div class="field" style="margin-top:10px;">
-          <label>Asociar procedimiento</label>
+          <label>Asociar procedimiento ambulatorio</label>
+
+          <input
+            type="text"
+            id="detalleProcedimientoBuscar"
+            placeholder="Escribe código o nombre... ej: PA0022 o nutrición"
+            value=""
+            style="margin-bottom:8px;"
+          >
+
           <select id="detalleProcedimientoId">
-            <option value="">(Selecciona procedimiento)</option>
+            <option value="">(Selecciona procedimiento ambulatorio)</option>
             ${opcionesProcedimientos}
           </select>
         </div>
@@ -648,6 +660,44 @@ function abrirDetalle(reg) {
   if ($("btnMoreInfo")) {
     $("btnMoreInfo").onclick = () => abrirMasInformacion(reg)
   }
+
+  const inputBuscarProc = $("detalleProcedimientoBuscar")
+  const selectProc = $("detalleProcedimientoId")
+
+  function renderOpcionesProcedimientoFiltradas() {
+    if (!selectProc) return
+
+    const q = normalizarTexto(inputBuscarProc?.value || "")
+    const lista = procedimientosAmbulatorios().filter(p => {
+      if (!q) return true
+
+      const texto = normalizarTexto([
+        p?.id || "",
+        nombreProcedimientoCatalogo(p),
+        p?.nombre || "",
+        p?.tratamiento || "",
+        p?.descripcion || ""
+      ].join(" | "))
+
+      return texto.includes(q)
+    })
+
+    const actual = reg.resolved?.procedimientoId || manualOverrides?.[reg.itemId]?.procedimientoId || ""
+
+    selectProc.innerHTML = `
+      <option value="">(Selecciona procedimiento ambulatorio)</option>
+      ${lista.map(p => {
+        const selected = actual === p.id ? "selected" : ""
+        return `<option value="${p.id}" ${selected}>${escapeHtml(p.id)} · ${escapeHtml(nombreProcedimientoCatalogo(p))}</option>`
+      }).join("")}
+    `
+  }
+
+  if (inputBuscarProc) {
+    inputBuscarProc.addEventListener("input", renderOpcionesProcedimientoFiltradas)
+  }
+
+  renderOpcionesProcedimientoFiltradas()
 }
 
 function abrirMasInformacion(reg) {
@@ -846,9 +896,72 @@ function itemSearchText(it) {
 }
 
 function filteredItems() {
-  const q = normalizarTexto(uiState.q)
-  if (!q) return consolidado
-  return consolidado.filter(it => itemSearchText(it).includes(q))
+  let items = [...consolidado]
+
+  // Vista principal:
+  // - por defecto ocultar no_aplica
+  // - al activar el toggle, mostrar SOLO no_aplica
+  if (uiState.mostrarNoAplica) {
+    items = items.filter(it => it.aplicacion?.estado === "no_aplica")
+  } else {
+    items = items.filter(it => it.aplicacion?.estado !== "no_aplica")
+  }
+
+  // Buscador principal:
+  // coma (,) = AND
+  // punto (.) = OR
+  if (!clean(uiState.q)) return items
+
+  return items.filter(it => {
+    const text = itemSearchText(it)
+    return matchBusquedaPrincipal(text, uiState.q)
+  })
+}
+
+function esProcedimientoAmbulatorio(p) {
+  const tipo = normalizarTexto(p?.tipo || "")
+  const id = normalizarTexto(p?.id || "")
+  return tipo === "AMBULATORIO" || /^PA\d+$/.test(id)
+}
+
+function procedimientosAmbulatorios() {
+  return procedimientos
+    .filter(esProcedimientoAmbulatorio)
+    .sort((a, b) => {
+      const aId = normalizarTexto(a?.id || "")
+      const bId = normalizarTexto(b?.id || "")
+      return aId.localeCompare(bId, 'es', { numeric: true, sensitivity: 'base' })
+    })
+}
+
+function matchBusquedaPrincipal(searchText, rawQuery) {
+  const q = normalizarTexto(rawQuery)
+  if (!q) return true
+
+  // LÓGICA:
+  // punto (.) = OR entre grupos
+  // coma (,)  = AND dentro de cada grupo
+  //
+  // Ej: juan,laser.botox
+  // => (juan Y laser) O (botox)
+
+  const gruposOr = q
+    .split(".")
+    .map(g => g.trim())
+    .filter(Boolean)
+
+  if (!gruposOr.length) return true
+
+  return gruposOr.some(grupo => {
+    const terminosAnd = grupo
+      .split(",")
+      .map(t => t.trim())
+      .filter(Boolean)
+
+    if (!terminosAnd.length) return false
+
+    return terminosAnd.every(term => searchText.includes(term))
+  })
 }
 
 /* ======================
@@ -932,7 +1045,7 @@ function render() {
   const reservoAplica = consolidado.filter(x => x.origen === "Reservo" && x.aplicacion?.estado === "aplica").length
   const mkAplica = consolidado.filter(x => x.origen === "MK" && x.aplicacion?.estado === "aplica").length
 
-  if ($("countPill")) $("countPill").textContent = `${consolidado.length} filas`
+  if ($("countPill")) $("countPill").textContent = `${items.length} filas`
   if ($("pillPendientes")) $("pillPendientes").textContent = `Pendientes: ${pendientes}`
   if ($("pillAlertas")) $("pillAlertas").textContent = `Alertas: ${alertas}`
   if ($("pillProf")) $("pillProf").textContent = `Profesionales: ${pendProf}`
@@ -942,13 +1055,22 @@ function render() {
   if ($("pillMKValidos")) $("pillMKValidos").textContent = `MK válidos: ${mkAplica}`
 
   if ($("pagerInfo")) {
-    $("pagerInfo").textContent = `${items.length} resultados · página ${uiState.page + 1} de ${totalPages}`
+    $("pagerInfo").textContent =
+      `${items.length} resultados · página ${uiState.page + 1} de ${totalPages}`
   }
 
   if ($("statusInfo")) {
+    const totalAmbulatorios = procedimientosAmbulatorios().length
+    const vista = uiState.mostrarNoAplica ? "Vista: NO APLICA" : "Vista: APLICABLES / REVISAR"
     $("statusInfo").textContent = consolidado.length
-      ? `Catálogos: ${profesionales.length} profesionales · ${procedimientos.length} procedimientos`
+      ? `${vista} · Catálogos: ${profesionales.length} profesionales · ${totalAmbulatorios} procedimientos ambulatorios`
       : "—"
+  }
+
+  if ($("btnToggleNoAplica")) {
+    $("btnToggleNoAplica").textContent = uiState.mostrarNoAplica
+      ? "Ver aplicables"
+      : "Ver no aplica"
   }
 
   if ($("btnResolver")) $("btnResolver").disabled = consolidado.length === 0
@@ -1040,6 +1162,14 @@ if ($("btnNext")) {
   $("btnNext").onclick = () => {
     const totalPages = Math.max(1, Math.ceil(filteredItems().length / uiState.pageSize))
     uiState.page = Math.min(totalPages - 1, uiState.page + 1)
+    render()
+  }
+}
+
+if ($("btnToggleNoAplica")) {
+  $("btnToggleNoAplica").onclick = () => {
+    uiState.mostrarNoAplica = !uiState.mostrarNoAplica
+    uiState.page = 0
     render()
   }
 }
