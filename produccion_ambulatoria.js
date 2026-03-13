@@ -281,6 +281,13 @@ function finalItemId(it) {
   return `${fecha}_${clean(it.itemId || nowId())}`;
 }
 
+function esItemConfirmable(it) {
+  return (
+    it?.aplicacion?.estado === "aplica" &&
+    it?.review?.estadoRevision === "ok"
+  );
+}
+
 function buildOriginalCsvForItem(reg) {
   return {
     fecha: reg.fecha || "",
@@ -1188,13 +1195,14 @@ function renderResolver() {
 
   if (!resumen || !listResumen || !listProf || !listProc || !listAlert) return;
 
-  const pendientes = consolidado.filter(x => x.review?.estadoRevision === "pendiente");
-  const pendProf = consolidado.filter(x => x.review?.pendientes?.profesional);
-  const pendProc = consolidado.filter(x => x.review?.pendientes?.procedimiento);
-  const conAlerta = consolidado.filter(x => (x.review?.alertas || []).length > 0);
-  const revisarApp = consolidado.filter(x => x.aplicacion?.estado === "revisar");
-  const aplica = consolidado.filter(x => x.aplicacion?.estado === "aplica");
-  const noAplica = consolidado.filter(x => x.aplicacion?.estado === "no_aplica");
+  const pendientes = consolidado.filter(x => x.review?.estadoRevision === "pendiente").length;
+  const alertas = consolidado.filter(x => (x.review?.alertas || []).length > 0).length;
+  const ok = consolidado.filter(x => x.review?.estadoRevision === "ok").length;
+  const noAplica = consolidado.filter(x => x.aplicacion?.estado === "no_aplica").length;
+  const pendProf = consolidado.filter(x => x.review?.pendientes?.profesional).length;
+  const reservoAplica = consolidado.filter(x => x.origen === "Reservo" && x.aplicacion?.estado === "aplica").length;
+  const mkAplica = consolidado.filter(x => x.origen === "MK" && x.aplicacion?.estado === "aplica").length;
+  const confirmables = consolidado.filter(esItemConfirmable).length;
 
   const resumenItems = getResolverItemsByFiltro();
 
@@ -1414,10 +1422,11 @@ function render() {
   if ($("pillPendientes")) $("pillPendientes").textContent = `Pendientes: ${pendientes}`;
   if ($("pillAlertas")) $("pillAlertas").textContent = `Alertas: ${alertas}`;
   if ($("pillProf")) $("pillProf").textContent = `Profesionales: ${pendProf}`;
-  if ($("pillCoincidencias")) $("pillCoincidencias").textContent = `OK: ${ok}`;
+  if ($("pillCoincidencias")) $("pillCoincidencias").textContent = `OK: ${ok} · Confirmables: ${confirmables}`;
   if ($("pillFusionados")) $("pillFusionados").textContent = `No aplica: ${noAplica}`;
   if ($("pillReservoValidos")) $("pillReservoValidos").textContent = `Reservo válidos: ${reservoAplica}`;
   if ($("pillMKValidos")) $("pillMKValidos").textContent = `MK válidos: ${mkAplica}`;
+  if ($("pillCoincidencias")) $("pillCoincidencias").textContent = `OK: ${ok} · Confirmables: ${confirmables}`;
 
   if ($("pagerInfo")) {
     $("pagerInfo").textContent =
@@ -1429,8 +1438,10 @@ function render() {
     const vista = uiState.mostrarNoAplica ? "Vista: NO APLICA" : "Vista: APLICABLES / REVISAR";
     const est = stateImport.status ? ` · Estado import: ${stateImport.status}` : "";
     const imp = stateImport.importId ? ` · ImportID: ${stateImport.importId}` : "";
+    const confirmables = consolidado.filter(esItemConfirmable).length;
+  
     $("statusInfo").textContent = consolidado.length
-      ? `${vista}${est}${imp} · Catálogos: ${profesionales.length} profesionales · ${totalAmbulatorios} procedimientos ambulatorios`
+      ? `${vista}${est}${imp} · Confirmables: ${confirmables} · Catálogos: ${profesionales.length} profesionales · ${totalAmbulatorios} procedimientos ambulatorios`
       : "—";
   }
 
@@ -1441,7 +1452,10 @@ function render() {
   }
 
   if ($("btnResolver")) $("btnResolver").disabled = consolidado.length === 0;
-  if ($("btnConfirmar")) $("btnConfirmar").disabled = !(stateImport.status === "staged" && consolidado.length > 0);
+  if ($("btnConfirmar")) {
+    const totalConfirmables = consolidado.filter(esItemConfirmable).length;
+    $("btnConfirmar").disabled = !(stateImport.status === "staged" && totalConfirmables > 0);
+  }
   if ($("btnAnular")) $("btnAnular").disabled = !(stateImport.importId && (stateImport.status === "staged" || stateImport.status === "confirmada"));
 
   renderPagerTabs(totalPages);
@@ -1820,12 +1834,36 @@ async function confirmarImportacion() {
     return;
   }
 
-  const totalPend =
-    consolidado.filter(x => x.review?.estadoRevision === "pendiente").length;
-
-  if (totalPend > 0) {
-    toast(`Confirmando con ${totalPend} pendientes.`);
+  // ✅ Recalcular antes de confirmar para asegurar que todo esté actualizado
+  for (const reg of consolidado) {
+    aplicarManualOverrides([reg]);
+    recomputeItemFromCurrentValues(reg);
   }
+
+  const itemsConfirmables = consolidado.filter(esItemConfirmable);
+  const itemsNoConfirmados = consolidado.filter(x => !esItemConfirmable(x));
+
+  if (!itemsConfirmables.length) {
+    toast("No hay ítems válidos para confirmar. Solo se confirman los que están en 'aplica' y revisión 'ok'.");
+    return;
+  }
+
+  const totalPend = consolidado.filter(x => x.review?.estadoRevision === "pendiente").length;
+  const totalRevisar = consolidado.filter(x => x.aplicacion?.estado === "revisar").length;
+  const totalNoAplica = consolidado.filter(x => x.aplicacion?.estado === "no_aplica").length;
+
+  const ok = confirm(
+    `Se confirmarán ${itemsConfirmables.length} ítems.\n` +
+    `\n` +
+    `No se confirmarán ${itemsNoConfirmados.length} ítems.\n` +
+    `- Pendientes revisión: ${totalPend}\n` +
+    `- En revisar: ${totalRevisar}\n` +
+    `- No aplica: ${totalNoAplica}\n` +
+    `\n` +
+    `¿Continuar?`
+  );
+
+  if (!ok) return;
 
   const YYYY = String(stateImport.year);
   const MM = pad(stateImport.monthNum, 2);
@@ -1853,13 +1891,11 @@ async function confirmarImportacion() {
   const batchSize = 300;
   let i = 0;
 
-  while (i < consolidado.length) {
+  while (i < itemsConfirmables.length) {
     const batch = writeBatch(db);
-    const slice = consolidado.slice(i, i + batchSize);
+    const slice = itemsConfirmables.slice(i, i + batchSize);
 
     for (const reg of slice) {
-      recomputeItemFromCurrentValues(reg);
-
       const rutKey = normalizarRutKey(reg.rut || "");
       const pacienteId = rutKey || `SINRUT_${stateImport.importId}`;
       const itemDocId = finalItemId(reg);
@@ -1904,14 +1940,23 @@ async function confirmarImportacion() {
     confirmadoEl: serverTimestamp(),
     confirmadoPor: stateImport.user?.email || "",
     confirmadoEn: `produccion_ambulatoria/${YYYY}/meses/${MM}/pacientes/{RUT}/items/{itemId}`,
+    totalItems: consolidado.length,
+    totalConfirmados: itemsConfirmables.length,
+    totalNoConfirmados: itemsNoConfirmados.length,
     actualizadoEl: serverTimestamp(),
     actualizadoPor: stateImport.user?.email || ""
   }, { merge: true });
 
   stateImport.status = "confirmada";
-  setStatus(`✅ Confirmada: ${stateImport.importId} → produccion_ambulatoria/${YYYY}/meses/${MM}/pacientes/{RUT}/items`);
+
+  setStatus(
+    `✅ Confirmada: ${stateImport.importId} · ` +
+    `${itemsConfirmables.length} items en producción final · ` +
+    `${itemsNoConfirmados.length} quedaron fuera`
+  );
+
   render();
-  toast("Importación confirmada");
+  toast(`Importación confirmada: ${itemsConfirmables.length} items guardados`);
 }
 
 /* ======================
