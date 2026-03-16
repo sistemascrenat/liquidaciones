@@ -551,36 +551,42 @@ async function loadProduccionMes(){
     colItemsGroup,
     where('ano','==', Number(state.ano)),
     where('mesNum','==', Number(state.mesNum)),
-    where('confirmado','==', true)
+    where('confirmadoEnProduccion','==', true),
+    where('estadoRegistro','==', 'activo')
   );
-
+  
   const snap = await getDocs(qy);
   const out = [];
-
+  
   snap.forEach(d=>{
     const x = d.data() || {};
-    if(isEstadoAnulada(x.estado)) return;
-
+  
+    // ✅ Seguridad extra:
+    // aunque la query ya trae solo activos, dejamos este filtro por si
+    // existen documentos antiguos o inconsistentes.
+    if (normalize(x.estadoRegistro) !== 'activo') return;
+    if (x.confirmadoEnProduccion !== true) return;
+  
     const raw = getRawContainer(x);
     const procCandidate = resolveProcedimientoCandidate(x, raw);
-
+  
     const procDoc =
       (procCandidate.paCode && state.procedimientosByCodigo.get(procCandidate.paCode)) ||
       (procCandidate.rawId && state.procedimientosById.get(String(procCandidate.rawId).trim())) ||
       (procCandidate.rawName && state.procedimientosByName.get(normalize(procCandidate.rawName))) ||
       null;
-
+  
     if(!isLikelyAmbulatorioItem(x, procDoc)) return;
-
+  
     const appEstado = normalize(
       x?.aplicacion?.estado ||
       x?.estadoAplicacion ||
       ''
     );
-
-    // Si viene marcado explícitamente como no_aplica, no entra a liquidación
+  
+    // ✅ Si viene marcado explícitamente como no_aplica, no entra a liquidación
     if(appEstado === 'no_aplica') return;
-
+  
     out.push({
       id: d.id,
       data: x,
