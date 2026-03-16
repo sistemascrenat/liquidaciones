@@ -1,11 +1,13 @@
 // produccion_ambulatoria.js — COMPLETO
-// ✅ Mantiene toda la lógica actual de carga / revisión / resolver / edición
-// ✅ Agrega staging en Firestore
-// ✅ Agrega confirmación a base final
-// ✅ Agrega carga de import existente
-// ✅ Agrega anulación
+// ✅ Mantiene carga / revisión / resolver / edición
+// ✅ Staging en Firestore
+// ✅ Confirmación parcial y acumulativa a base final
+// ✅ Carga de import existente
+// ✅ Anulación
 // ✅ Si editas en STAGED guarda en produccion_ambulatoria_imports/{importId}/items/{itemId}
-// ✅ Si editas en CONFIRMADA guarda en produccion_ambulatoria/{YYYY}/meses/{MM}/pacientes/{RUT}/items/{finalItemId}
+// ✅ Si editas en CONFIRMADA:
+//    - si el item YA estaba confirmado => reescribe también producción final
+//    - si el item AÚN NO estaba confirmado => guarda solo en el import, hasta que vuelvas a confirmar
 
 import { db } from './firebase-init.js';
 import { requireAuth } from './auth.js';
@@ -19,7 +21,6 @@ import {
   getDoc,
   getDocs,
   setDoc,
-  updateDoc,
   writeBatch,
   serverTimestamp,
   query,
@@ -580,7 +581,13 @@ function procesarReservo() {
         profesionalId: resolved.profesionalId,
         procedimientoId: resolved.procedimientoId,
         alertas
-      })
+      }),
+
+      confirmadoEnProduccion: false,
+      confirmadoEl: null,
+      confirmadoPor: null,
+      finalItemId: null,
+      pacienteId: null
     };
   });
 }
@@ -647,7 +654,13 @@ function procesarMK() {
         profesionalId: resolved.profesionalId,
         procedimientoId: resolved.procedimientoId,
         alertas
-      })
+      }),
+
+      confirmadoEnProduccion: false,
+      confirmadoEl: null,
+      confirmadoPor: null,
+      finalItemId: null,
+      pacienteId: null
     };
   });
 
@@ -798,6 +811,7 @@ function abrirDetalle(reg) {
           <div class="k">Aplicación</div><div class="v">${escapeHtml(reg.aplicacion?.estado || "—")}</div>
           <div class="k">Motivo</div><div class="v">${escapeHtml(reg.aplicacion?.motivo || "—")}</div>
           <div class="k">Alertas</div><div class="v">${escapeHtml((reg.review?.alertas || []).join(" · ") || "—")}</div>
+          <div class="k">Confirmado final</div><div class="v">${reg.confirmadoEnProduccion ? "Sí" : "No"}</div>
         </div>
 
         <div style="height:12px;"></div>
@@ -1008,42 +1022,51 @@ async function persistirItemEditado(reg) {
   }
 
   if (stateImport.status === "confirmada") {
-    const YYYY = String(stateImport.year);
-    const MM = pad(stateImport.monthNum, 2);
-    const rutKey = normalizarRutKey(reg.rut || "");
-    const pacienteId = rutKey || `SINRUT_${stateImport.importId}`;
-    const itemDocId = finalItemId(reg);
-
-    const refPaciente = doc(db, "produccion_ambulatoria", YYYY, "meses", MM, "pacientes", pacienteId);
-    const refItem = doc(db, "produccion_ambulatoria", YYYY, "meses", MM, "pacientes", pacienteId, "items", itemDocId);
-
-    await setDoc(refPaciente, {
-      rut: reg.rut || null,
-      rutNorm: reg.rutNorm || null,
-      paciente: reg.paciente || null,
-      pacienteNorm: reg.pacienteNorm || null,
-      actualizadoEl: serverTimestamp(),
-      actualizadoPor: stateImport.user?.email || ""
-    }, { merge: true });
-
-    await setDoc(refItem, {
-      ...serializeAmbItem(reg),
-      finalItemId: itemDocId,
-      pacienteId,
-      estadoRegistro: "activo",
-      actualizadoEl: serverTimestamp(),
-      actualizadoPor: stateImport.user?.email || ""
-    }, { merge: true });
-
-    // espejo al staging para no perder consistencia al recargar el import
     const refStaging = doc(db, "produccion_ambulatoria_imports", stateImport.importId, "items", reg.itemId);
+
+    // ✅ Siempre guarda el item editado dentro del import
     await setDoc(refStaging, {
       ...serializeAmbItem(reg),
       actualizadoEl: serverTimestamp(),
       actualizadoPor: stateImport.user?.email || ""
     }, { merge: true });
 
-    toast("Item guardado en producción ambulatoria confirmada");
+    // ✅ Solo si YA estaba confirmado, reescribe también producción final
+    if (reg.confirmadoEnProduccion === true) {
+      const YYYY = String(stateImport.year);
+      const MM = pad(stateImport.monthNum, 2);
+      const rutKey = normalizarRutKey(reg.rut || "");
+      const pacienteId = rutKey || `SINRUT_${stateImport.importId}`;
+      const itemDocId = reg.finalItemId || finalItemId(reg);
+
+      reg.finalItemId = itemDocId;
+      reg.pacienteId = pacienteId;
+
+      const refPaciente = doc(db, "produccion_ambulatoria", YYYY, "meses", MM, "pacientes", pacienteId);
+      const refItem = doc(db, "produccion_ambulatoria", YYYY, "meses", MM, "pacientes", pacienteId, "items", itemDocId);
+
+      await setDoc(refPaciente, {
+        rut: reg.rut || null,
+        rutNorm: reg.rutNorm || null,
+        paciente: reg.paciente || null,
+        pacienteNorm: reg.pacienteNorm || null,
+        actualizadoEl: serverTimestamp(),
+        actualizadoPor: stateImport.user?.email || ""
+      }, { merge: true });
+
+      await setDoc(refItem, {
+        ...serializeAmbItem(reg),
+        finalItemId: itemDocId,
+        pacienteId,
+        estadoRegistro: "activo",
+        actualizadoEl: serverTimestamp(),
+        actualizadoPor: stateImport.user?.email || ""
+      }, { merge: true });
+
+      toast("Item confirmado actualizado en producción final");
+    } else {
+      toast("Item pendiente guardado en el import; aún no pasa a producción final");
+    }
   }
 }
 
@@ -1077,7 +1100,14 @@ function serializeAmbItem(reg) {
 
     resolved: reg.resolved || null,
     aplicacion: reg.aplicacion || null,
-    review: reg.review || null
+    review: reg.review || null,
+
+    // ✅ NUEVO: confirmación acumulada
+    confirmadoEnProduccion: !!reg.confirmadoEnProduccion,
+    confirmadoEl: reg.confirmadoEl || null,
+    confirmadoPor: reg.confirmadoPor || null,
+    finalItemId: reg.finalItemId || null,
+    pacienteId: reg.pacienteId || null
   };
 }
 
@@ -1098,6 +1128,7 @@ function rowMiniHTML(it, extra = "") {
         <div><b>Revisión:</b> ${escapeHtml(it.review?.estadoRevision || "pendiente")}</div>
         <div><b>Aplicación:</b> ${escapeHtml(it.aplicacion?.estado || "—")}</div>
         <div><b>Motivo:</b> ${escapeHtml(it.aplicacion?.motivo || "—")}</div>
+        <div><b>Confirmado final:</b> ${it.confirmadoEnProduccion ? "Sí" : "No"}</div>
       </div>
       <div>
         <button class="btn small" type="button" data-edit-item="${escapeHtml(it.itemId)}">Editar</button>
@@ -1195,7 +1226,6 @@ function renderResolver() {
 
   if (!resumen || !listResumen || !listProf || !listProc || !listAlert) return;
 
-  // ✅ Aquí deben ser ARRAYS, no .length
   const pendientes = consolidado.filter(x => x.review?.estadoRevision === "pendiente");
   const pendProf = consolidado.filter(x => x.review?.pendientes?.profesional);
   const pendProc = consolidado.filter(x => x.review?.pendientes?.procedimiento);
@@ -1278,6 +1308,7 @@ function itemSearchText(it) {
     it.review?.estadoRevision,
     it.aplicacion?.estado,
     it.aplicacion?.motivo,
+    it.confirmadoEnProduccion ? "CONFIRMADO" : "PENDIENTE",
     ...(it.review?.alertas || [])
   ].map(x => normalizarTexto(x)).join(" | ");
 }
@@ -1417,13 +1448,16 @@ function render() {
   const pendProf = consolidado.filter(x => x.review?.pendientes?.profesional).length;
   const reservoAplica = consolidado.filter(x => x.origen === "Reservo" && x.aplicacion?.estado === "aplica").length;
   const mkAplica = consolidado.filter(x => x.origen === "MK" && x.aplicacion?.estado === "aplica").length;
-  const confirmables = consolidado.filter(esItemConfirmable).length;
-  
+  const confirmados = consolidado.filter(x => x.confirmadoEnProduccion).length;
+  const confirmables = consolidado.filter(it =>
+    esItemConfirmable(it) && !it.confirmadoEnProduccion
+  ).length;
+
   if ($("countPill")) $("countPill").textContent = `${items.length} filas`;
   if ($("pillPendientes")) $("pillPendientes").textContent = `Pendientes: ${pendientes}`;
   if ($("pillAlertas")) $("pillAlertas").textContent = `Alertas: ${alertas}`;
   if ($("pillProf")) $("pillProf").textContent = `Profesionales: ${pendProf}`;
-  if ($("pillCoincidencias")) $("pillCoincidencias").textContent = `OK: ${ok} · Confirmables: ${confirmables}`;
+  if ($("pillCoincidencias")) $("pillCoincidencias").textContent = `OK: ${ok} · Nuevos confirmables: ${confirmables}`;
   if ($("pillFusionados")) $("pillFusionados").textContent = `No aplica: ${noAplica}`;
   if ($("pillReservoValidos")) $("pillReservoValidos").textContent = `Reservo válidos: ${reservoAplica}`;
   if ($("pillMKValidos")) $("pillMKValidos").textContent = `MK válidos: ${mkAplica}`;
@@ -1438,10 +1472,9 @@ function render() {
     const vista = uiState.mostrarNoAplica ? "Vista: NO APLICA" : "Vista: APLICABLES / REVISAR";
     const est = stateImport.status ? ` · Estado import: ${stateImport.status}` : "";
     const imp = stateImport.importId ? ` · ImportID: ${stateImport.importId}` : "";
-    const confirmables = consolidado.filter(esItemConfirmable).length;
-  
+
     $("statusInfo").textContent = consolidado.length
-      ? `${vista}${est}${imp} · Confirmables: ${confirmables} · Catálogos: ${profesionales.length} profesionales · ${totalAmbulatorios} procedimientos ambulatorios`
+      ? `${vista}${est}${imp} · Confirmados: ${confirmados} · Nuevos confirmables: ${confirmables} · Catálogos: ${profesionales.length} profesionales · ${totalAmbulatorios} procedimientos ambulatorios`
       : "—";
   }
 
@@ -1452,16 +1485,21 @@ function render() {
   }
 
   if ($("btnResolver")) $("btnResolver").disabled = consolidado.length === 0;
+
   if ($("btnConfirmar")) {
-    const totalConfirmables = consolidado.filter(esItemConfirmable).length;
-    const canConfirm = (stateImport.status === "staged" && totalConfirmables > 0);
-  
+    const canConfirm =
+      (stateImport.status === "staged" || stateImport.status === "confirmada") &&
+      confirmables > 0;
+
     $("btnConfirmar").disabled = !canConfirm;
     $("btnConfirmar").title = canConfirm
-      ? `Listo para confirmar (${totalConfirmables} items)`
-      : `Bloqueado: estado=${stateImport.status || "—"} / confirmables=${totalConfirmables}`;
+      ? `Listo para confirmar (${confirmables} items nuevos)`
+      : `Bloqueado: estado=${stateImport.status || "—"} / nuevos confirmables=${confirmables}`;
   }
-  if ($("btnAnular")) $("btnAnular").disabled = !(stateImport.importId && (stateImport.status === "staged" || stateImport.status === "confirmada"));
+
+  if ($("btnAnular")) {
+    $("btnAnular").disabled = !(stateImport.importId && (stateImport.status === "staged" || stateImport.status === "confirmada"));
+  }
 
   renderPagerTabs(totalPages);
 }
@@ -1571,6 +1609,12 @@ async function saveStagingToFirestore() {
       const itemId = it.itemId || `${it.origen || "ITEM"}_${String(idx + k + 1).padStart(4, "0")}`;
       it.itemId = itemId;
 
+      if (typeof it.confirmadoEnProduccion === "undefined") it.confirmadoEnProduccion = false;
+      if (typeof it.confirmadoEl === "undefined") it.confirmadoEl = null;
+      if (typeof it.confirmadoPor === "undefined") it.confirmadoPor = null;
+      if (typeof it.finalItemId === "undefined") it.finalItemId = null;
+      if (typeof it.pacienteId === "undefined") it.pacienteId = null;
+
       batch.set(doc(itemsCol, itemId), {
         ...serializeAmbItem(it),
         idx: idx + k + 1,
@@ -1659,7 +1703,13 @@ async function loadStagingFromFirestore(importId) {
         confirmadoManualProcedimiento: false
       },
       aplicacion: x.aplicacion || null,
-      review: x.review || null
+      review: x.review || null,
+
+      confirmadoEnProduccion: x.confirmadoEnProduccion === true || x.estado === "confirmada",
+      confirmadoEl: x.confirmadoEl || null,
+      confirmadoPor: x.confirmadoPor || null,
+      finalItemId: x.finalItemId || null,
+      pacienteId: x.pacienteId || null
     });
   });
 
@@ -1835,8 +1885,8 @@ async function reemplazarMesAntesDeConfirmar(YYYY, MM, newImportId) {
 ====================== */
 
 async function confirmarImportacion() {
-  if (stateImport.status !== "staged") {
-    toast("No hay staging para confirmar");
+  if (!(stateImport.status === "staged" || stateImport.status === "confirmada")) {
+    toast("Este import no está disponible para confirmar");
     return;
   }
 
@@ -1845,28 +1895,31 @@ async function confirmarImportacion() {
     return;
   }
 
-  // ✅ Recalcular antes de confirmar para asegurar que todo esté actualizado
   for (const reg of consolidado) {
     aplicarManualOverrides([reg]);
     recomputeItemFromCurrentValues(reg);
   }
 
-  const itemsConfirmables = consolidado.filter(esItemConfirmable);
-  const itemsNoConfirmados = consolidado.filter(x => !esItemConfirmable(x));
+  const itemsConfirmables = consolidado.filter(it =>
+    esItemConfirmable(it) && !it.confirmadoEnProduccion
+  );
 
-  if (!itemsConfirmables.length) {
-    toast("No hay ítems válidos para confirmar. Solo se confirman los que están en 'aplica' y revisión 'ok'.");
-    return;
-  }
-
+  const totalConfirmadosActuales = consolidado.filter(it => it.confirmadoEnProduccion).length;
   const totalPend = consolidado.filter(x => x.review?.estadoRevision === "pendiente").length;
   const totalRevisar = consolidado.filter(x => x.aplicacion?.estado === "revisar").length;
   const totalNoAplica = consolidado.filter(x => x.aplicacion?.estado === "no_aplica").length;
+  const totalQuedanFuera = consolidado.length - (totalConfirmadosActuales + itemsConfirmables.length);
+
+  if (!itemsConfirmables.length) {
+    toast("No hay nuevos ítems válidos para pasar a producción final.");
+    return;
+  }
 
   const ok = confirm(
-    `Se confirmarán ${itemsConfirmables.length} ítems.\n` +
+    `Se pasarán ${itemsConfirmables.length} ítems nuevos a producción final.\n` +
     `\n` +
-    `No se confirmarán ${itemsNoConfirmados.length} ítems.\n` +
+    `Ya estaban confirmados: ${totalConfirmadosActuales}\n` +
+    `Quedarán todavía fuera: ${totalQuedanFuera}\n` +
     `- Pendientes revisión: ${totalPend}\n` +
     `- En revisar: ${totalRevisar}\n` +
     `- No aplica: ${totalNoAplica}\n` +
@@ -1879,9 +1932,11 @@ async function confirmarImportacion() {
   const YYYY = String(stateImport.year);
   const MM = pad(stateImport.monthNum, 2);
 
-  const replacedCount = await reemplazarMesAntesDeConfirmar(YYYY, MM, stateImport.importId);
-  if (replacedCount > 0) {
-    toast(`Mes ${YYYY}-${MM}: ${replacedCount} items previos marcados como reemplazados.`);
+  if (stateImport.status === "staged") {
+    const replacedCount = await reemplazarMesAntesDeConfirmar(YYYY, MM, stateImport.importId);
+    if (replacedCount > 0) {
+      toast(`Mes ${YYYY}-${MM}: ${replacedCount} items previos marcados como reemplazados.`);
+    }
   }
 
   await setDoc(doc(db, "produccion_ambulatoria", YYYY), {
@@ -1911,8 +1966,41 @@ async function confirmarImportacion() {
       const pacienteId = rutKey || `SINRUT_${stateImport.importId}`;
       const itemDocId = finalItemId(reg);
 
-      const refPaciente = doc(db, "produccion_ambulatoria", YYYY, "meses", MM, "pacientes", pacienteId);
-      const refItem = doc(db, "produccion_ambulatoria", YYYY, "meses", MM, "pacientes", pacienteId, "items", itemDocId);
+      reg.confirmadoEnProduccion = true;
+      reg.confirmadoEl = new Date().toISOString();
+      reg.confirmadoPor = stateImport.user?.email || "";
+      reg.finalItemId = itemDocId;
+      reg.pacienteId = pacienteId;
+
+      const refPaciente = doc(
+        db,
+        "produccion_ambulatoria",
+        YYYY,
+        "meses",
+        MM,
+        "pacientes",
+        pacienteId
+      );
+
+      const refItem = doc(
+        db,
+        "produccion_ambulatoria",
+        YYYY,
+        "meses",
+        MM,
+        "pacientes",
+        pacienteId,
+        "items",
+        itemDocId
+      );
+
+      const refStaging = doc(
+        db,
+        "produccion_ambulatoria_imports",
+        stateImport.importId,
+        "items",
+        reg.itemId
+      );
 
       batch.set(refPaciente, {
         rut: reg.rut || null,
@@ -1940,11 +2028,21 @@ async function confirmarImportacion() {
         actualizadoEl: serverTimestamp(),
         actualizadoPor: stateImport.user?.email || ""
       }, { merge: true });
+
+      batch.set(refStaging, {
+        ...serializeAmbItem(reg),
+        estado: "confirmada",
+        actualizadoEl: serverTimestamp(),
+        actualizadoPor: stateImport.user?.email || ""
+      }, { merge: true });
     }
 
     await batch.commit();
     i += batchSize;
   }
+
+  const totalConfirmadosAcumulados = consolidado.filter(x => x.confirmadoEnProduccion).length;
+  const totalPendientesAcumulados = consolidado.length - totalConfirmadosAcumulados;
 
   await setDoc(doc(db, "produccion_ambulatoria_imports", stateImport.importId), {
     estado: "confirmada",
@@ -1952,8 +2050,8 @@ async function confirmarImportacion() {
     confirmadoPor: stateImport.user?.email || "",
     confirmadoEn: `produccion_ambulatoria/${YYYY}/meses/${MM}/pacientes/{RUT}/items/{itemId}`,
     totalItems: consolidado.length,
-    totalConfirmados: itemsConfirmables.length,
-    totalNoConfirmados: itemsNoConfirmados.length,
+    totalConfirmados: totalConfirmadosAcumulados,
+    totalPendientes: totalPendientesAcumulados,
     actualizadoEl: serverTimestamp(),
     actualizadoPor: stateImport.user?.email || ""
   }, { merge: true });
@@ -1962,12 +2060,12 @@ async function confirmarImportacion() {
 
   setStatus(
     `✅ Confirmada: ${stateImport.importId} · ` +
-    `${itemsConfirmables.length} items en producción final · ` +
-    `${itemsNoConfirmados.length} quedaron fuera`
+    `${totalConfirmadosAcumulados} items ya están en producción final · ` +
+    `${totalPendientesAcumulados} siguen pendientes dentro del import`
   );
 
   render();
-  toast(`Importación confirmada: ${itemsConfirmables.length} items guardados`);
+  toast(`Confirmación ejecutada: ${itemsConfirmables.length} nuevos items pasaron a producción`);
 }
 
 /* ======================
@@ -2118,10 +2216,7 @@ if ($("modalResolverBackdrop")) {
 if ($("btnItemClose")) $("btnItemClose").onclick = cerrarDetalle;
 if ($("btnItemCancelar")) $("btnItemCancelar").onclick = cerrarDetalle;
 if ($("btnGuardarItem")) $("btnGuardarItem").onclick = guardarDetalle;
-
-if ($("btnGuardarTodo")) {
-  $("btnGuardarTodo").onclick = guardarDetalle;
-}
+if ($("btnGuardarTodo")) $("btnGuardarTodo").onclick = guardarDetalle;
 
 if ($("modalItemBackdrop")) {
   $("modalItemBackdrop").addEventListener("click", e => {
