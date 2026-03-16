@@ -289,6 +289,18 @@ function esItemConfirmable(it) {
   );
 }
 
+function badgeConfirmacionHTML(it) {
+  if (it?.confirmadoEnProduccion) {
+    return `<span class="ok">Confirmado</span>`;
+  }
+
+  if (esItemConfirmable(it)) {
+    return `<span class="chip" style="background:#fff7ed;color:#9a3412;border:1px solid #fdba74;">Listo para confirmar</span>`;
+  }
+
+  return `<span class="muted">Pendiente</span>`;
+}
+
 function buildOriginalCsvForItem(reg) {
   return {
     fecha: reg.fecha || "",
@@ -1117,9 +1129,14 @@ function serializeAmbItem(reg) {
 
 function rowMiniHTML(it, extra = "") {
   return `
-    <div class="miniRow">
+    <div class="miniRow" style="${it.confirmadoEnProduccion ? 'border-left:4px solid #16a34a; padding-left:10px;' : ''}">
       <div>
-        <div><b>${escapeHtml(it.origen)}</b> · ${escapeHtml(it.fecha || "")} · ${escapeHtml(it.rut || "")}</div>
+        <div>
+          <b>${escapeHtml(it.origen)}</b> · ${escapeHtml(it.fecha || "")} · ${escapeHtml(it.rut || "")}
+          ${it.confirmadoEnProduccion
+            ? `<span class="ok" style="margin-left:8px;">Confirmado final</span>`
+            : ``}
+        </div>
         <div class="muted tiny">${escapeHtml(it.paciente || "")}</div>
         <div class="tiny">Prof: ${escapeHtml(it.profesional || "")} · Proc: ${escapeHtml(it.prestacion || "")}</div>
         ${extra ? `<div class="tiny warn" style="margin-top:4px;">${escapeHtml(extra)}</div>` : ""}
@@ -1128,7 +1145,7 @@ function rowMiniHTML(it, extra = "") {
         <div><b>Revisión:</b> ${escapeHtml(it.review?.estadoRevision || "pendiente")}</div>
         <div><b>Aplicación:</b> ${escapeHtml(it.aplicacion?.estado || "—")}</div>
         <div><b>Motivo:</b> ${escapeHtml(it.aplicacion?.motivo || "—")}</div>
-        <div><b>Confirmado final:</b> ${it.confirmadoEnProduccion ? "Sí" : "No"}</div>
+        <div><b>Estado final:</b> ${it.confirmadoEnProduccion ? "Ya confirmado" : (esItemConfirmable(it) ? "Listo para confirmar" : "Pendiente")}</div>
       </div>
       <div>
         <button class="btn small" type="button" data-edit-item="${escapeHtml(it.itemId)}">Editar</button>
@@ -1415,6 +1432,8 @@ function render() {
     const estado = r.review?.estadoRevision || "pendiente";
     const alertasTexto = (r.review?.alertas || []).join(" · ");
 
+    const estadoFinalHtml = badgeConfirmacionHTML(r);
+    
     tr.innerHTML = `
       <td>${from + i + 1}</td>
       <td>${escapeHtml(r.origen || "")}</td>
@@ -1427,7 +1446,10 @@ function render() {
       <td>${estado === "ok" ? `<span class="ok">OK</span>` : `<span class="warn">Pendiente</span>`}</td>
       <td>${escapeHtml(r.aplicacion?.estado || "—")}</td>
       <td class="wrap">${escapeHtml(r.aplicacion?.motivo || "—")}</td>
-      <td class="wrap">${escapeHtml(alertasTexto || "—")}</td>
+      <td class="wrap">
+        ${escapeHtml(alertasTexto || "—")}
+        <div style="margin-top:6px;">${estadoFinalHtml}</div>
+      </td>
       <td>
         <button class="btnDetalle btn small" type="button">Editar</button>
       </td>
