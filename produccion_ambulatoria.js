@@ -1,13 +1,4 @@
 // produccion_ambulatoria.js — COMPLETO
-// ✅ Mantiene carga / revisión / resolver / edición
-// ✅ Staging en Firestore
-// ✅ Confirmación parcial y acumulativa a base final
-// ✅ Carga de import existente
-// ✅ Anulación
-// ✅ Si editas en STAGED guarda en produccion_ambulatoria_imports/{importId}/items/{itemId}
-// ✅ Si editas en CONFIRMADA:
-//    - si el item YA estaba confirmado => reescribe también producción final
-//    - si el item AÚN NO estaba confirmado => guarda solo en el import, hasta que vuelvas a confirmar
 
 import { db } from './firebase-init.js';
 import { requireAuth } from './auth.js';
@@ -399,7 +390,8 @@ function clasificarEstadoCitaReservo(v) {
   const t = normalizarTexto(v);
   if (!t) return "otro";
   if (t.includes("ATENDID")) return "atendido";
-  return "no_atendido";
+  if (t.includes("NO LLEGO")) return "no_llego";
+  return "otro";
 }
 
 function clasificarEstadoPagoReservo(v) {
@@ -407,6 +399,7 @@ function clasificarEstadoPagoReservo(v) {
   if (!t) return "otro";
   if (t.includes("NO PAG")) return "no_pagado";
   if (t.includes("PAGAD")) return "pagado";
+  if (t.includes("DESCARTAD")) return "descartado";
   return "otro";
 }
 
@@ -416,6 +409,7 @@ function evaluarAplicacionReservo(raw) {
 
   const alertas = [];
 
+  // ✅ Casos que SÍ aplican
   if (estadoCita === "atendido" && estadoPago === "pagado") {
     return {
       aplicacion: construirAplicacion("aplica", "Atendido y pagado"),
@@ -423,23 +417,46 @@ function evaluarAplicacionReservo(raw) {
     };
   }
 
-  if (estadoCita === "atendido" && estadoPago !== "pagado") {
+  if (estadoCita === "no_llego" && estadoPago === "pagado") {
+    return {
+      aplicacion: construirAplicacion("aplica", "No llegó y pagado"),
+      alertas
+    };
+  }
+
+  if (estadoCita === "atendido" && estadoPago === "descartado") {
+    return {
+      aplicacion: construirAplicacion("aplica", "Atendido y descartado"),
+      alertas
+    };
+  }
+
+  // Casos para revisar
+  if (estadoCita === "no_llego" && estadoPago === "descartado") {
+    alertas.push("Revisar: no llegó y descartado");
+    return {
+      aplicacion: construirAplicacion("revisar", "No llegó y descartado"),
+      alertas
+    };
+  }
+
+  if (estadoCita === "otro" && (estadoPago === "pagado" || estadoPago === "descartado")) {
+    alertas.push("Inconsistencia: pago/descartado sin estado cita reconocido");
+    return {
+      aplicacion: construirAplicacion("revisar", "Pago/descartado sin estado cita reconocido"),
+      alertas
+    };
+  }
+
+  if (estadoCita === "atendido" && estadoPago === "no_pagado") {
     return {
       aplicacion: construirAplicacion("no_aplica", "Atendido sin pago"),
       alertas
     };
   }
 
-  if (estadoCita !== "atendido" && estadoPago === "pagado") {
-    alertas.push("Inconsistencia: pagado sin atendido");
-    return {
-      aplicacion: construirAplicacion("revisar", "Pagado sin atendido"),
-      alertas
-    };
-  }
-
   return {
-    aplicacion: construirAplicacion("no_aplica", "No atendido y sin pago"),
+    aplicacion: construirAplicacion("no_aplica", "Combinación no válida para liquidar"),
     alertas
   };
 }
