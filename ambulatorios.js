@@ -289,6 +289,22 @@ function tarifaChip(p){
   `;
 }
 
+function getNextPACode(){
+  let maxNum = 0;
+
+  for(const p of (state.all || [])){
+    const raw = String(p?.codigo || p?.id || '').toUpperCase().trim();
+    const m = raw.match(/^PA(\d{4})$/);
+    if(!m) continue;
+
+    const num = Number(m[1]) || 0;
+    if(num > maxNum) maxNum = num;
+  }
+
+  const next = maxNum + 1;
+  return `PA${String(next).padStart(4, '0')}`;
+}
+
 /* =========================
    Paint table
 ========================= */
@@ -417,7 +433,7 @@ function openProcModal(mode, p=null){
     $('modalProcTitle').textContent = 'Crear procedimiento ambulatorio';
     $('modalProcSub').textContent = 'Define archivo, categoría, tratamiento y tarifa.';
     $('procCodigo').disabled = false;
-    $('procCodigo').value = '';
+    $('procCodigo').value = getNextPACode();
     $('procArchivo').value = '';
     $('procCategoria').value = '';
     $('procTratamiento').value = '';
