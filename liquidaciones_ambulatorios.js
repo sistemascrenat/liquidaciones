@@ -1876,8 +1876,19 @@ async function generarPDFLiquidacionProfesional(agg){
   const infoText = `Por favor enviar boleta o factura por el monto total al correo:\ncontabilidad@clinicarennt.cl`;
   const linesTxt = String(infoText).split('\n');
   let yTxt = y;
+  
   for(const t of linesTxt){
-    drawCellTextCenter(page1, t, tableX, yTxt, 14, 7.8, true, RENNAT_BLUE);
+    drawCellTextCenter(
+      page1,
+      t,
+      tableX,
+      yTxt,
+      tableW,     // ancho del bloque
+      14,         // alto de línea/celda
+      7.8,        // tamaño fuente
+      true,       // bold
+      RENNAT_BLUE // color
+    );
     yTxt -= 11;
   }
 
