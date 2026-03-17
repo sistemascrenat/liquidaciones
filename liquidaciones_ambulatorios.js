@@ -1,16 +1,13 @@
 // liquidaciones_ambulatorios.js — COMPLETO
-// ✅ Visualmente coherente con liquidaciones.js
-// ✅ Lógica adaptada a procedimientos ambulatorios (PAxxxx)
-// ✅ Lee producción confirmada del mes desde collectionGroup('items')
-// ✅ Cruza con:
-//    - profesionales
-//    - procedimientos tipo="ambulatorio"
-// ✅ Cálculo por ítem:
-//    - valorBase
-//    - pagoProfesional
-//    - utilidad
-// ✅ Export CSV resumen / detalle / profesional
-// ✅ PDF con look similar al módulo de liquidaciones cirugías
+// ✅ Mantiene lectura de producción ambulatoria confirmada
+// ✅ Calcula por línea según origen MK / Reservo
+// ✅ Agrupa por modalidad según rol
+// ✅ Ajustes mensuales por profesional y mes:
+//    - descuento manual
+//    - instalación de balón manual (solo cirujanos)
+// ✅ PDF formal tipo liquidación
+// ✅ CSV resumen / detalle / profesional
+// ✅ Modal de detalle + modal de ajustes
 
 import { db } from './firebase-init.js';
 import { requireAuth } from './auth.js';
@@ -20,7 +17,15 @@ import { loadSidebar } from './layout.js';
 await loadSidebar({ active: 'liquidaciones_ambulatorios' });
 
 import {
-  collection, collectionGroup, getDocs, query, where
+  collection,
+  collectionGroup,
+  getDocs,
+  query,
+  where,
+  doc,
+  getDoc,
+  setDoc,
+  serverTimestamp
 } from 'https://www.gstatic.com/firebasejs/11.7.3/firebase-firestore.js';
 
 import {
@@ -32,8 +37,6 @@ import {
 /* =========================
    AJUSTE ÚNICO
 ========================= */
-// Se usa collectionGroup('items') igual que en el módulo de cirugías.
-// Luego se filtran SOLO ítems ambulatorios.
 const PROD_ITEMS_GROUP = 'items';
 
 /* =========================
@@ -170,12 +173,6 @@ function monthNameEs(m){
   return ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'][m-1] || '';
 }
 
-function isTruthyBool(v){
-  return v === true ||
-    String(v || '').toLowerCase().trim() === 'true' ||
-    String(v || '').trim() === '1';
-}
-
 function yyyymm(ano, mesNum){
   return `${String(ano)}${String(mesNum).padStart(2,'0')}`;
 }
@@ -184,6 +181,36 @@ function pickDisplayEstadoLinea(l){
   if(l.isAlerta) return 'ALERTA';
   if(l.isPendiente) return 'PENDIENTE';
   return 'OK';
+}
+
+function roleLabel(roleId=''){
+  const r = normalize(roleId);
+  if(r === 'r_nutricionista') return 'NUTRICIONISTA';
+  if(r === 'r_psicologo') return 'PSICÓLOGO';
+  if(r === 'r_nutrilogo') return 'NUTRIÓLOGO';
+  if(r === 'r_cirujano') return 'CIRUJANO';
+  return String(roleId || '').toUpperCase();
+}
+
+function professionFromRole(roleId=''){
+  const r = normalize(roleId);
+  if(r === 'r_nutricionista') return 'NUTRICIONISTA';
+  if(r === 'r_psicologo') return 'PSICÓLOGO';
+  if(r === 'r_nutrilogo') return 'NUTRIÓLOGO';
+  if(r === 'r_cirujano') return 'CIRUJANO';
+  return 'PROFESIONAL';
+}
+
+function normalizeOrigin(v=''){
+  const x = normalize(v);
+  if(x.includes('mk')) return 'MK';
+  if(x.includes('reservo')) return 'RESERVO';
+  return (v || '').toString().toUpperCase().trim();
+}
+
+function containsAny(text='', arr=[]){
+  const t = normalize(text);
+  return arr.some(x => t.includes(normalize(x)));
 }
 
 /* =========================
@@ -205,7 +232,11 @@ const state = {
 
   prodRows: [],
   liquidResumen: [],
-  lastDetailExportLines: []
+  lastDetailExportLines: [],
+
+  ajustesCache: new Map(),
+  ajustesActualKey: '',
+  ajustesActualAgg: null
 };
 
 /* =========================
@@ -215,7 +246,7 @@ const colProfesionales = collection(db, 'profesionales');
 const colProcedimientos = collection(db, 'procedimientos');
 
 /* =========================
-   Load catálogos
+   Catálogos
 ========================= */
 async function loadProfesionales(){
   const snap = await getDocs(colProfesionales);
@@ -234,7 +265,10 @@ async function loadProfesionales(){
     const rutPersonal = cleanReminder(x.rut) || String(rutId || '');
     const tipoPersona = (cleanReminder(x.tipoPersona) || (razonSocial ? 'juridica' : 'natural')).toLowerCase();
 
-    const doc = {
+    const rolePrincipalRaw = cleanReminder(x.rolPrincipalId || x.rolPrincipal || '');
+    const rolePrincipal = rolePrincipalRaw || '';
+
+    const docProf = {
       id: String(rutId || d.id),
       rutId: String(rutId || d.id),
 
@@ -245,23 +279,25 @@ async function loadProfesionales(){
       rutEmpresa,
 
       tipoPersona,
-      estado
+      estado,
+      rolePrincipal,
+      profesionDisplay: cleanReminder(x.profesionDisplay || professionFromRole(rolePrincipal))
     };
 
     const keys = new Set();
-    keys.add(String(doc.id || '').trim());
-    keys.add(String(doc.rutId || '').trim());
-    keys.add(String(doc.rut || '').trim());
-    keys.add(canonRutAny(doc.id));
-    keys.add(canonRutAny(doc.rutId));
-    keys.add(canonRutAny(doc.rut));
+    keys.add(String(docProf.id || '').trim());
+    keys.add(String(docProf.rutId || '').trim());
+    keys.add(String(docProf.rut || '').trim());
+    keys.add(canonRutAny(docProf.id));
+    keys.add(canonRutAny(docProf.rutId));
+    keys.add(canonRutAny(docProf.rut));
 
     for(const k of keys){
       const kk = (k ?? '').toString().trim();
-      if(kk) byId.set(kk, doc);
+      if(kk) byId.set(kk, docProf);
     }
 
-    if(nombreProfesional) byName.set(normalize(nombreProfesional), doc);
+    if(nombreProfesional) byName.set(normalize(nombreProfesional), docProf);
   });
 
   state.profesionalesByName = byName;
@@ -303,10 +339,10 @@ async function loadProcedimientosAmbulatorios(){
 
   snap.forEach(d=>{
     const x = d.data() || {};
-    const doc = normalizeProcDocAmb(d.id, x);
+    const docProc = normalizeProcDocAmb(d.id, x);
 
-    const tipoN = normalize(doc.tipo);
-    const codigoN = String(doc.codigo || '').toUpperCase().trim();
+    const tipoN = normalize(docProc.tipo);
+    const codigoN = String(docProc.codigo || '').toUpperCase().trim();
 
     const esAmb =
       tipoN === 'ambulatorio' ||
@@ -314,14 +350,14 @@ async function loadProcedimientosAmbulatorios(){
 
     if(!esAmb) return;
 
-    byId.set(String(doc.id), doc);
+    byId.set(String(docProc.id), docProc);
 
-    if(doc.codigo){
-      byCodigo.set(String(doc.codigo).trim().toUpperCase(), doc);
+    if(docProc.codigo){
+      byCodigo.set(String(docProc.codigo).trim().toUpperCase(), docProc);
     }
 
-    if(doc.nombre) byName.set(normalize(doc.nombre), doc);
-    if(doc.tratamiento) byName.set(normalize(doc.tratamiento), doc);
+    if(docProc.nombre) byName.set(normalize(docProc.nombre), docProc);
+    if(docProc.tratamiento) byName.set(normalize(docProc.tratamiento), docProc);
   });
 
   state.procedimientosByName = byName;
@@ -332,11 +368,6 @@ async function loadProcedimientosAmbulatorios(){
 /* =========================
    Producción ambulatoria
 ========================= */
-function isEstadoAnulada(v=''){
-  const x = normalize(v);
-  return x === 'anulada' || x === 'anulado' || x === 'cancelada' || x === 'cancelado';
-}
-
 function getRawContainer(x){
   if(x?.raw && typeof x.raw === 'object') return x.raw;
   if(x?.dataReservo && typeof x.dataReservo === 'object') return x.dataReservo;
@@ -476,38 +507,67 @@ function getValorDesdeRaw(raw, columna){
   return 0;
 }
 
-function calcularPagoProfesional(valorBase, tarifa){
-  const valorBaseNum = Number(valorBase || 0) || 0;
-  const valorProfesionalFijo = Number(tarifa?.valorProfesional || 0) || 0;
-  const comisionPct = Number(tarifa?.comisionPct || 0) || 0;
+function getValorMKFallback(raw){
+  const posibles = [
+    'Total',
+    'Valor',
+    'Monto',
+    'Subtotal',
+    'Total Neto',
+    'Total Pago'
+  ];
 
-  if(valorProfesionalFijo > 0){
-    return valorProfesionalFijo;
-  }
-
-  if(comisionPct > 0 && valorBaseNum > 0){
-    return Math.round(valorBaseNum * (comisionPct / 100));
+  for(const p of posibles){
+    const n = parseDecimalFlexible(pickRaw(raw, p));
+    if(n > 0) return n;
   }
 
   return 0;
 }
 
-function calcularLineaAmbulatoria(x, procDoc){
+function calcularPagoSegunOrigen(x, procDoc){
   const raw = getRawContainer(x);
   const tarifa = getTarifaAmbulatoria(procDoc);
 
   let valorBase = 0;
+  let pagoProfesional = 0;
+  let utilidad = 0;
+  const origen = normalizeOrigin(x.origen || x.archivo || pickRaw(raw,'Origen') || pickRaw(raw,'Archivo') || '');
 
-  if(tarifa.modoValor === 'archivo'){
-    valorBase = getValorDesdeRaw(raw, tarifa.columnaOrigen);
-  }else{
-    valorBase = Number(tarifa.valor || 0) || 0;
+  if(origen === 'MK'){
+    // ✅ MK: paga porcentaje del valor indicado por el archivo
+    valorBase =
+      tarifa.modoValor === 'archivo'
+        ? getValorDesdeRaw(raw, tarifa.columnaOrigen) || getValorMKFallback(raw)
+        : getValorMKFallback(raw) || Number(tarifa.valor || 0) || 0;
+
+    if(tarifa.comisionPct > 0 && valorBase > 0){
+      pagoProfesional = Math.round(valorBase * (tarifa.comisionPct / 100));
+    }else if(Number(tarifa.valorProfesional || 0) > 0){
+      // fallback de seguridad
+      pagoProfesional = Number(tarifa.valorProfesional || 0) || 0;
+    }
+
+    utilidad = valorBase - pagoProfesional;
+  } else {
+    // ✅ Reservo: paga valor a pagar al profesional
+    valorBase =
+      tarifa.modoValor === 'archivo'
+        ? getValorDesdeRaw(raw, tarifa.columnaOrigen)
+        : Number(tarifa.valor || 0) || 0;
+
+    if(Number(tarifa.valorProfesional || 0) > 0){
+      pagoProfesional = Number(tarifa.valorProfesional || 0) || 0;
+    }else if(tarifa.comisionPct > 0 && valorBase > 0){
+      // fallback por seguridad
+      pagoProfesional = Math.round(valorBase * (tarifa.comisionPct / 100));
+    }
+
+    utilidad = valorBase - pagoProfesional;
   }
 
-  const pagoProfesional = calcularPagoProfesional(valorBase, tarifa);
-  const utilidad = valorBase - pagoProfesional;
-
   return {
+    origen,
     tarifa,
     valorBase,
     pagoProfesional,
@@ -554,39 +614,35 @@ async function loadProduccionMes(){
     where('confirmadoEnProduccion','==', true),
     where('estadoRegistro','==', 'activo')
   );
-  
+
   const snap = await getDocs(qy);
   const out = [];
-  
+
   snap.forEach(d=>{
     const x = d.data() || {};
-  
-    // ✅ Seguridad extra:
-    // aunque la query ya trae solo activos, dejamos este filtro por si
-    // existen documentos antiguos o inconsistentes.
-    if (normalize(x.estadoRegistro) !== 'activo') return;
-    if (x.confirmadoEnProduccion !== true) return;
-  
+
+    if(normalize(x.estadoRegistro) !== 'activo') return;
+    if(x.confirmadoEnProduccion !== true) return;
+
     const raw = getRawContainer(x);
     const procCandidate = resolveProcedimientoCandidate(x, raw);
-  
+
     const procDoc =
       (procCandidate.paCode && state.procedimientosByCodigo.get(procCandidate.paCode)) ||
       (procCandidate.rawId && state.procedimientosById.get(String(procCandidate.rawId).trim())) ||
       (procCandidate.rawName && state.procedimientosByName.get(normalize(procCandidate.rawName))) ||
       null;
-  
+
     if(!isLikelyAmbulatorioItem(x, procDoc)) return;
-  
+
     const appEstado = normalize(
       x?.aplicacion?.estado ||
       x?.estadoAplicacion ||
       ''
     );
-  
-    // ✅ Si viene marcado explícitamente como no_aplica, no entra a liquidación
+
     if(appEstado === 'no_aplica') return;
-  
+
     out.push({
       id: d.id,
       data: x,
@@ -598,9 +654,110 @@ async function loadProduccionMes(){
 }
 
 /* =========================
+   Ajustes mensuales
+========================= */
+function ajustesMonthId(){
+  return yyyymm(state.ano, state.mesNum);
+}
+
+function ajustesDocRef(profKey){
+  return doc(db, 'liquidaciones_ambulatorias_config', ajustesMonthId(), 'profesionales', profKey);
+}
+
+async function loadAjustesProfesional(profKey){
+  const cacheKey = `${ajustesMonthId()}__${profKey}`;
+  if(state.ajustesCache.has(cacheKey)) return state.ajustesCache.get(cacheKey);
+
+  try{
+    const snap = await getDoc(ajustesDocRef(profKey));
+    const x = snap.exists() ? (snap.data() || {}) : {};
+
+    const data = {
+      descuentoAplica: x.descuentoAplica === true,
+      descuentoCLP: Number(x.descuentoCLP || 0) || 0,
+      descuentoAsunto: cleanReminder(x.descuentoAsunto || ''),
+      balonAplica: x.balonAplica === true,
+      balonCantidad: Number(x.balonCantidad || 0) || 0,
+      balonValorUnitario: Number(x.balonValorUnitario || 0) || 0,
+      balonAsunto: cleanReminder(x.balonAsunto || 'Instalación de balón')
+    };
+
+    state.ajustesCache.set(cacheKey, data);
+    return data;
+  }catch(e){
+    console.warn('No se pudo leer ajustes ambulatorios', profKey, e);
+    const data = {
+      descuentoAplica: false,
+      descuentoCLP: 0,
+      descuentoAsunto: '',
+      balonAplica: false,
+      balonCantidad: 0,
+      balonValorUnitario: 0,
+      balonAsunto: 'Instalación de balón'
+    };
+    state.ajustesCache.set(cacheKey, data);
+    return data;
+  }
+}
+
+async function saveAjustesProfesional(profKey, payload){
+  await setDoc(ajustesDocRef(profKey), {
+    ...payload,
+    monthId: ajustesMonthId(),
+    ano: Number(state.ano),
+    mesNum: Number(state.mesNum),
+    actualizadoEl: serverTimestamp(),
+    actualizadoPor: state.user?.email || ''
+  }, { merge:true });
+
+  const cacheKey = `${ajustesMonthId()}__${profKey}`;
+  state.ajustesCache.set(cacheKey, payload);
+}
+
+/* =========================
+   Reglas de modalidad por rol
+========================= */
+function procedimientoTextoUnificado(line){
+  return [
+    line.procedimientoNombre || '',
+    line.procedimientoId || '',
+    line.categoria || '',
+    line.origen || ''
+  ].join(' | ');
+}
+
+function classifyModalidadByRole(roleId, line){
+  const role = normalize(roleId);
+  const texto = normalize(procedimientoTextoUnificado(line));
+
+  if(role === 'r_nutricionista'){
+    if(containsAny(texto, ['pad'])) return 'BONO PAD';
+    if(containsAny(texto, ['promo', 'promocion', 'promoción'])) return 'PROMOCIÓN';
+    return 'CONSULTA';
+  }
+
+  if(role === 'r_psicologo'){
+    if(containsAny(texto, ['promo', 'promocion', 'promoción'])) return 'PROMOCIÓN';
+    return 'CONSULTA';
+  }
+
+  if(role === 'r_nutrilogo'){
+    if(containsAny(texto, ['online', 'telemedicina', 'telemed', 'telemedico', 'telemedico', 'remoto'])) return 'ONLINE';
+    if(containsAny(texto, ['presensial', 'presencial'])) return 'PRESENCIAL';
+    return 'PRESENCIAL';
+  }
+
+  if(role === 'r_cirujano'){
+    return 'CONSULTA';
+  }
+
+  return 'CONSULTA';
+}
+
+/* =========================
    Build liquidaciones
 ========================= */
-function buildLiquidaciones(){
+async function buildLiquidaciones(){
   const lines = [];
 
   for(const row of state.prodRows){
@@ -631,13 +788,14 @@ function buildLiquidaciones(){
     const tipoPersona = (profDoc?.tipoPersona || '').toLowerCase();
     const empresaNombre = (tipoPersona === 'juridica') ? (profDoc?.razonSocial || '') : '';
     const empresaRut = (tipoPersona === 'juridica') ? (profDoc?.rutEmpresa || '') : '';
+    const roleId = cleanReminder(profDoc?.rolePrincipal || x.roleId || x.rolPrincipal || '');
 
     const procedimientoLabel =
       toUpperSafe(procDoc?.nombre || procCandidate.rawName || '') || '(Sin procedimiento)';
     const procedimientoId =
       cleanReminder(procDoc?.codigo || procDoc?.id || procCandidate.paCode || procCandidate.rawId || '');
 
-    const origen = cleanReminder(x.origen || x.archivo || pickRaw(raw,'Origen') || pickRaw(raw,'Archivo') || '');
+    const origen = normalizeOrigin(x.origen || x.archivo || pickRaw(raw,'Origen') || pickRaw(raw,'Archivo') || '');
     const categoria = cleanReminder(procDoc?.categoria || x.categoria || '');
 
     const alertas = [];
@@ -647,6 +805,7 @@ function buildLiquidaciones(){
     if(!procDoc) alertas.push('Procedimiento ambulatorio no existe / no mapeado');
     if(!fecha) pendientes.push('Fecha vacía');
     if(!pacienteNombre) pendientes.push('Paciente vacío');
+    if(!roleId) pendientes.push('Profesional sin rol principal');
 
     let valorBase = 0;
     let pagoProfesional = 0;
@@ -656,7 +815,7 @@ function buildLiquidaciones(){
     let tarifaColumnaOrigen = '';
 
     if(procDoc){
-      const calc = calcularLineaAmbulatoria(x, procDoc);
+      const calc = calcularPagoSegunOrigen(x, procDoc);
 
       valorBase = Number(calc.valorBase || 0) || 0;
       pagoProfesional = Number(calc.pagoProfesional || 0) || 0;
@@ -665,29 +824,24 @@ function buildLiquidaciones(){
       tarifaModoValor = calc.tarifa?.modoValor || 'fijo';
       tarifaColumnaOrigen = calc.tarifa?.columnaOrigen || '';
 
-      if(tarifaModoValor === 'archivo' && !tarifaColumnaOrigen){
-        pendientes.push('Tarifa archivo sin columna origen');
-      }
-
-      if(tarifaModoValor === 'archivo' && tarifaColumnaOrigen && valorBase <= 0){
-        pendientes.push(`No se pudo leer valor desde columna "${tarifaColumnaOrigen}"`);
-      }
-
-      if(tarifaModoValor === 'fijo' && valorBase <= 0){
-        pendientes.push('Tarifa fija sin valor');
-      }
-
-      if(pagoProfesional <= 0){
-        pendientes.push('Pago profesional calculado en 0');
+      if(origen === 'MK'){
+        if(tarifaModoValor === 'archivo' && !tarifaColumnaOrigen){
+          pendientes.push('MK sin columna origen para porcentaje');
+        }
+        if(valorBase <= 0){
+          pendientes.push('MK sin valor base desde archivo');
+        }
+        if(comisionPct <= 0 && pagoProfesional <= 0){
+          pendientes.push('MK sin porcentaje / pago válido');
+        }
+      } else {
+        if(Number(calc.tarifa?.valorProfesional || 0) <= 0 && pagoProfesional <= 0){
+          pendientes.push('Reservo sin valor a pagar al profesional');
+        }
       }
     }
 
-    const observacion = [
-      ...(alertas.length ? [`ALERTA: ${alertas.join(' · ')}`] : []),
-      ...(pendientes.length ? [`PENDIENTE: ${pendientes.join(' · ')}`] : [])
-    ].join(' | ');
-
-    lines.push({
+    const baseLine = {
       prodId: row.id,
 
       fecha,
@@ -705,6 +859,9 @@ function buildLiquidaciones(){
       tipoPersona,
       empresaNombre,
       empresaRut,
+      roleId,
+      roleNombre: roleLabel(roleId),
+      profesionDisplay: cleanReminder(profDoc?.profesionDisplay || professionFromRole(roleId)),
 
       procedimientoId,
       procedimientoNombre: procedimientoLabel,
@@ -718,18 +875,23 @@ function buildLiquidaciones(){
       pagoProfesional,
       utilidad,
 
+      modalidad: '',
+
       isAlerta: alertas.length > 0,
       isPendiente: pendientes.length > 0,
       alerts: alertas,
       pendings: pendientes,
-      observacion,
+      observacion: ''
+    };
 
-      info: {
-        raw,
-        appEstado: x?.aplicacion?.estado || '',
-        confirmado: !!x?.confirmado
-      }
-    });
+    baseLine.modalidad = classifyModalidadByRole(roleId, baseLine);
+
+    baseLine.observacion = [
+      ...(alertas.length ? [`ALERTA: ${alertas.join(' · ')}`] : []),
+      ...(pendientes.length ? [`PENDIENTE: ${pendientes.join(' · ')}`] : [])
+    ].join(' | ');
+
+    lines.push(baseLine);
   }
 
   const map = new Map();
@@ -750,6 +912,10 @@ function buildLiquidaciones(){
         empresaNombre: ln.empresaNombre || '',
         empresaRut: ln.empresaRut || '',
 
+        roleId: ln.roleId || '',
+        roleNombre: ln.roleNombre || '',
+        profesionDisplay: ln.profesionDisplay || '',
+
         casos: 0,
         totalBruto: 0,
         totalPagoProfesional: 0,
@@ -758,6 +924,22 @@ function buildLiquidaciones(){
         alertasCount: 0,
         pendientesCount: 0,
 
+        ajustes: {
+          descuentoAplica: false,
+          descuentoCLP: 0,
+          descuentoAsunto: '',
+          balonAplica: false,
+          balonCantidad: 0,
+          balonValorUnitario: 0,
+          balonSubtotal: 0,
+          balonAsunto: 'Instalación de balón',
+          totalValorizado: 0,
+          totalBoleta: 0,
+          retencionCLP: 0,
+          liquido: 0
+        },
+
+        resumenModalidades: [],
         lines: []
       });
     }
@@ -774,24 +956,80 @@ function buildLiquidaciones(){
     if(!agg.tipoPersona && ln.tipoPersona) agg.tipoPersona = ln.tipoPersona;
     if(!agg.empresaNombre && ln.empresaNombre) agg.empresaNombre = ln.empresaNombre;
     if(!agg.empresaRut && ln.empresaRut) agg.empresaRut = ln.empresaRut;
+    if(!agg.roleId && ln.roleId) agg.roleId = ln.roleId;
+    if(!agg.roleNombre && ln.roleNombre) agg.roleNombre = ln.roleNombre;
+    if(!agg.profesionDisplay && ln.profesionDisplay) agg.profesionDisplay = ln.profesionDisplay;
 
     agg.lines.push(ln);
   }
 
-  const resumen = [...map.values()].map(x=>{
+  const resumen = [];
+  for(const x of map.values()){
+    const ajustesCfg = await loadAjustesProfesional(x.key);
+
+    // agrupación por modalidad
+    const modalidadesMap = new Map();
+    for(const l of (x.lines || [])){
+      const mod = l.modalidad || 'CONSULTA';
+      if(!modalidadesMap.has(mod)){
+        modalidadesMap.set(mod, {
+          modalidad: mod,
+          cantidad: 0,
+          subtotal: 0
+        });
+      }
+      const o = modalidadesMap.get(mod);
+      o.cantidad += 1;
+      o.subtotal += Number(l.pagoProfesional || 0) || 0;
+    }
+
+    const resumenModalidades = [...modalidadesMap.values()]
+      .sort((a,b)=> (b.subtotal||0) - (a.subtotal||0));
+
+    const totalValorizado = Number(x.totalPagoProfesional || 0) || 0;
+    const totalBoleta = totalValorizado;
+    const retencionCLP = 0;
+
+    const descuentoCLP = ajustesCfg.descuentoAplica ? (Number(ajustesCfg.descuentoCLP || 0) || 0) : 0;
+
+    const esCirujano = normalize(x.roleId) === 'r_cirujano';
+    const balonCantidad = esCirujano && ajustesCfg.balonAplica ? (Number(ajustesCfg.balonCantidad || 0) || 0) : 0;
+    const balonValorUnitario = esCirujano && ajustesCfg.balonAplica ? (Number(ajustesCfg.balonValorUnitario || 0) || 0) : 0;
+    const balonSubtotal = esCirujano && ajustesCfg.balonAplica ? (balonCantidad * balonValorUnitario) : 0;
+
+    const liquido = Math.max(0, totalBoleta - descuentoCLP - retencionCLP + balonSubtotal);
+
     let status = 'ok';
     if(x.alertasCount > 0) status = 'alerta';
     else if(x.pendientesCount > 0) status = 'pendiente';
 
-    return { ...x, status };
-  });
+    resumen.push({
+      ...x,
+      status,
+      resumenModalidades,
+      ajustes: {
+        descuentoAplica: !!ajustesCfg.descuentoAplica,
+        descuentoCLP,
+        descuentoAsunto: ajustesCfg.descuentoAsunto || '',
+        balonAplica: !!ajustesCfg.balonAplica && esCirujano,
+        balonCantidad,
+        balonValorUnitario,
+        balonSubtotal,
+        balonAsunto: ajustesCfg.balonAsunto || 'Instalación de balón',
+        totalValorizado,
+        totalBoleta,
+        retencionCLP,
+        liquido
+      }
+    });
+  }
 
   const prio = (st)=> st === 'alerta' ? 0 : (st === 'pendiente' ? 1 : 2);
   resumen.sort((a,b)=>{
     const pa = prio(a.status);
     const pb = prio(b.status);
     if(pa !== pb) return pa - pb;
-    return (b.totalPagoProfesional||0) - (a.totalPagoProfesional||0);
+    return (b.ajustes?.liquido||0) - (a.ajustes?.liquido||0);
   });
 
   state.liquidResumen = resumen;
@@ -810,13 +1048,16 @@ function matchesSearch(agg, q){
     agg.tipoPersona,
     agg.empresaNombre,
     agg.empresaRut,
+    agg.roleNombre,
+    agg.profesionDisplay,
+    ...(agg.resumenModalidades || []).map(r => [r.modalidad, r.cantidad, r.subtotal].join(' ')),
     ...agg.lines.map(l=> [
       l.origen,
       l.categoria,
+      l.modalidad,
       l.procedimientoNombre,
       l.procedimientoId,
       l.pacienteNombre,
-      l.tarifaModoValor,
       ...(l.alerts || []),
       ...(l.pendings || [])
     ].join(' '))
@@ -881,6 +1122,7 @@ function paint(){
         <div class="big">${escapeHtml(nombreTitular)}</div>
         ${empresaSub}
         <div class="mini muted">${escapeHtml(agg.key)}</div>
+        <div class="mini muted">${escapeHtml(agg.profesionDisplay || agg.roleNombre || '')}</div>
       </td>
       <td class="mono">
         ${escapeHtml(rutTitular)}
@@ -888,13 +1130,14 @@ function paint(){
       </td>
       <td>${escapeHtml((agg.tipoPersona || '—').toUpperCase())}</td>
       <td class="mono">${agg.casos}</td>
-      <td><b>${clp(agg.totalPagoProfesional || 0)}</b></td>
+      <td><b>${clp(agg.ajustes?.liquido || 0)}</b></td>
       <td>${statusPill}</td>
       <td>
         <div class="actionsMini">
           <button class="iconBtn" type="button" title="Descargar PDF liquidación" aria-label="PDF">📄</button>
           <button class="iconBtn" type="button" title="Ver detalle" aria-label="Detalle">🔎</button>
           <button class="iconBtn" type="button" title="Exportar (profesional)" aria-label="ExportProf">⬇️</button>
+          <button class="iconBtn" type="button" title="Ajustes del mes" aria-label="Ajustes">⚙️</button>
         </div>
       </td>
     `;
@@ -913,6 +1156,7 @@ function paint(){
 
     tr.querySelector('[aria-label="Detalle"]').addEventListener('click', ()=> openDetalle(agg));
     tr.querySelector('[aria-label="ExportProf"]').addEventListener('click', ()=> exportDetalleProfesional(agg));
+    tr.querySelector('[aria-label="Ajustes"]').addEventListener('click', ()=> openAjustes(agg));
 
     tb.appendChild(tr);
   }
@@ -937,7 +1181,7 @@ function openDetalle(agg){
     (agg.rut ? ` · RUT: ${agg.rut}` : '') +
     extraEmpresa;
 
-  $('modalPillTotal').textContent = `PAGO PROF.: ${clp(agg.totalPagoProfesional || 0)}`;
+  $('modalPillTotal').textContent = `LÍQUIDO: ${clp(agg.ajustes?.liquido || 0)}`;
   $('modalPillPendientes').textContent =
     agg.alertasCount > 0
       ? `Alertas: ${agg.alertasCount} · Pendientes: ${agg.pendientesCount}`
@@ -982,11 +1226,11 @@ function openDetalle(agg){
         ${escapeHtml(l.pacienteNombre || '')}
         <div class="mini muted mono">${escapeHtml(l.pacienteRut || '')}</div>
       </td>
+      <td>${escapeHtml(l.modalidad || '')}</td>
       <td>
         ${escapeHtml((l.origen || '—').toUpperCase())}
         <div class="mini muted">${escapeHtml(l.categoria || '')}</div>
       </td>
-      <td><b>${clp(l.valorBase || 0)}</b></td>
       <td><b>${clp(l.pagoProfesional || 0)}</b></td>
       <td>${st}</td>
       <td class="mini">${escapeHtml(obs || '')}</td>
@@ -1000,6 +1244,77 @@ function closeDetalle(){
 }
 
 /* =========================
+   Modal ajustes
+========================= */
+function closeAjustes(){
+  $('ajustesBackdrop').style.display = 'none';
+  state.ajustesActualAgg = null;
+  state.ajustesActualKey = '';
+}
+
+function formatAjustesSub(agg){
+  return `${monthNameEs(state.mesNum)} ${state.ano} · ${agg.nombre || 'Profesional'} · ${agg.profesionDisplay || agg.roleNombre || ''}`;
+}
+
+function fillAjustesForm(agg){
+  const a = agg.ajustes || {};
+
+  $('ajustesTitle').textContent = 'Ajustes mensuales';
+  $('ajustesSub').textContent = formatAjustesSub(agg);
+
+  $('ajDescuentoAplica').checked = !!a.descuentoAplica;
+  $('ajDescuentoCLP').value = a.descuentoCLP ? String(a.descuentoCLP) : '';
+  $('ajDescuentoAsunto').value = a.descuentoAsunto || '';
+
+  const esCirujano = normalize(agg.roleId) === 'r_cirujano';
+  $('ajBalonAplica').checked = !!a.balonAplica;
+  $('ajBalonCantidad').value = a.balonCantidad ? String(a.balonCantidad) : '';
+  $('ajBalonValorUnitario').value = a.balonValorUnitario ? String(a.balonValorUnitario) : '';
+  $('ajBalonAsunto').value = a.balonAsunto || 'Instalación de balón';
+
+  $('ajBalonAplica').disabled = !esCirujano;
+  $('ajBalonCantidad').disabled = !esCirujano;
+  $('ajBalonValorUnitario').disabled = !esCirujano;
+  $('ajBalonAsunto').disabled = !esCirujano;
+
+  $('ajBalonHelp').textContent = esCirujano
+    ? 'Este adicional se suma al líquido final del cirujano en el mes.'
+    : 'Este adicional solo aplica a profesionales con rol CIRUJANO.';
+}
+
+function openAjustes(agg){
+  state.ajustesActualAgg = agg;
+  state.ajustesActualKey = agg.key;
+  fillAjustesForm(agg);
+  $('ajustesBackdrop').style.display = 'grid';
+}
+
+async function saveAjustesDesdeModal(){
+  if(!state.ajustesActualAgg || !state.ajustesActualKey){
+    toast('No hay profesional seleccionado');
+    return;
+  }
+
+  const agg = state.ajustesActualAgg;
+  const esCirujano = normalize(agg.roleId) === 'r_cirujano';
+
+  const payload = {
+    descuentoAplica: !!$('ajDescuentoAplica').checked,
+    descuentoCLP: parseDecimalFlexible($('ajDescuentoCLP').value || ''),
+    descuentoAsunto: cleanReminder($('ajDescuentoAsunto').value || ''),
+    balonAplica: esCirujano ? !!$('ajBalonAplica').checked : false,
+    balonCantidad: esCirujano ? (Number($('ajBalonCantidad').value || 0) || 0) : 0,
+    balonValorUnitario: esCirujano ? parseDecimalFlexible($('ajBalonValorUnitario').value || '') : 0,
+    balonAsunto: esCirujano ? cleanReminder($('ajBalonAsunto').value || 'Instalación de balón') : 'Instalación de balón'
+  };
+
+  await saveAjustesProfesional(state.ajustesActualKey, payload);
+  toast('Ajustes guardados');
+  closeAjustes();
+  await recalc();
+}
+
+/* =========================
    CSV exports
 ========================= */
 function exportResumenCSV(){
@@ -1008,10 +1323,12 @@ function exportResumenCSV(){
     'profesional','rut',
     'empresa','rutEmpresa',
     'tipoPersona',
+    'rol','profesion',
     'casos',
-    'totalBruto',
-    'totalPagoProfesional',
-    'totalUtilidad',
+    'totalValorizado',
+    'descuentoCLP',
+    'balonSubtotal',
+    'liquido',
     'alertas','pendientes'
   ];
 
@@ -1026,10 +1343,14 @@ function exportResumenCSV(){
     rutEmpresa: a.empresaRut || '',
 
     tipoPersona: a.tipoPersona || '',
+    rol: a.roleNombre || '',
+    profesion: a.profesionDisplay || '',
     casos: String(a.casos || 0),
-    totalBruto: String(a.totalBruto || 0),
-    totalPagoProfesional: String(a.totalPagoProfesional || 0),
-    totalUtilidad: String(a.totalUtilidad || 0),
+
+    totalValorizado: String(a.ajustes?.totalValorizado || 0),
+    descuentoCLP: String(a.ajustes?.descuentoCLP || 0),
+    balonSubtotal: String(a.ajustes?.balonSubtotal || 0),
+    liquido: String(a.ajustes?.liquido || 0),
 
     alertas: String(a.alertasCount || 0),
     pendientes: String(a.pendientesCount || 0)
@@ -1046,15 +1367,14 @@ function exportDetalleCSV(){
     'profesional','rut',
     'empresa','rutEmpresa',
     'tipoPersona',
-
+    'rol','profesion',
     'fecha','hora',
     'procedimiento','procedimientoId','procedimientoExiste',
+    'modalidad',
     'paciente','rutPaciente',
     'origen','categoria',
-
     'tarifaModoValor','tarifaColumnaOrigen','comisionPct',
     'valorBase','pagoProfesional','utilidad',
-
     'estadoLinea',
     'observacion',
     'prodId'
@@ -1072,6 +1392,8 @@ function exportDetalleCSV(){
         empresa: a.empresaNombre || '',
         rutEmpresa: a.empresaRut || '',
         tipoPersona: a.tipoPersona || '',
+        rol: a.roleNombre || '',
+        profesion: a.profesionDisplay || '',
 
         fecha: l.fecha || '',
         hora: l.hora || '',
@@ -1079,6 +1401,8 @@ function exportDetalleCSV(){
         procedimiento: l.procedimientoNombre || '',
         procedimientoId: l.procedimientoId || '',
         procedimientoExiste: l.procedimientoExists ? 'SI' : 'NO',
+
+        modalidad: l.modalidad || '',
 
         paciente: l.pacienteNombre || '',
         rutPaciente: l.pacienteRut || '',
@@ -1112,15 +1436,14 @@ function exportDetalleProfesional(agg){
     'profesional','rut',
     'empresa','rutEmpresa',
     'tipoPersona',
-
+    'rol','profesion',
     'fecha','hora',
     'procedimiento','procedimientoId','procedimientoExiste',
+    'modalidad',
     'paciente','rutPaciente',
     'origen','categoria',
-
     'tarifaModoValor','tarifaColumnaOrigen','comisionPct',
     'valorBase','pagoProfesional','utilidad',
-
     'estadoLinea',
     'observacion',
     'prodId'
@@ -1135,6 +1458,8 @@ function exportDetalleProfesional(agg){
     empresa: agg.empresaNombre || '',
     rutEmpresa: agg.empresaRut || '',
     tipoPersona: agg.tipoPersona || '',
+    rol: agg.roleNombre || '',
+    profesion: agg.profesionDisplay || '',
 
     fecha: l.fecha || '',
     hora: l.hora || '',
@@ -1142,6 +1467,8 @@ function exportDetalleProfesional(agg){
     procedimiento: l.procedimientoNombre || '',
     procedimientoId: l.procedimientoId || '',
     procedimientoExiste: l.procedimientoExists ? 'SI' : 'NO',
+
+    modalidad: l.modalidad || '',
 
     paciente: l.pacienteNombre || '',
     rutPaciente: l.pacienteRut || '',
@@ -1184,26 +1511,104 @@ async function fetchAsArrayBuffer(url){
   }
 }
 
+function buildPdfResumenRows(agg){
+  const rows = (agg.resumenModalidades || []).map(r=>({
+    modalidad: r.modalidad,
+    cantidad: r.cantidad,
+    subtotal: r.subtotal
+  }));
+
+  if((agg.ajustes?.balonSubtotal || 0) > 0){
+    rows.push({
+      modalidad: agg.ajustes?.balonAsunto || 'INSTALACIÓN DE BALÓN',
+      cantidad: Number(agg.ajustes?.balonCantidad || 0) || 0,
+      subtotal: Number(agg.ajustes?.balonSubtotal || 0) || 0
+    });
+  }
+
+  return rows;
+}
+
+function getNroLiquidacion(agg){
+  const hashBase = `${ajustesMonthId()}|${agg.key || ''}|${agg.nombre || ''}`;
+  let n = 0;
+  for(let i=0;i<hashBase.length;i++){
+    n = (n * 31 + hashBase.charCodeAt(i)) % 100000;
+  }
+  return String(n).padStart(5,'0');
+}
+
+function getNombreRutPago(agg){
+  if((agg.tipoPersona || '').toLowerCase() === 'juridica'){
+    return (agg.empresaNombre || agg.nombre || '—').toUpperCase();
+  }
+  return (agg.nombre || '—').toUpperCase();
+}
+
+function getRutPago(agg){
+  if((agg.tipoPersona || '').toLowerCase() === 'juridica'){
+    return (agg.empresaRut || agg.rut || '—').toUpperCase();
+  }
+  return (agg.rut || '—').toUpperCase();
+}
+
+function getDatosBoleta(agg){
+  if((agg.tipoPersona || '').toLowerCase() === 'juridica'){
+    return {
+      rut: agg.empresaRut || '—',
+      razonSocial: agg.empresaNombre || '—',
+      giro: 'PRESTACIONES MÉDICAS',
+      direccion: 'MANUEL MONTT 427'
+    };
+  }
+
+  return {
+    rut: agg.rut || '—',
+    razonSocial: agg.nombre || '—',
+    giro: 'PRESTACIONES MÉDICAS',
+    direccion: 'MANUEL MONTT 427'
+  };
+}
+
+function getFechaPagoTexto(){
+  // Ajuste simple:
+  // se deja día 5 del mes siguiente al liquidado
+  let mes = Number(state.mesNum || 0);
+  let ano = Number(state.ano || 0);
+
+  if(!mes || !ano) return '';
+
+  mes += 1;
+  if(mes === 13){
+    mes = 1;
+    ano += 1;
+  }
+
+  return `5/${mes}/${ano}`;
+}
+
 async function generarPDFLiquidacionProfesional(agg){
   const pdfDoc = await PDFDocument.create();
 
   const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
   const fontBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
 
-  const W = 841.89;
-  const H = 595.28;
+  // A4 vertical
+  const W = 595.28;
+  const H = 841.89;
 
   const rgb255 = (r,g,b)=> rgb(r/255, g/255, b/255);
 
   const RENNAT_BLUE  = rgb255(0, 39, 56);
   const RENNAT_GREEN = rgb255(31, 140, 115);
-  const BORDER_SOFT  = rgb(0.82, 0.84, 0.86);
+  const RENNAT_GRAY  = rgb255(210, 215, 220);
+  const BOX_BLUE     = rgb255(179, 208, 230);
   const TEXT_MAIN    = rgb(0.08, 0.09, 0.11);
   const TEXT_MUTED   = rgb(0.45, 0.48, 0.52);
-  const RENNAT_BLUE_SOFT  = rgb(0.18, 0.36, 0.45);
-  const RENNAT_GREEN_SOFT = rgb(0.20, 0.50, 0.42);
+  const BORDER_SOFT  = rgb(0.72, 0.76, 0.80);
 
-  const M = 36;
+  const M = 30;
+  const boxW = W - 2*M;
 
   const drawText = (page, text, x, y, size=10, bold=false, color=TEXT_MAIN) => {
     page.drawText(String(text ?? ''), {
@@ -1246,6 +1651,19 @@ async function generarPDFLiquidacionProfesional(agg){
     });
   };
 
+  const drawCellTextCenter = (page, text, x, yTop, cellW, cellH, size=10, bold=false, color=TEXT_MAIN) => {
+    const t = String(text ?? '');
+    const wTxt = (bold ? fontBold : font).widthOfTextAtSize(t, size);
+    const yText = yTop - (cellH * 0.72);
+    page.drawText(t, {
+      x: x + (cellW - wTxt) / 2,
+      y: yText,
+      size,
+      font: bold ? fontBold : font,
+      color
+    });
+  };
+
   const drawCellTextRight = (page, text, x, yTop, cellW, cellH, size=10, bold=false, color=TEXT_MAIN, pad=6) => {
     const t = String(text ?? '');
     const wTxt = (bold ? fontBold : font).widthOfTextAtSize(t, size);
@@ -1262,18 +1680,10 @@ async function generarPDFLiquidacionProfesional(agg){
   const wrapClip = (s, maxChars) => String(s ?? '').slice(0, maxChars);
   const money = (n)=> clp(n || 0);
 
-  // =========================
-  // Página 1
-  // =========================
   const page1 = pdfDoc.addPage([W, H]);
+  let y = H - 14;
 
-  const boxW = W - 2*M;
-  const barH = 28;
-  const barX = M;
-
-  let logoBottomY = H - M;
   const logoBytes = await fetchAsArrayBuffer(PDF_ASSET_LOGO_URL);
-
   if (logoBytes) {
     try {
       const urlLower = String(PDF_ASSET_LOGO_URL || '').toLowerCase();
@@ -1283,172 +1693,193 @@ async function generarPDFLiquidacionProfesional(agg){
         ? await pdfDoc.embedJpg(logoBytes)
         : await pdfDoc.embedPng(logoBytes);
 
-      const logoW = 120;
+      const logoW = 104;
       const logoH = (logo.height / logo.width) * logoW;
 
-      const logoX = M;
-      const logoY = H - M - logoH;
-
       page1.drawImage(logo, {
-        x: logoX,
-        y: logoY,
+        x: M + 12,
+        y: H - 12 - logoH,
         width: logoW,
         height: logoH
       });
-
-      logoBottomY = logoY;
     } catch (e) {
       console.warn('No se pudo embebeder logo:', e);
     }
   }
 
-  const gapLogoTitulo = barH;
-  const barTop = logoBottomY - gapLogoTitulo;
-  const barW = W - 2*M;
+  y = H - 92;
 
-  drawBox(page1, barX, barTop, barW, barH, RENNAT_BLUE, RENNAT_BLUE, 1);
+  // Barra título
+  drawBox(page1, M + 50, y, boxW - 100, 24, RENNAT_BLUE, RENNAT_BLUE, 1);
+  const title = 'Liquidación de Pago Producción - Participaciones Mensuales';
+  drawCellTextCenter(page1, title, M + 50, y, boxW - 100, 24, 10.5, true, rgb(1,1,1));
 
-  const mesTxt = `${monthNameEs(state.mesNum)} ${state.ano}`;
-  const title = `LIQUIDACIÓN AMBULATORIA ${String(mesTxt).toUpperCase()}`;
-  const titleSize = 13;
-  const titleW = measure(title, titleSize, true);
-  drawText(page1, title, barX + (barW - titleW)/2, barTop - 19, titleSize, true, rgb(1,1,1));
+  y -= 36;
 
-  let y = barTop - barH - 14;
+  // Datos cabecera
+  const nroLiquidacion = getNroLiquidacion(agg);
+  const rutPago = getRutPago(agg);
+  const nombreRutPago = getNombreRutPago(agg);
+  const profesion = (agg.profesionDisplay || agg.roleNombre || 'PROFESIONAL').toUpperCase();
 
-  // Datos profesional
-  const profNombre = (agg?.nombre || '').toString().trim();
-  const profRut = (agg?.rut || '').toString().trim();
+  const cabRows = [
+    ['Nro. Liquidación', nroLiquidacion],
+    ['RUT Pago', rutPago],
+    ['Nombre RUT de Pago', nombreRutPago],
+    ['Profesión', profesion]
+  ];
 
-  const tipoPersona = (agg?.tipoPersona || '').toString().toLowerCase().trim();
-  const esJuridica = (tipoPersona === 'juridica');
+  const rowH = 20;
+  const cabH = cabRows.length * rowH;
+  const cabX = M + 50;
+  const cabW = boxW - 100;
+  const cabC1 = 150;
+  const cabC2 = cabW - cabC1;
 
-  const empresaNombre = (agg?.empresaNombre || '').toString().trim();
-  const empresaRut = (agg?.empresaRut || '').toString().trim();
+  drawBox(page1, cabX, y, cabW, cabH, rgb(1,1,1), BORDER_SOFT, 1);
+  drawVLine(page1, cabX + cabC1, y, cabH, 1, BORDER_SOFT);
 
-  const dataRows = [];
-  dataRows.push(['PROFESIONAL', String(profNombre || '—').toUpperCase()]);
-  dataRows.push(['RUT', String(profRut || '—').toUpperCase()]);
-  if(esJuridica){
-    dataRows.push(['EMPRESA', String(empresaNombre || '—').toUpperCase()]);
-    dataRows.push(['RUT EMPRESA', String(empresaRut || '—').toUpperCase()]);
-  }
-  dataRows.push(['TIPO DE PERSONA', String(esJuridica ? 'JURIDICA' : 'NATURAL').toUpperCase()]);
+  for(let i=0;i<cabRows.length;i++){
+    const r = cabRows[i];
+    const yTop = y - i*rowH;
+    if(i > 0) drawHLine(page1, cabX, yTop, cabW, 1, BORDER_SOFT);
 
-  const rowH = 22;
-  const dataH = dataRows.length * rowH;
-  const c1 = Math.round(boxW * 0.45);
-  const c2 = boxW - c1;
-
-  drawBox(page1, M, y, boxW, dataH, rgb(1,1,1), BORDER_SOFT, 1);
-  drawVLine(page1, M + c1, y, dataH, 1, BORDER_SOFT);
-
-  for(let r=0; r<dataRows.length; r++){
-    const yRowTop = y - r*rowH;
-    const row = Array.isArray(dataRows[r]) ? dataRows[r] : ['',''];
-    const label = row[0] ?? '';
-    const value = row[1] ?? '';
-    const isProfesionalRow = String(label).toLowerCase().trim() === 'profesional';
-
-    if(isProfesionalRow){
-      page1.drawRectangle({
-        x: M,
-        y: (yRowTop - rowH),
-        width: boxW,
-        height: rowH,
-        color: RENNAT_GREEN
-      });
-      drawVLine(page1, M + c1, yRowTop, rowH, 1, BORDER_SOFT);
-    }
-
-    if(r > 0) drawHLine(page1, M, yRowTop, boxW, 1, BORDER_SOFT);
-
-    const labelColor = isProfesionalRow ? rgb(1,1,1) : TEXT_MAIN;
-    const valueColor = isProfesionalRow ? rgb(1,1,1) : TEXT_MAIN;
-
-    drawCellText(page1, label, M, yRowTop, rowH, 10, false, labelColor, 8);
-    drawCellText(page1, wrapClip(value, 50), M + c1, yRowTop, rowH, 10, true, valueColor, 8);
+    drawCellText(page1, r[0], cabX, yTop, rowH, 9, false, TEXT_MUTED, 6);
+    drawCellTextCenter(page1, r[1], cabX + cabC1, yTop, cabC2, rowH, 9.5, i === 2, TEXT_MAIN);
   }
 
-  y = y - dataH - 16;
+  y -= cabH + 18;
 
-  // Resumen por procedimiento
-  const agrupadoProc = new Map();
-  for(const l of (agg.lines || [])){
-    const key = `${l.procedimientoId || ''}|${l.procedimientoNombre || ''}`;
-    if(!agrupadoProc.has(key)){
-      agrupadoProc.set(key, {
-        procedimientoId: l.procedimientoId || '',
-        procedimientoNombre: l.procedimientoNombre || '—',
-        casos: 0,
-        bruto: 0,
-        pago: 0,
-        utilidad: 0
-      });
-    }
+  // Tabla principal resumen modalidades
+  const resumenRows = buildPdfResumenRows(agg);
 
-    const o = agrupadoProc.get(key);
-    o.casos += 1;
-    o.bruto += Number(l.valorBase || 0) || 0;
-    o.pago += Number(l.pagoProfesional || 0) || 0;
-    o.utilidad += Number(l.utilidad || 0) || 0;
-  }
-
-  const resumenProc = [...agrupadoProc.values()].sort((a,b)=> (b.pago||0) - (a.pago||0));
-
-  const headH = 24;
+  const headH = 22;
   const resRowH = 20;
-  const colProc = 260;
-  const colCasos = 70;
-  const colBruto = 90;
-  const colPago = 90;
-  const colUtil = boxW - colProc - colCasos - colBruto - colPago;
+  const tableW = cabW;
+  const tableX = cabX;
+  const col1 = 190;
+  const col2 = 145;
+  const col3 = tableW - col1 - col2;
+  const totalH = headH + (resumenRows.length + 1) * resRowH;
 
-  const resH = headH + Math.min(resumenProc.length, 14) * resRowH;
-  drawBox(page1, M, y, boxW, resH, rgb(1,1,1), BORDER_SOFT, 1);
-  drawBox(page1, M, y, boxW, headH, RENNAT_BLUE, RENNAT_BLUE, 1);
+  drawBox(page1, tableX, y, tableW, totalH, rgb(1,1,1), BORDER_SOFT, 1);
+  drawBox(page1, tableX, y, tableW, headH, RENNAT_BLUE, RENNAT_BLUE, 1);
 
-  drawVLine(page1, M + colProc, y, resH, 1, BORDER_SOFT);
-  drawVLine(page1, M + colProc + colCasos, y, resH, 1, BORDER_SOFT);
-  drawVLine(page1, M + colProc + colCasos + colBruto, y, resH, 1, BORDER_SOFT);
-  drawVLine(page1, M + colProc + colCasos + colBruto + colPago, y, resH, 1, BORDER_SOFT);
+  drawVLine(page1, tableX + col1, y, totalH, 1, BORDER_SOFT);
+  drawVLine(page1, tableX + col1 + col2, y, totalH, 1, BORDER_SOFT);
 
-  drawCellText(page1, 'PROCEDIMIENTO', M, y, headH, 10, true, rgb(1,1,1), 8);
-  drawCellTextRight(page1, 'CASOS', M + colProc, y, colCasos, headH, 10, true, rgb(1,1,1), 8);
-  drawCellTextRight(page1, 'BRUTO', M + colProc + colCasos, y, colBruto, headH, 10, true, rgb(1,1,1), 8);
-  drawCellTextRight(page1, 'PAGO PROF.', M + colProc + colCasos + colBruto, y, colPago, headH, 10, true, rgb(1,1,1), 8);
-  drawCellTextRight(page1, 'UTILIDAD', M + colProc + colCasos + colBruto + colPago, y, colUtil, headH, 10, true, rgb(1,1,1), 8);
+  drawCellTextCenter(page1, 'Modalidad', tableX, y, col1, headH, 8.5, true, rgb(1,1,1));
+  drawCellTextCenter(page1, 'Cantidad Consultas', tableX + col1, y, col2, headH, 8.5, true, rgb(1,1,1));
+  drawCellTextCenter(page1, '$ Subtotal', tableX + col1 + col2, y, col3, headH, 8.5, true, rgb(1,1,1));
 
-  const maxRowsResumen = Math.min(resumenProc.length, 14);
-  for(let i=0; i<maxRowsResumen; i++){
-    const r = resumenProc[i];
+  for(let i=0;i<resumenRows.length;i++){
+    const r = resumenRows[i];
     const yTop = y - headH - i*resRowH;
-    drawHLine(page1, M, yTop, boxW, 1, BORDER_SOFT);
+    drawHLine(page1, tableX, yTop, tableW, 1, BORDER_SOFT);
 
-    drawCellText(page1, wrapClip(`${r.procedimientoId} · ${r.procedimientoNombre}`, 40), M, yTop, resRowH, 9, false, TEXT_MAIN, 8);
-    drawCellTextRight(page1, String(r.casos), M + colProc, yTop, colCasos, resRowH, 9, true, TEXT_MAIN, 8);
-    drawCellTextRight(page1, money(r.bruto), M + colProc + colCasos, yTop, colBruto, resRowH, 9, true, TEXT_MAIN, 8);
-    drawCellTextRight(page1, money(r.pago), M + colProc + colCasos + colBruto, yTop, colPago, resRowH, 9, true, TEXT_MAIN, 8);
-    drawCellTextRight(page1, money(r.utilidad), M + colProc + colCasos + colBruto + colPago, yTop, colUtil, resRowH, 9, true, TEXT_MAIN, 8);
+    drawCellText(page1, wrapClip((r.modalidad || '').toUpperCase(), 34), tableX, yTop, resRowH, 8.5, false, TEXT_MAIN, 6);
+    drawCellTextCenter(page1, String(r.cantidad || 0), tableX + col1, yTop, col2, resRowH, 8.5, true, TEXT_MAIN);
+    drawCellTextRight(page1, money(r.subtotal || 0), tableX + col1 + col2, yTop, col3, resRowH, 8.5, true, TEXT_MAIN, 8);
   }
 
-  y = y - resH - 14;
+  const yTotalRow = y - headH - resumenRows.length * resRowH;
+  drawHLine(page1, tableX, yTotalRow, tableW, 1, BORDER_SOFT);
+  drawBox(page1, tableX, yTotalRow, tableW, resRowH, rgb255(30, 190, 171), rgb255(30, 190, 171), 1);
+  drawVLine(page1, tableX + col1, yTotalRow, resRowH, 1, BORDER_SOFT);
+  drawVLine(page1, tableX + col1 + col2, yTotalRow, resRowH, 1, BORDER_SOFT);
+  drawCellTextCenter(page1, 'TOTAL', tableX, yTotalRow, col1, resRowH, 9, true, RENNAT_BLUE);
+  drawCellTextCenter(page1, String(agg.casos || 0), tableX + col1, yTotalRow, col2, resRowH, 9, true, RENNAT_BLUE);
+  drawCellTextRight(page1, money(agg.ajustes?.totalValorizado || 0), tableX + col1 + col2, yTotalRow, col3, resRowH, 9, true, RENNAT_BLUE, 8);
 
-  // Totales
-  const totalBarH = 28;
-  drawBox(page1, M, y, boxW, totalBarH, RENNAT_GREEN, RENNAT_GREEN, 1);
-  drawCellText(page1, 'TOTAL BRUTO', M, y, totalBarH, 12, true, rgb(1,1,1), 10);
-  drawCellTextRight(page1, money(agg.totalBruto || 0), M + (boxW - 200), y, 200, totalBarH, 13, true, rgb(1,1,1), 10);
-  y = y - totalBarH - 10;
+  y -= totalH + 16;
 
-  drawBox(page1, M, y, boxW, totalBarH, RENNAT_GREEN, RENNAT_GREEN, 1);
-  drawCellText(page1, 'TOTAL A PAGAR PROFESIONAL', M, y, totalBarH, 12, true, rgb(1,1,1), 10);
-  drawCellTextRight(page1, money(agg.totalPagoProfesional || 0), M + (boxW - 200), y, 200, totalBarH, 13, true, rgb(1,1,1), 10);
-  y = y - totalBarH - 10;
+  // Resumen montos
+  const resumenX = tableX + 250;
+  const resumenW = tableW - 250;
+  const resumenHeadH = 20;
+  const resumenRowH = 18;
 
-  drawBox(page1, M, y, boxW, totalBarH, RENNAT_GREEN, RENNAT_GREEN, 1);
-  drawCellText(page1, 'UTILIDAD CLÍNICA', M, y, totalBarH, 12, true, rgb(1,1,1), 10);
-  drawCellTextRight(page1, money(agg.totalUtilidad || 0), M + (boxW - 200), y, 200, totalBarH, 13, true, rgb(1,1,1), 10);
+  const resumenMontoRows = [
+    ['$ Valorizado:', money(agg.ajustes?.totalValorizado || 0)],
+    ['$ Boleta:', money(agg.ajustes?.totalBoleta || 0)],
+    ['$ Retención:', money(agg.ajustes?.retencionCLP || 0)],
+    [agg.ajustes?.descuentoAsunto || 'Descuento seguro complementario', money(agg.ajustes?.descuentoCLP || 0)],
+    ['$ Líquido:', money(agg.ajustes?.liquido || 0)]
+  ];
+
+  const rmH = resumenHeadH + resumenMontoRows.length * resumenRowH;
+  const rmC1 = 145;
+  const rmC2 = resumenW - rmC1;
+
+  drawBox(page1, resumenX, y, resumenW, rmH, rgb(1,1,1), BORDER_SOFT, 1);
+  drawBox(page1, resumenX, y, resumenW, resumenHeadH, RENNAT_BLUE, RENNAT_BLUE, 1);
+  drawCellTextCenter(page1, 'RESUMEN', resumenX, y, resumenW, resumenHeadH, 9, true, rgb(1,1,1));
+
+  drawVLine(page1, resumenX + rmC1, y, rmH, 1, BORDER_SOFT);
+
+  for(let i=0;i<resumenMontoRows.length;i++){
+    const r = resumenMontoRows[i];
+    const yTop = y - resumenHeadH - i*resumenRowH;
+    drawHLine(page1, resumenX, yTop, resumenW, 1, BORDER_SOFT);
+
+    const isLiquido = i === resumenMontoRows.length - 1;
+    drawCellText(page1, wrapClip(r[0], 34), resumenX, yTop, resumenRowH, 8.3, isLiquido, TEXT_MAIN, 6);
+    drawCellTextRight(page1, r[1], resumenX + rmC1, yTop, rmC2, resumenRowH, 8.3, true, TEXT_MAIN, 6);
+  }
+
+  y -= rmH + 16;
+
+  // Datos boleta
+  const datosBoleta = getDatosBoleta(agg);
+
+  const boletaHeadH = 24;
+  const boletaRowH = 18;
+  const boletaRows = [
+    ['RUT:', datosBoleta.rut || '—'],
+    ['RAZÓN SOCIAL:', datosBoleta.razonSocial || '—'],
+    ['GIRO:', datosBoleta.giro || '—'],
+    ['DIRECCIÓN', datosBoleta.direccion || '—']
+  ];
+
+  const boletaH = boletaHeadH + boletaRows.length * boletaRowH;
+  const boletaC1 = 140;
+  const boletaC2 = tableW - boletaC1;
+
+  drawBox(page1, tableX, y, tableW, boletaH, rgb(1,1,1), BORDER_SOFT, 1);
+  drawBox(page1, tableX, y, tableW, boletaHeadH, BOX_BLUE, BOX_BLUE, 1);
+  drawCellTextCenter(page1, 'DATOS BOLETA', tableX, y, tableW, boletaHeadH, 9.5, true, RENNAT_BLUE);
+
+  drawVLine(page1, tableX + boletaC1, y, boletaH, 1, BORDER_SOFT);
+
+  for(let i=0;i<boletaRows.length;i++){
+    const r = boletaRows[i];
+    const yTop = y - boletaHeadH - i*boletaRowH;
+    drawHLine(page1, tableX, yTop, tableW, 1, BORDER_SOFT);
+
+    drawCellText(page1, r[0], tableX, yTop, boletaRowH, 8.2, false, TEXT_MUTED, 6);
+    drawCellTextCenter(page1, wrapClip(r[1], 54), tableX + boletaC1, yTop, boletaC2, boletaRowH, 8.2, false, TEXT_MAIN);
+  }
+
+  y -= boletaH + 30;
+
+  // Fecha de pago
+  const fechaPago = getFechaPagoTexto();
+  const fpH = 22;
+  drawBox(page1, tableX, y, tableW, fpH, rgb(1,1,1), BORDER_SOFT, 1);
+  drawVLine(page1, tableX + boletaC1, y, fpH, 1, BORDER_SOFT);
+  drawCellText(page1, 'FECHA DE PAGO', tableX, y, fpH, 8.6, false, RENNAT_BLUE, 6);
+  drawCellTextCenter(page1, fechaPago, tableX + boletaC1, y, boletaC2, fpH, 9.2, true, TEXT_MAIN);
+
+  y -= fpH + 18;
+
+  // texto final
+  const infoText = `Por favor enviar boleta o factura por el monto total al correo:\ncontabilidad@clinicarennt.cl`;
+  const linesTxt = String(infoText).split('\n');
+  let yTxt = y;
+  for(const t of linesTxt){
+    drawCellTextCenter(page1, t, tableX, yTxt, 14, 7.8, true, RENNAT_BLUE);
+    yTxt -= 11;
+  }
 
   // =========================
   // Página 2 detalle
@@ -1460,13 +1891,14 @@ async function generarPDFLiquidacionProfesional(agg){
   let y2 = H2 - M;
   const barX2 = M;
   const barW2 = W2 - 2*M;
+  const barH = 26;
   const T_DETALLE = 'Detalle de Prestaciones Ambulatorias';
 
   drawBox(page2, barX2, y2, barW2, barH, RENNAT_BLUE, RENNAT_BLUE, 1);
-  drawText(page2, T_DETALLE, barX2 + (barW2 - measure(T_DETALLE, 13, true))/2, y2 - 19, 13, true, rgb(1,1,1));
+  drawCellTextCenter(page2, T_DETALLE, barX2, y2, barW2, barH, 12, true, rgb(1,1,1));
   y2 -= (barH + 12);
 
-  drawText(page2, `${profNombre || '—'} · ${mesTxt}`, M, y2, 10, false, TEXT_MUTED);
+  drawText(page2, `${agg.nombre || '—'} · ${monthNameEs(state.mesNum)} ${state.ano}`, M, y2, 10, false, TEXT_MUTED);
   y2 -= 12;
 
   const detX = M;
@@ -1476,13 +1908,12 @@ async function generarPDFLiquidacionProfesional(agg){
 
   let detCols = [
     { key:'n',    label:'#',             w: 40  },
-    { key:'fecha',label:'FECHA',         w: 110 },
-    { key:'proc', label:'PROCEDIMIENTO', w: 220 },
+    { key:'fecha',label:'FECHA',         w: 105 },
+    { key:'proc', label:'PROCEDIMIENTO', w: 240 },
     { key:'pac',  label:'PACIENTE',      w: 190 },
-    { key:'org',  label:'ORIGEN',        w: 90  },
-    { key:'vb',   label:'BRUTO',         w: 80  },
-    { key:'pp',   label:'PAGO PROF.',    w: 90  },
-    { key:'ut',   label:'UTILIDAD',      w: 90  }
+    { key:'mod',  label:'MODALIDAD',     w: 110 },
+    { key:'org',  label:'ORIGEN',        w: 80  },
+    { key:'pp',   label:'SUBTOTAL',      w: 100 }
   ];
 
   {
@@ -1517,22 +1948,19 @@ async function generarPDFLiquidacionProfesional(agg){
     drawCellText(page, wrapClip(fechaTxt, 18), xPos, topY, detRowH, 9, false, TEXT_MAIN, 8);
     xPos += detCols[1].w;
 
-    drawCellText(page, wrapClip(`${row.procedimientoId || ''} · ${row.procedimientoNombre || ''}`, 34), xPos, topY, detRowH, 9, false, TEXT_MAIN, 8);
+    drawCellText(page, wrapClip(`${row.procedimientoId || ''} · ${row.procedimientoNombre || ''}`, 38), xPos, topY, detRowH, 9, false, TEXT_MAIN, 8);
     xPos += detCols[2].w;
 
-    drawCellText(page, wrapClip(row.pacienteNombre || '', 26), xPos, topY, detRowH, 9, false, TEXT_MAIN, 8);
+    drawCellText(page, wrapClip(row.pacienteNombre || '', 28), xPos, topY, detRowH, 9, false, TEXT_MAIN, 8);
     xPos += detCols[3].w;
 
-    drawCellText(page, wrapClip((row.origen || '').toUpperCase(), 12), xPos, topY, detRowH, 9, false, TEXT_MUTED, 8);
+    drawCellText(page, wrapClip((row.modalidad || '').toUpperCase(), 14), xPos, topY, detRowH, 9, false, TEXT_MUTED, 8);
     xPos += detCols[4].w;
 
-    drawCellTextRight(page, money(row.valorBase || 0), xPos, topY, detCols[5].w, detRowH, 9, true, TEXT_MAIN, 8);
+    drawCellText(page, wrapClip((row.origen || '').toUpperCase(), 10), xPos, topY, detRowH, 9, false, TEXT_MUTED, 8);
     xPos += detCols[5].w;
 
     drawCellTextRight(page, money(row.pagoProfesional || 0), xPos, topY, detCols[6].w, detRowH, 9, true, TEXT_MAIN, 8);
-    xPos += detCols[6].w;
-
-    drawCellTextRight(page, money(row.utilidad || 0), xPos, topY, detCols[7].w, detRowH, 9, true, RENNAT_GREEN_SOFT, 8);
   }
 
   const allLinesSorted = [...(agg.lines || [])].sort((a,b)=>{
@@ -1560,10 +1988,10 @@ async function generarPDFLiquidacionProfesional(agg){
       cursorTopY = H2 - M;
 
       drawBox(currentPage, barX2, cursorTopY, barW2, barH, RENNAT_BLUE, RENNAT_BLUE, 1);
-      drawText(currentPage, T_DETALLE, barX2 + (barW2 - measure(T_DETALLE, 13, true))/2, cursorTopY - 19, 13, true, rgb(1,1,1));
+      drawCellTextCenter(currentPage, T_DETALLE, barX2, cursorTopY, barW2, barH, 12, true, rgb(1,1,1));
       cursorTopY -= (barH + 12);
 
-      drawText(currentPage, `${profNombre || '—'} · ${mesTxt}`, M, cursorTopY, 10, false, TEXT_MUTED);
+      drawText(currentPage, `${agg.nombre || '—'} · ${monthNameEs(state.mesNum)} ${state.ano}`, M, cursorTopY, 10, false, TEXT_MUTED);
       cursorTopY -= 12;
       continue;
     }
@@ -1597,10 +2025,10 @@ async function generarPDFLiquidacionProfesional(agg){
       cursorTopY = H2 - M;
 
       drawBox(currentPage, barX2, cursorTopY, barW2, barH, RENNAT_BLUE, RENNAT_BLUE, 1);
-      drawText(currentPage, T_DETALLE, barX2 + (barW2 - measure(T_DETALLE, 13, true))/2, cursorTopY - 19, 13, true, rgb(1,1,1));
+      drawCellTextCenter(currentPage, T_DETALLE, barX2, cursorTopY, barW2, barH, 12, true, rgb(1,1,1));
       cursorTopY -= (barH + 12);
 
-      drawText(currentPage, `${profNombre || '—'} · ${mesTxt}`, M, cursorTopY, 10, false, TEXT_MUTED);
+      drawText(currentPage, `${agg.nombre || '—'} · ${monthNameEs(state.mesNum)} ${state.ano}`, M, cursorTopY, 10, false, TEXT_MUTED);
       cursorTopY -= 12;
     }
   }
@@ -1658,8 +2086,15 @@ async function recalc(){
   try{
     $('btnRecalcular').disabled = true;
 
+    // limpia cache de ajustes del mes si cambió
+    const currentMonthId = ajustesMonthId();
+    if(state._lastMonthId !== currentMonthId){
+      state.ajustesCache = new Map();
+      state._lastMonthId = currentMonthId;
+    }
+
     await loadProduccionMes();
-    buildLiquidaciones();
+    await buildLiquidaciones();
     paint();
 
   }catch(err){
@@ -1668,6 +2103,55 @@ async function recalc(){
   }finally{
     $('btnRecalcular').disabled = false;
   }
+}
+
+/* =========================
+   Eventos UI
+========================= */
+function bindUI(){
+  $('q').addEventListener('input', (e)=>{
+    state.q = (e.target.value || '').toString();
+    paint();
+  });
+
+  $('btnRecalcular').addEventListener('click', recalc);
+  $('btnCSVResumen').addEventListener('click', exportResumenCSV);
+  $('btnCSVDetalle').addEventListener('click', exportDetalleCSV);
+
+  $('btnClose').addEventListener('click', closeDetalle);
+  $('btnCerrar2').addEventListener('click', closeDetalle);
+  $('modalBackdrop').addEventListener('click', (e)=>{
+    if(e.target === $('modalBackdrop')) closeDetalle();
+  });
+
+  $('btnExportDetalleProf').addEventListener('click', ()=>{
+    if(!state.lastDetailExportLines.length){
+      toast('No hay detalle abierto');
+      return;
+    }
+
+    const first = state.lastDetailExportLines[0];
+    const agg = {
+      nombre: first?.profesionalNombre || 'Profesional',
+      rut: first?.profesionalRut || '',
+      tipoPersona: first?.tipoPersona || '',
+      empresaNombre: first?.empresaNombre || '',
+      empresaRut: first?.empresaRut || '',
+      roleId: first?.roleId || '',
+      roleNombre: first?.roleNombre || '',
+      profesionDisplay: first?.profesionDisplay || '',
+      lines: state.lastDetailExportLines
+    };
+
+    exportDetalleProfesional(agg);
+  });
+
+  $('btnAjustesClose').addEventListener('click', closeAjustes);
+  $('btnAjustesCancelar').addEventListener('click', closeAjustes);
+  $('ajustesBackdrop').addEventListener('click', (e)=>{
+    if(e.target === $('ajustesBackdrop')) closeAjustes();
+  });
+  $('btnAjustesGuardar').addEventListener('click', saveAjustesDesdeModal);
 }
 
 /* =========================
@@ -1684,40 +2168,7 @@ requireAuth({
     wireLogout();
 
     initMonthYearSelectors();
-
-    $('q').addEventListener('input', (e)=>{
-      state.q = (e.target.value || '').toString();
-      paint();
-    });
-
-    $('btnRecalcular').addEventListener('click', recalc);
-    $('btnCSVResumen').addEventListener('click', exportResumenCSV);
-    $('btnCSVDetalle').addEventListener('click', exportDetalleCSV);
-
-    $('btnClose').addEventListener('click', closeDetalle);
-    $('btnCerrar2').addEventListener('click', closeDetalle);
-    $('modalBackdrop').addEventListener('click', (e)=>{
-      if(e.target === $('modalBackdrop')) closeDetalle();
-    });
-
-    $('btnExportDetalleProf').addEventListener('click', ()=>{
-      if(!state.lastDetailExportLines.length){
-        toast('No hay detalle abierto');
-        return;
-      }
-
-      const first = state.lastDetailExportLines[0];
-      const agg = {
-        nombre: first?.profesionalNombre || 'Profesional',
-        rut: first?.profesionalRut || '',
-        tipoPersona: first?.tipoPersona || '',
-        empresaNombre: first?.empresaNombre || '',
-        empresaRut: first?.empresaRut || '',
-        lines: state.lastDetailExportLines
-      };
-
-      exportDetalleProfesional(agg);
-    });
+    bindUI();
 
     await Promise.all([
       loadProfesionales(),
