@@ -1492,7 +1492,7 @@ function render() {
     esItemConfirmable(it) && !it.confirmadoEnProduccion
   ).length;
 
-  if ($("countPill")) $("countPill").textContent = `${items.length} filas`;
+  if ($("countPill")) $("countPill").textContent = `Vista: ${items.length} · Total import: ${consolidado.length}`;
   if ($("pillPendientes")) $("pillPendientes").textContent = `Pendientes: ${pendientes}`;
   if ($("pillAlertas")) $("pillAlertas").textContent = `Alertas: ${alertas}`;
   if ($("pillProf")) $("pillProf").textContent = `Profesionales: ${pendProf}`;
@@ -1709,6 +1709,9 @@ async function loadStagingFromFirestore(importId) {
   const qy = query(itemsCol, orderBy("idx", "asc"));
   const snapItems = await getDocs(qy);
 
+  console.log("IMPORT DOC PADRE:", imp);
+  console.log("CANTIDAD DOCS items LEIDOS:", snapItems.size);
+
   const staged = [];
   snapItems.forEach(d => {
     const x = d.data() || {};
@@ -1753,6 +1756,23 @@ async function loadStagingFromFirestore(importId) {
   });
 
   consolidado = staged;
+
+  console.log("CARGADOS EN consolidado:", consolidado.length);
+
+  const resumenDebug = {
+    total: consolidado.length,
+    aplica: consolidado.filter(x => x.aplicacion?.estado === "aplica").length,
+    no_aplica: consolidado.filter(x => x.aplicacion?.estado === "no_aplica").length,
+    revisar: consolidado.filter(x => x.aplicacion?.estado === "revisar").length,
+    sin_aplicacion: consolidado.filter(x => !x.aplicacion?.estado).length,
+    review_ok: consolidado.filter(x => x.review?.estadoRevision === "ok").length,
+    review_pendiente: consolidado.filter(x => x.review?.estadoRevision === "pendiente").length,
+    confirmados: consolidado.filter(x => x.confirmadoEnProduccion).length,
+    reservo: consolidado.filter(x => x.origen === "Reservo").length,
+    mk: consolidado.filter(x => x.origen === "MK").length
+  };
+  
+  console.log("RESUMEN IMPORT CARGADO:", resumenDebug);
 
   for (const it of consolidado) {
     recomputeItemFromCurrentValues(it);
