@@ -1190,8 +1190,8 @@ async function generarPDFLiquidacionProfesional(agg){
   const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
   const fontBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
 
-  const W = 595.28;
-  const H = 841.89;
+  const W = 841.89;
+  const H = 595.28;
 
   const rgb255 = (r,g,b)=> rgb(r/255, g/255, b/255);
 
