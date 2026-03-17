@@ -1,146 +1,395 @@
 <!doctype html>
 <html lang="es">
 <head>
-  <meta charset="utf-8"/>
-  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Clínica Rennat — Liquidaciones Ambulatorias</title>
-  <link rel="icon" type="image/png" href="logoCR.png">
-
-  <link rel="stylesheet" href="estilos.css"/>
+  <link rel="icon" type="image/png" href="logoCR.png" />
+  <link rel="stylesheet" href="estilos.css" />
 
   <style>
-    .page{ display:flex; min-height:100vh; }
-    .main{ flex:1; padding:18px 18px 30px; }
-    .topRow{ display:flex; align-items:flex-start; justify-content:space-between; gap:14px; margin-bottom:14px; }
-    .pageTitle{ font-size:20px; font-weight:900; margin:0; }
-    .pageSub{ color:var(--muted); margin-top:2px; font-size:13px; }
-
-    .card{ background:var(--card); border:1px solid var(--border); border-radius:14px; box-shadow:0 8px 22px rgba(15,23,42,.06); }
-    .cardPad{ padding:14px; }
-    .toolbar{ display:flex; gap:10px; flex-wrap:wrap; align-items:end; justify-content:space-between; }
-    .filters{ display:flex; gap:10px; flex-wrap:wrap; align-items:end; }
-    .field{ display:flex; flex-direction:column; gap:6px; min-width:170px; }
-    .field label{ font-size:12px; color:var(--muted); font-weight:800; }
-    .field select, .field input{
-      height:38px; border-radius:10px; border:1px solid var(--border);
-      padding:0 10px; background:#fff;
+    :root{
+      --bg:#f4f6fb;
+      --card:#ffffff;
+      --line:#d7dde6;
+      --text:#18212b;
+      --muted:#64748b;
+      --blue:#002738;
+      --green:#1f8c73;
+      --green-soft:#0f766e;
+      --bad:#b91c1c;
+      --warn:#b45309;
+      --ok:#166534;
+      --sidebar-w:260px;
     }
 
-    .btn{ height:38px; padding:0 12px; border-radius:10px; border:1px solid var(--border); background:#fff; cursor:pointer; font-weight:800; }
-    .btn.primary{ background:var(--bg-strong); border-color:var(--bg-strong); color:#fff; }
-    .btn.soft{ background:var(--accent-soft); border-color:#bfeee8; }
-    .btn.danger{ background:var(--danger); border-color:var(--danger); color:#fff; }
-    .btn:disabled{ opacity:.6; cursor:not-allowed; }
+    *{ box-sizing:border-box; }
+    body{
+      margin:0;
+      background:var(--bg);
+      color:var(--text);
+      font-family: Inter, Arial, Helvetica, sans-serif;
+    }
 
+    .appShell{
+      display:flex;
+      min-height:100vh;
+      background:var(--bg);
+    }
+    #sidebar-slot{
+      flex:0 0 var(--sidebar-w);
+      min-width:var(--sidebar-w);
+      background:#0b8d83;
+    }
+    .main{
+      flex:1;
+      min-width:0;
+      padding:22px;
+    }
+
+    .pageHead{
+      display:flex;
+      justify-content:space-between;
+      align-items:flex-start;
+      gap:16px;
+      margin-bottom:16px;
+    }
+    .pageHead h1{
+      margin:0 0 6px 0;
+      font-size:34px;
+      line-height:1.1;
+      color:#0f172a;
+    }
+    .sub{
+      color:var(--muted);
+      font-size:14px;
+    }
+
+    .card{
+      background:var(--card);
+      border:1px solid var(--line);
+      border-radius:18px;
+      box-shadow:0 8px 24px rgba(2,12,27,.05);
+    }
+
+    .toolbar{
+      padding:18px;
+      margin-bottom:16px;
+    }
+
+    .grid3{
+      display:grid;
+      grid-template-columns: 180px 180px 1fr;
+      gap:12px;
+      margin-bottom:12px;
+    }
+    .grid2{
+      display:grid;
+      grid-template-columns:1fr 1fr;
+      gap:12px;
+    }
+    .field label{
+      display:block;
+      font-size:13px;
+      font-weight:700;
+      color:#334155;
+      margin-bottom:6px;
+    }
+    .field input,
+    .field select,
+    .field textarea{
+      width:100%;
+      padding:11px 12px;
+      border:1px solid var(--line);
+      border-radius:12px;
+      background:#fff;
+      color:#0f172a;
+      font-size:14px;
+    }
+    .field textarea{
+      min-height:86px;
+      resize:vertical;
+    }
+
+    .actions{
+      display:flex;
+      flex-wrap:wrap;
+      gap:10px;
+      margin-top:14px;
+    }
+
+    .btn{
+      border:1px solid var(--line);
+      background:#fff;
+      color:#0f172a;
+      padding:10px 14px;
+      border-radius:12px;
+      font-weight:800;
+      font-size:14px;
+      cursor:pointer;
+    }
+    .btn:hover{ filter:brightness(.98); }
+    .btn:disabled{
+      opacity:.55;
+      cursor:not-allowed;
+    }
+    .btn.primary{
+      background:var(--green);
+      border-color:var(--green);
+      color:#fff;
+    }
+    .btn.soft{
+      background:#ecfeff;
+      color:#0f766e;
+      border-color:#99f6e4;
+    }
+    .btn.dark{
+      background:var(--blue);
+      border-color:var(--blue);
+      color:#fff;
+    }
+
+    .pills{
+      display:flex;
+      flex-wrap:wrap;
+      gap:10px;
+      margin-top:14px;
+    }
     .pill{
-      display:inline-flex; align-items:center; gap:6px;
-      border:1px solid var(--border); border-radius:999px;
-      padding:4px 10px; font-size:12px; font-weight:900; background:#fff;
+      display:inline-flex;
+      align-items:center;
+      gap:8px;
+      border-radius:999px;
+      padding:8px 12px;
+      font-size:13px;
+      font-weight:800;
+      border:1px solid #cbd5e1;
+      background:#fff;
+      color:#334155;
     }
-    .pill.ok{ background:#e9fff6; border-color:#b7f2d5; color:#0a7a49; }
-    .pill.warn{ background:#fff7ed; border-color:#fed7aa; color:#9a3412; }
-    .pill.bad{ background:#ffe4e6; border-color:#fecdd3; color:#9f1239; }
+    .pill.ok{
+      color:var(--ok);
+      border-color:#bbf7d0;
+      background:#f0fdf4;
+    }
+    .pill.warn{
+      color:var(--warn);
+      border-color:#fed7aa;
+      background:#fff7ed;
+    }
+    .pill.bad{
+      color:var(--bad);
+      border-color:#fecaca;
+      background:#fef2f2;
+    }
 
-    .tableWrap{ overflow:auto; border-radius:12px; border:1px solid var(--border); }
-    table{ width:100%; border-collapse:collapse; min-width:980px; background:#fff; }
-    th, td{ padding:10px 10px; border-bottom:1px solid #eef2f7; vertical-align:top; }
-    th{ text-align:left; font-size:12px; color:var(--muted); font-weight:900; background:#fbfcfe; position:sticky; top:0; z-index:1; }
-    td .mini{ font-size:12px; color:var(--muted); }
-    td .big{ font-weight:900; }
-    .mono{ font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
-    .actionsMini{ display:flex; gap:8px; }
-    .iconBtn{ height:34px; width:40px; border-radius:10px; border:1px solid var(--border); background:#fff; cursor:pointer; font-weight:900; }
-    .iconBtn:hover{ filter:brightness(.98); }
+    .tableCard{
+      padding:18px;
+    }
+    .tableTop{
+      display:flex;
+      justify-content:space-between;
+      gap:12px;
+      align-items:end;
+      margin-bottom:12px;
+    }
+    .tableTop .field{
+      flex:1;
+      max-width:500px;
+    }
 
-    .split{ display:flex; gap:12px; flex-wrap:wrap; align-items:center; justify-content:space-between; }
-    .right{ display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+    table{
+      width:100%;
+      border-collapse:collapse;
+    }
+    thead th{
+      text-align:left;
+      background:#f8fafc;
+      color:#475569;
+      border-bottom:1px solid var(--line);
+      font-size:13px;
+      padding:12px 10px;
+      white-space:nowrap;
+    }
+    tbody td{
+      border-bottom:1px solid var(--line);
+      padding:12px 10px;
+      vertical-align:top;
+      font-size:14px;
+    }
+    tbody tr:hover{
+      background:#fafafa;
+    }
 
-    .backdrop{
-      position:fixed; inset:0; background:rgba(2,6,23,.55);
-      display:none; place-items:center; z-index:50; padding:18px;
+    .mono{ font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .mini{ font-size:12px; }
+    .big{ font-size:15px; font-weight:800; }
+    .muted{ color:var(--muted); }
+
+    .actionsMini{
+      display:flex;
+      gap:8px;
+      align-items:center;
+      flex-wrap:wrap;
+    }
+    .iconBtn{
+      border:1px solid var(--line);
+      background:#fff;
+      border-radius:10px;
+      padding:7px 10px;
+      cursor:pointer;
+      font-size:14px;
+      font-weight:800;
+    }
+
+    .modalBackdrop{
+      position:fixed;
+      inset:0;
+      background:rgba(2,6,23,.45);
+      display:none;
+      place-items:center;
+      z-index:1000;
+      padding:18px;
     }
     .modal{
-      width:min(1100px, 98vw);
+      width:min(1180px, 96vw);
       max-height:92vh;
       overflow:auto;
-      border-radius:16px;
       background:#fff;
-      border:1px solid var(--border);
-      box-shadow:0 18px 55px rgba(2,6,23,.28);
+      border-radius:20px;
+      border:1px solid var(--line);
+      box-shadow:0 20px 60px rgba(15,23,42,.28);
     }
-    .modalHead{ padding:14px 14px 10px; border-bottom:1px solid #eef2f7; display:flex; align-items:flex-start; justify-content:space-between; gap:10px; }
-    .modalTitle{ font-size:16px; font-weight:1000; margin:0; }
-    .modalSub{ font-size:12px; color:var(--muted); margin-top:3px; }
-    .modalBody{ padding:14px; }
-    .modalFoot{ padding:12px 14px; border-top:1px solid #eef2f7; display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; }
-    .closeX{ height:34px; width:38px; border-radius:10px; border:1px solid var(--border); background:#fff; cursor:pointer; font-weight:1000; }
+    .modal.small{
+      width:min(760px, 96vw);
+    }
+    .modalHead{
+      display:flex;
+      justify-content:space-between;
+      align-items:flex-start;
+      gap:12px;
+      padding:18px 20px 12px 20px;
+      border-bottom:1px solid var(--line);
+    }
+    .modalHead h2{
+      margin:0 0 6px 0;
+      font-size:24px;
+    }
+    .modalBody{
+      padding:18px 20px;
+    }
+    .modalFoot{
+      padding:14px 20px 20px 20px;
+      display:flex;
+      justify-content:space-between;
+      gap:10px;
+      flex-wrap:wrap;
+    }
+
+    .summaryLine{
+      display:flex;
+      gap:10px;
+      flex-wrap:wrap;
+      align-items:center;
+      margin-bottom:14px;
+    }
+
+    .detailTable th, .detailTable td{
+      font-size:13px;
+      padding:10px 8px;
+    }
+
+    .help{
+      color:#64748b;
+      font-size:13px;
+      line-height:1.4;
+    }
+
+    .right{
+      text-align:right;
+    }
+
+    .sectionTitle{
+      font-size:16px;
+      font-weight:900;
+      margin:0 0 12px 0;
+      color:#0f172a;
+    }
+
+    .hidden{
+      display:none !important;
+    }
+
+    @media (max-width: 1100px){
+      .grid3{ grid-template-columns:1fr; }
+      .grid2{ grid-template-columns:1fr; }
+      .pageHead{ flex-direction:column; }
+      .tableTop{ flex-direction:column; align-items:stretch; }
+      .tableTop .field{ max-width:none; }
+    }
   </style>
 </head>
-
 <body>
-  <div class="page">
-    <div id="sidebar-slot"></div>
+  <div class="appShell">
+    <aside id="sidebar-slot"></aside>
 
     <main class="main">
-      <div class="topRow">
+      <div class="pageHead">
         <div>
-          <h1 class="pageTitle">Liquidaciones Ambulatorias</h1>
-          <div class="pageSub" id="who">Conectado: —</div>
-        </div>
-
-        <div class="right">
-          <span class="pill" id="pillEstado">Estado: —</span>
-          <span class="pill" id="pillCount">0 profesionales</span>
+          <h1>Liquidaciones Ambulatorias</h1>
+          <div class="sub" id="who">Conectado: —</div>
+          <div class="sub" id="lastLoad">—</div>
         </div>
       </div>
 
-      <section class="card cardPad" style="margin-bottom:14px;">
-        <div class="toolbar">
-          <div class="filters">
-            <div class="field">
-              <label>Mes</label>
-              <select id="mes"></select>
-            </div>
-
-            <div class="field" style="min-width:120px;">
-              <label>Año</label>
-              <select id="ano"></select>
-            </div>
-
-            <div class="field" style="min-width:260px;">
-              <label>Buscar</label>
-              <input id="q" placeholder="Buscar profesional, procedimiento, paciente, origen…"/>
-            </div>
+      <section class="card toolbar">
+        <div class="grid3">
+          <div class="field">
+            <label for="mes">Mes</label>
+            <select id="mes"></select>
           </div>
 
-          <div class="right">
-            <button class="btn soft" id="btnRecalcular">🔄 Recalcular</button>
-            <button class="btn" id="btnCSVResumen">⬇️ CSV Resumen</button>
-            <button class="btn" id="btnCSVDetalle">⬇️ CSV Detalle</button>
+          <div class="field">
+            <label for="ano">Año</label>
+            <select id="ano"></select>
+          </div>
+
+          <div class="field">
+            <label>&nbsp;</label>
+            <div class="actions" style="margin-top:0;">
+              <button id="btnRecalcular" class="btn primary" type="button">Recalcular</button>
+              <button id="btnCSVResumen" class="btn" type="button">CSV Resumen</button>
+              <button id="btnCSVDetalle" class="btn" type="button">CSV Detalle</button>
+            </div>
           </div>
         </div>
 
-        <div class="split" style="margin-top:12px;">
-          <div class="mini" id="hint">
-            Fuente: <b>Producción ambulatoria confirmada</b> del mes seleccionado. Cálculo: <b>Tarifa embebida en procedimientos ambulatorios</b>.
-          </div>
-          <div class="mini" id="lastLoad">—</div>
+        <div class="pills">
+          <span id="pillCount" class="pill">0 profesionales</span>
+          <span id="pillEstado" class="pill warn">—</span>
         </div>
       </section>
 
-      <section class="card cardPad">
-        <div class="tableWrap">
+      <section class="card tableCard">
+        <div class="tableTop">
+          <div class="field">
+            <label for="q">Buscar</label>
+            <input id="q" type="text" placeholder="Profesional, procedimiento, paciente, modalidad, observación..." />
+          </div>
+        </div>
+
+        <div style="overflow:auto;">
           <table>
             <thead>
               <tr>
-                <th style="width:44px;">#</th>
+                <th>#</th>
                 <th>Profesional</th>
                 <th>RUT</th>
                 <th>Tipo</th>
                 <th>Casos</th>
                 <th>Total a pagar</th>
                 <th>Estado</th>
-                <th style="width:140px;">Acciones</th>
+                <th>Acciones</th>
               </tr>
             </thead>
             <tbody id="tbody"></tbody>
@@ -150,32 +399,33 @@
     </main>
   </div>
 
-  <div class="backdrop" id="modalBackdrop">
+  <!-- Modal detalle -->
+  <div id="modalBackdrop" class="modalBackdrop">
     <div class="modal">
       <div class="modalHead">
         <div>
-          <div class="modalTitle" id="modalTitle">Detalle</div>
-          <div class="modalSub" id="modalSub">—</div>
+          <h2 id="modalTitle">Detalle</h2>
+          <div class="sub" id="modalSub">—</div>
         </div>
-        <button class="closeX" id="btnClose">✕</button>
+        <button id="btnClose" class="btn" type="button">Cerrar</button>
       </div>
 
       <div class="modalBody">
-        <div class="split" style="margin-bottom:10px;">
-          <div class="pill" id="modalPillTotal">PAGO PROF.: —</div>
-          <div class="mini" id="modalPillPendientes">Pendientes: —</div>
+        <div class="summaryLine">
+          <span id="modalPillTotal" class="pill ok">—</span>
+          <span id="modalPillPendientes" class="pill warn">—</span>
         </div>
 
-        <div class="tableWrap">
-          <table style="min-width:1200px;">
+        <div style="overflow:auto;">
+          <table class="detailTable">
             <thead>
               <tr>
                 <th>Fecha</th>
                 <th>Procedimiento</th>
                 <th>Paciente</th>
+                <th>Modalidad</th>
                 <th>Origen</th>
-                <th>Valor base</th>
-                <th>Pago profesional</th>
+                <th>Subtotal</th>
                 <th>Estado</th>
                 <th>Observación</th>
               </tr>
@@ -186,13 +436,99 @@
       </div>
 
       <div class="modalFoot">
-        <button class="btn" id="btnCerrar2">Cerrar</button>
-        <button class="btn soft" id="btnExportDetalleProf">⬇️ Exportar detalle (este profesional)</button>
+        <div class="help">
+          El detalle muestra la liquidación ya calculada por línea, antes de agrupar por modalidad.
+        </div>
+        <div class="actions" style="margin-top:0;">
+          <button id="btnExportDetalleProf" class="btn" type="button">Exportar detalle profesional</button>
+          <button id="btnCerrar2" class="btn primary" type="button">Cerrar</button>
+        </div>
       </div>
     </div>
   </div>
 
-  <script type="module" src="layout.js"></script>
-  <script type="module" src="liquidaciones_ambulatorios.js"></script>
+  <!-- Modal ajustes -->
+  <div id="ajustesBackdrop" class="modalBackdrop">
+    <div class="modal small">
+      <div class="modalHead">
+        <div>
+          <h2 id="ajustesTitle">Ajustes mensuales</h2>
+          <div class="sub" id="ajustesSub">—</div>
+        </div>
+        <button id="btnAjustesClose" class="btn" type="button">Cerrar</button>
+      </div>
+
+      <div class="modalBody">
+        <div class="grid2">
+          <section class="card" style="padding:16px;">
+            <div class="sectionTitle">Descuento mensual</div>
+
+            <div class="field">
+              <label>
+                <input id="ajDescuentoAplica" type="checkbox" style="width:auto; margin-right:8px;" />
+                Aplica descuento este mes
+              </label>
+            </div>
+
+            <div class="field">
+              <label for="ajDescuentoCLP">Monto descuento (CLP)</label>
+              <input id="ajDescuentoCLP" type="text" placeholder="Ej: 23152" />
+            </div>
+
+            <div class="field">
+              <label for="ajDescuentoAsunto">Asunto del descuento</label>
+              <input id="ajDescuentoAsunto" type="text" placeholder="Ej: Descuento seguro complementario" />
+            </div>
+
+            <div class="help">
+              Este descuento se resta del total liquidado del profesional y se muestra en el PDF.
+            </div>
+          </section>
+
+          <section class="card" style="padding:16px;">
+            <div class="sectionTitle">Instalación de balón</div>
+
+            <div class="field">
+              <label>
+                <input id="ajBalonAplica" type="checkbox" style="width:auto; margin-right:8px;" />
+                Sumar instalación de balón este mes
+              </label>
+            </div>
+
+            <div class="field">
+              <label for="ajBalonCantidad">Cantidad</label>
+              <input id="ajBalonCantidad" type="number" min="0" step="1" placeholder="0" />
+            </div>
+
+            <div class="field">
+              <label for="ajBalonValorUnitario">Valor unitario (CLP)</label>
+              <input id="ajBalonValorUnitario" type="text" placeholder="Ej: 50000" />
+            </div>
+
+            <div class="field">
+              <label for="ajBalonAsunto">Asunto / glosa</label>
+              <input id="ajBalonAsunto" type="text" placeholder="Ej: Instalación de balón" />
+            </div>
+
+            <div id="ajBalonHelp" class="help">
+              Solo se aplicará en el cálculo si el profesional es cirujano.
+            </div>
+          </section>
+        </div>
+      </div>
+
+      <div class="modalFoot">
+        <div class="help">
+          Los ajustes se guardan por profesional y por mes.
+        </div>
+        <div class="actions" style="margin-top:0;">
+          <button id="btnAjustesCancelar" class="btn" type="button">Cancelar</button>
+          <button id="btnAjustesGuardar" class="btn primary" type="button">Guardar ajustes</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="./liquidaciones_ambulatorios.js"></script>
 </body>
 </html>
