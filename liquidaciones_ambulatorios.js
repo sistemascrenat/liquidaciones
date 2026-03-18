@@ -3,7 +3,7 @@
 import { db } from './firebase-init.js';
 import { requireAuth } from './auth.js';
 import { toast, wireLogout, setActiveNav } from './ui.js';
-import { cleanReminder, toUpperSafe, toCSV } from './utils.js';
+import { cleanReminder, toUpperSafe } from './utils.js';
 import { loadSidebar } from './layout.js';
 await loadSidebar({ active: 'liquidaciones_ambulatorios' });
 
@@ -130,6 +130,46 @@ function downloadBytes(filename, bytes, mime='application/pdf'){
   a.download = filename;
   a.click();
   setTimeout(()=> URL.revokeObjectURL(url), 1500);
+}
+
+function ensureXLSX(){
+  if(!window.XLSX){
+    throw new Error('XLSX no está cargado en la página');
+  }
+}
+
+function autoWidthFromRows(rows = [], headers = []){
+  const widths = headers.map(h => ({ wch: String(h || '').length + 2 }));
+
+  for(const row of rows){
+    headers.forEach((h, i) => {
+      const val = row?.[h];
+      const len = String(val ?? '').length + 2;
+      if(!widths[i] || len > widths[i].wch){
+        widths[i] = { wch: Math.min(len, 60) };
+      }
+    });
+  }
+
+  return widths;
+}
+
+function exportRowsToXLSX(filename, sheetName, headers, rows){
+  ensureXLSX();
+
+  const data = rows.map(r => {
+    const out = {};
+    headers.forEach(h => { out[h] = r?.[h] ?? ''; });
+    return out;
+  });
+
+  const ws = XLSX.utils.json_to_sheet(data, { header: headers });
+  ws['!cols'] = autoWidthFromRows(data, headers);
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, String(sheetName || 'Datos').slice(0, 31));
+
+  XLSX.writeFile(wb, filename);
 }
 
 function safeFileName(s){
@@ -1382,7 +1422,7 @@ function exportResumenCSV(){
     'alertas','pendientes'
   ];
 
-  const items = state.liquidResumen.map(a=>({
+  const items = state.liquidResumen.map(a => ({
     mes: monthNameEs(state.mesNum),
     ano: String(state.ano),
 
@@ -1395,20 +1435,25 @@ function exportResumenCSV(){
     tipoPersona: a.tipoPersona || '',
     rol: a.roleNombre || '',
     profesion: a.profesionDisplay || '',
-    casos: String(a.casos || 0),
+    casos: Number(a.casos || 0),
 
-    totalValorizado: String(a.ajustes?.totalValorizado || 0),
-    descuentoCLP: String(a.ajustes?.descuentoCLP || 0),
-    balonSubtotal: String(a.ajustes?.balonSubtotal || 0),
-    liquido: String(a.ajustes?.liquido || 0),
+    totalValorizado: Number(a.ajustes?.totalValorizado || 0),
+    descuentoCLP: Number(a.ajustes?.descuentoCLP || 0),
+    balonSubtotal: Number(a.ajustes?.balonSubtotal || 0),
+    liquido: Number(a.ajustes?.liquido || 0),
 
-    alertas: String(a.alertasCount || 0),
-    pendientes: String(a.pendientesCount || 0)
+    alertas: Number(a.alertasCount || 0),
+    pendientes: Number(a.pendientesCount || 0)
   }));
 
-  const csv = toCSV(headers, items);
-  download(`liquidaciones_ambulatorias_resumen_${state.ano}_${String(state.mesNum).padStart(2,'0')}.csv`, csv, 'text/csv');
-  toast('CSV resumen exportado');
+  exportRowsToXLSX(
+    `liquidaciones_ambulatorias_resumen_${state.ano}_${String(state.mesNum).padStart(2,'0')}.xlsx`,
+    'Resumen',
+    headers,
+    items
+  );
+
+  toast('XLSX resumen exportado');
 }
 
 function exportDetalleCSV(){
@@ -1462,11 +1507,11 @@ function exportDetalleCSV(){
 
         tarifaModoValor: l.tarifaModoValor || '',
         tarifaColumnaOrigen: l.tarifaColumnaOrigen || '',
-        comisionPct: hasRealValue(l.comisionPct) ? String(l.comisionPct) : '',
-        
-        valorBase: hasRealValue(l.valorBase) ? String(l.valorBase) : '',
-        pagoProfesional: hasRealValue(l.pagoProfesional) ? String(l.pagoProfesional) : '',
-        utilidad: hasRealValue(l.utilidad) ? String(l.utilidad) : '',
+        comisionPct: hasRealValue(l.comisionPct) ? Number(l.comisionPct) : '',
+
+        valorBase: hasRealValue(l.valorBase) ? Number(l.valorBase) : '',
+        pagoProfesional: hasRealValue(l.pagoProfesional) ? Number(l.pagoProfesional) : '',
+        utilidad: hasRealValue(l.utilidad) ? Number(l.utilidad) : '',
 
         estadoLinea: pickDisplayEstadoLinea(l),
         observacion: l.observacion || '',
@@ -1475,9 +1520,14 @@ function exportDetalleCSV(){
     }
   }
 
-  const csv = toCSV(headers, items);
-  download(`liquidaciones_ambulatorias_detalle_${state.ano}_${String(state.mesNum).padStart(2,'0')}.csv`, csv, 'text/csv');
-  toast('CSV detalle exportado');
+  exportRowsToXLSX(
+    `liquidaciones_ambulatorias_detalle_${state.ano}_${String(state.mesNum).padStart(2,'0')}.xlsx`,
+    'Detalle',
+    headers,
+    items
+  );
+
+  toast('XLSX detalle exportado');
 }
 
 function exportDetalleProfesional(agg){
@@ -1499,7 +1549,7 @@ function exportDetalleProfesional(agg){
     'prodId'
   ];
 
-  const items = (agg.lines || []).map(l=>({
+  const items = (agg.lines || []).map(l => ({
     mes: monthNameEs(state.mesNum),
     ano: String(state.ano),
 
@@ -1528,21 +1578,27 @@ function exportDetalleProfesional(agg){
 
     tarifaModoValor: l.tarifaModoValor || '',
     tarifaColumnaOrigen: l.tarifaColumnaOrigen || '',
-    comisionPct: String(l.comisionPct || 0),
+    comisionPct: hasRealValue(l.comisionPct) ? Number(l.comisionPct) : '',
 
-    valorBase: String(l.valorBase || 0),
-    pagoProfesional: String(l.pagoProfesional || 0),
-    utilidad: String(l.utilidad || 0),
+    valorBase: hasRealValue(l.valorBase) ? Number(l.valorBase) : '',
+    pagoProfesional: hasRealValue(l.pagoProfesional) ? Number(l.pagoProfesional) : '',
+    utilidad: hasRealValue(l.utilidad) ? Number(l.utilidad) : '',
 
     estadoLinea: pickDisplayEstadoLinea(l),
     observacion: l.observacion || '',
     prodId: l.prodId || ''
   }));
 
-  const csv = toCSV(headers, items);
   const safeName = safeFileName(agg.nombre || 'profesional');
-  download(`liquidacion_ambulatoria_${safeName}_${state.ano}_${String(state.mesNum).padStart(2,'0')}.csv`, csv, 'text/csv');
-  toast('CSV profesional exportado');
+
+  exportRowsToXLSX(
+    `liquidacion_ambulatoria_${safeName}_${state.ano}_${String(state.mesNum).padStart(2,'0')}.xlsx`,
+    'DetalleProfesional',
+    headers,
+    items
+  );
+
+  toast('XLSX profesional exportado');
 }
 
 /* =========================
