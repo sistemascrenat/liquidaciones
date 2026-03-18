@@ -1,13 +1,4 @@
 // liquidaciones_ambulatorios.js — COMPLETO
-// ✅ Mantiene lectura de producción ambulatoria confirmada
-// ✅ Calcula por línea según origen MK / Reservo
-// ✅ Agrupa por modalidad según rol
-// ✅ Ajustes mensuales por profesional y mes:
-//    - descuento manual
-//    - instalación de balón manual (solo cirujanos)
-// ✅ PDF formal tipo liquidación
-// ✅ CSV resumen / detalle / profesional
-// ✅ Modal de detalle + modal de ajustes
 
 import { db } from './firebase-init.js';
 import { requireAuth } from './auth.js';
@@ -1552,20 +1543,11 @@ function getRutPago(agg){
   return (agg.rut || '—').toUpperCase();
 }
 
-function getDatosBoleta(agg){
-  if((agg.tipoPersona || '').toLowerCase() === 'juridica'){
-    return {
-      rut: agg.empresaRut || '—',
-      razonSocial: agg.empresaNombre || '—',
-      giro: 'PRESTACIONES MÉDICAS',
-      direccion: 'MANUEL MONTT 427'
-    };
-  }
-
+function getDatosBoleta(){
   return {
-    rut: agg.rut || '—',
-    razonSocial: agg.nombre || '—',
-    giro: 'PRESTACIONES MÉDICAS',
+    rut: '77.460.159-7',
+    razonSocial: 'SERVICIOS MÉDICOS PROVIDENCIA GCS SPA',
+    giro: 'ACTIVIDADES DE HOSPITALES Y CLÍNICAS PRIVADAS',
     direccion: 'MANUEL MONTT 427'
   };
 }
@@ -1815,7 +1797,17 @@ async function generarPDFLiquidacionProfesional(agg){
 
   drawBox(page1, resumenX, y, resumenW, rmH, rgb(1,1,1), BORDER_SOFT, 1);
   drawBox(page1, resumenX, y, resumenW, resumenHeadH, RENNAT_BLUE, RENNAT_BLUE, 1);
-  drawCellTextCenter(page1, 'RESUMEN', resumenX, y, resumenW, resumenHeadH, 9, true, rgb(1,1,1));
+  
+  // ✅ Centrado manual real del título
+  {
+    const t = 'RESUMEN';
+    const size = 9;
+    const wTxt = measure(t, size, true);
+    const xTxt = resumenX + ((resumenW - wTxt) / 2);
+    const yTxt = y - (resumenHeadH * 0.72);
+  
+    drawText(page1, t, xTxt, yTxt, size, true, rgb(1,1,1));
+  }
 
   drawVLine(page1, resumenX + rmC1, y, rmH, 1, BORDER_SOFT);
 
