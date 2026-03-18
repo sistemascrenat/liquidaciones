@@ -1794,11 +1794,11 @@ async function generarPDFLiquidacionProfesional(agg){
   y -= totalH + 16;
 
   // Resumen montos
-  const resumenX = tableX + 250;
-  const resumenW = tableW - 250;
+  const resumenX = tableX + 235;
+  const resumenW = tableW - 235;
   const resumenHeadH = 20;
   const resumenRowH = 18;
-
+  
   const resumenMontoRows = [
     ['$ Valorizado:', money(agg.ajustes?.totalValorizado || 0)],
     ['$ Boleta:', money(agg.ajustes?.totalBoleta || 0)],
@@ -1806,9 +1806,11 @@ async function generarPDFLiquidacionProfesional(agg){
     [agg.ajustes?.descuentoAsunto || 'Descuento seguro complementario', money(agg.ajustes?.descuentoCLP || 0)],
     ['$ Líquido:', money(agg.ajustes?.liquido || 0)]
   ];
-
+  
   const rmH = resumenHeadH + resumenMontoRows.length * resumenRowH;
-  const rmC1 = 145;
+  
+  // ✅ Derecha más ancha para que los montos respiren mejor
+  const rmC1 = 120;
   const rmC2 = resumenW - rmC1;
 
   drawBox(page1, resumenX, y, resumenW, rmH, rgb(1,1,1), BORDER_SOFT, 1);
