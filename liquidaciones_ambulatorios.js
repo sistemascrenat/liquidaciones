@@ -1248,15 +1248,8 @@ function openDetalle(agg){
         <div class="mini muted mono">${escapeHtml(l.procedimientoId || '')}</div>
         ${procWarn}
       </td>
-      <td>
-        ${escapeHtml(l.pacienteNombre || '')}
-        <div class="mini muted mono">${escapeHtml(l.pacienteRut || '')}</div>
-      </td>
-      <td>${escapeHtml(l.modalidad || '')}</td>
-      <td>
-        ${escapeHtml((l.origen || '—').toUpperCase())}
-        <div class="mini muted">${escapeHtml(l.categoria || '')}</div>
-      </td>
+      <td>${escapeHtml(l.pacienteNombre || '')}</td>
+      <td class="mono">${escapeHtml(l.pacienteRut || '')}</td>
       <td><b>${clp(l.pagoProfesional || 0)}</b></td>
       <td>${st}</td>
       <td class="mini">${escapeHtml(obs || '')}</td>
@@ -2000,15 +1993,14 @@ async function generarPDFLiquidacionProfesional(agg){
   const detHeadH = 24;
   const detRowH = 18;
 
-  let detCols = [
-    { key:'n',    label:'#',             w: 40  },
-    { key:'fecha',label:'FECHA',         w: 105 },
-    { key:'proc', label:'PROCEDIMIENTO', w: 240 },
-    { key:'pac',  label:'PACIENTE',      w: 190 },
-    { key:'mod',  label:'MODALIDAD',     w: 110 },
-    { key:'org',  label:'ORIGEN',        w: 80  },
-    { key:'pp',   label:'SUBTOTAL',      w: 100 }
-  ];
+let detCols = [
+  { key:'n',      label:'#',             w: 40  },
+  { key:'fecha',  label:'FECHA',         w: 105 },
+  { key:'proc',   label:'PROCEDIMIENTO', w: 285 },
+  { key:'pac',    label:'PACIENTE',      w: 210 },
+  { key:'rutPac', label:'RUT PACIENTE',  w: 120 },
+  { key:'pp',     label:'SUBTOTAL',      w: 100 }
+];
 
   {
     const sum = detCols.reduce((a,c)=>a + c.w, 0);
@@ -2037,24 +2029,21 @@ async function generarPDFLiquidacionProfesional(agg){
 
     drawCellTextRight(page, String(rowNumber), xPos, topY, detCols[0].w, detRowH, 9, true, TEXT_MUTED, 8);
     xPos += detCols[0].w;
-
+    
     const fechaTxt = `${row.fecha || ''}${row.hora ? ' ' + row.hora : ''}`;
     drawCellText(page, wrapClip(fechaTxt, 18), xPos, topY, detRowH, 9, false, TEXT_MAIN, 8);
     xPos += detCols[1].w;
-
-    drawCellText(page, wrapClip(`${row.procedimientoId || ''} · ${row.procedimientoNombre || ''}`, 38), xPos, topY, detRowH, 9, false, TEXT_MAIN, 8);
+    
+    drawCellText(page, wrapClip(`${row.procedimientoId || ''} · ${row.procedimientoNombre || ''}`, 46), xPos, topY, detRowH, 9, false, TEXT_MAIN, 8);
     xPos += detCols[2].w;
-
-    drawCellText(page, wrapClip(row.pacienteNombre || '', 28), xPos, topY, detRowH, 9, false, TEXT_MAIN, 8);
+    
+    drawCellText(page, wrapClip(row.pacienteNombre || '', 30), xPos, topY, detRowH, 9, false, TEXT_MAIN, 8);
     xPos += detCols[3].w;
-
-    drawCellText(page, wrapClip((row.modalidad || '').toUpperCase(), 14), xPos, topY, detRowH, 9, false, TEXT_MUTED, 8);
+    
+    drawCellText(page, wrapClip(row.pacienteRut || '', 16), xPos, topY, detRowH, 9, false, TEXT_MUTED, 8);
     xPos += detCols[4].w;
-
-    drawCellText(page, wrapClip((row.origen || '').toUpperCase(), 10), xPos, topY, detRowH, 9, false, TEXT_MUTED, 8);
-    xPos += detCols[5].w;
-
-    drawCellTextRight(page, money(row.pagoProfesional || 0), xPos, topY, detCols[6].w, detRowH, 9, true, TEXT_MAIN, 8);
+    
+    drawCellTextRight(page, money(row.pagoProfesional || 0), xPos, topY, detCols[5].w, detRowH, 9, true, TEXT_MAIN, 8);
   }
 
   const allLinesSorted = [...(agg.lines || [])].sort((a,b)=>{
