@@ -56,20 +56,49 @@ function escapeHtml(s=''){
     .replaceAll("'","&#039;");
 }
 
+function hasRealValue(v){
+  return !(v === undefined || v === null || String(v).trim() === '');
+}
+
 function asNumberLoose(v){
   const s = (v ?? '').toString().replace(/[^\d]/g,'');
   return Number(s || 0) || 0;
 }
 
+function asNullableMoney(v){
+  const raw = (v ?? '').toString().trim();
+  if(!raw) return null;
+
+  const digits = raw.replace(/[^\d]/g,'');
+  if(digits === '') return null;
+
+  return Number(digits);
+}
+
+function asNullablePercent(v){
+  const raw = (v ?? '').toString().trim();
+  if(!raw) return null;
+
+  const normalized = raw.replace(/[^\d.,]/g,'').replace(',','.');
+  if(normalized === '') return null;
+
+  const n = Number(normalized);
+  return Number.isNaN(n) ? null : n;
+}
+
 function clp(n){
-  const x = Number(n || 0) || 0;
+  if(!hasRealValue(n)) return '';
+  const x = Number(n);
+  if(Number.isNaN(x)) return '';
   const s = Math.round(x).toString();
   const withDots = s.replace(/\B(?=(\d{3})+(?!\d))/g, '.');
   return `$${withDots}`;
 }
 
 function pct(n){
-  const x = Number(n || 0) || 0;
+  if(!hasRealValue(n)) return '';
+  const x = Number(n);
+  if(Number.isNaN(x)) return '';
   return `${x}%`;
 }
 
@@ -77,8 +106,16 @@ function wireMoneyInput(el){
   if(!el) return;
 
   const repaint = ()=>{
-    const n = asNumberLoose(el.value);
-    el.value = (n > 0) ? clp(n) : '';
+    const raw = (el.value ?? '').toString().trim();
+    const digits = raw.replace(/[^\d]/g,'');
+
+    if(digits === ''){
+      el.value = '';
+      return;
+    }
+
+    const n = Number(digits);
+    el.value = clp(n);
   };
 
   el.addEventListener('blur', repaint);
@@ -94,15 +131,32 @@ function wirePercentInput(el){
 
   el.addEventListener('input', ()=>{
     let raw = (el.value ?? '').toString().replace(/[^\d.,]/g,'').replace(',','.');
-    const n = Number(raw || 0);
+    if(raw === ''){
+      el.value = '';
+      return;
+    }
+
+    const n = Number(raw);
     if(Number.isNaN(n)) return;
+
     if(n < 0) el.value = '0';
     else if(n > 100) el.value = '100';
     else el.value = raw;
   });
 
   el.addEventListener('blur', ()=>{
-    const n = Number((el.value ?? '').toString().replace(',','.')) || 0;
+    const raw = (el.value ?? '').toString().trim();
+    if(!raw){
+      el.value = '';
+      return;
+    }
+
+    const n = Number(raw.replace(',','.'));
+    if(Number.isNaN(n)){
+      el.value = '';
+      return;
+    }
+
     el.value = String(n);
   });
 }
@@ -153,20 +207,20 @@ function normalizeProcDoc(id, x){
   const tarifaRaw = (x?.tarifa && typeof x.tarifa === 'object') ? x.tarifa : {};
 
   const modoValor = normalizeModoValor(tarifaRaw.modoValor);
-  const valor = Number(tarifaRaw.valor ?? 0) || 0;
+  const valor = hasRealValue(tarifaRaw.valor) ? Number(tarifaRaw.valor) : null;
   const columnaOrigen = cleanReminder(tarifaRaw.columnaOrigen || '');
-  const comisionPct = Number(tarifaRaw.comisionPct ?? 0) || 0;
-  const valorProfesional = Number(tarifaRaw.valorProfesional ?? 0) || 0;
+  const comisionPct = hasRealValue(tarifaRaw.comisionPct) ? Number(tarifaRaw.comisionPct) : null;
+  const valorProfesional = hasRealValue(tarifaRaw.valorProfesional) ? Number(tarifaRaw.valorProfesional) : null;
 
   let utilidad = null;
-  if(modoValor === 'fijo'){
+  if(modoValor === 'fijo' && valor !== null && valorProfesional !== null){
     utilidad = valor - valorProfesional;
   }
 
   const hasTarifa =
     (modoValor === 'archivo')
-      ? !!columnaOrigen || comisionPct > 0 || valorProfesional > 0
-      : valor > 0 || comisionPct > 0 || valorProfesional > 0;
+      ? !!columnaOrigen || comisionPct !== null || valorProfesional !== null
+      : valor !== null || comisionPct !== null || valorProfesional !== null;
 
   return {
     id,
@@ -261,30 +315,30 @@ function tarifaChip(p){
 
   if(t.modoValor === 'archivo'){
     const col = t.columnaOrigen || '—';
-    const vp = Number(t.valorProfesional || 0) || 0;
-    const com = Number(t.comisionPct || 0) || 0;
+    const vp = t.valorProfesional;
+    const com = t.comisionPct;
 
     return `
       <div style="display:flex; flex-wrap:wrap; gap:8px;">
         <span class="pill"><b>VALOR:</b> DESDE ARCHIVO</span>
         <span class="pill"><b>COLUMNA:</b> ${escapeHtml(col)}</span>
-        <span class="pill"><b>COMISIÓN:</b> ${escapeHtml(pct(com))}</span>
-        <span class="pill"><b>PAGO PROF.:</b> ${vp > 0 ? escapeHtml(clp(vp)) : '—'}</span>
+        <span class="pill"><b>COMISIÓN:</b> ${hasRealValue(com) ? escapeHtml(pct(com)) : '—'}</span>
+        <span class="pill"><b>PAGO PROF.:</b> ${hasRealValue(vp) ? escapeHtml(clp(vp)) : '—'}</span>
       </div>
     `;
   }
 
-  const valor = Number(t.valor || 0) || 0;
-  const pago = Number(t.valorProfesional || 0) || 0;
-  const utilidad = Number(t.utilidad || 0) || 0;
-  const com = Number(t.comisionPct || 0) || 0;
+  const valor = t.valor;
+  const pago = t.valorProfesional;
+  const utilidad = t.utilidad;
+  const com = t.comisionPct;
 
   return `
     <div style="display:flex; flex-wrap:wrap; gap:8px;">
-      <span class="pill"><b>${clp(valor)}</b></span>
-      <span class="pill">Comisión ${escapeHtml(pct(com))}</span>
-      <span class="pill">Pago prof. ${escapeHtml(clp(pago))}</span>
-      <span class="pill">Utilidad ${escapeHtml(clp(utilidad))}</span>
+      <span class="pill"><b>${hasRealValue(valor) ? clp(valor) : '—'}</b></span>
+      <span class="pill">Comisión ${hasRealValue(com) ? escapeHtml(pct(com)) : '—'}</span>
+      <span class="pill">Pago prof. ${hasRealValue(pago) ? escapeHtml(clp(pago)) : '—'}</span>
+      <span class="pill">Utilidad ${hasRealValue(utilidad) ? escapeHtml(clp(utilidad)) : '—'}</span>
     </div>
   `;
 }
@@ -378,10 +432,10 @@ function toggleModoValorUI(){
 
 function computeTarPreview(){
   const modo = normalizeModoValor($('tarModoValor')?.value || 'fijo');
-  const valor = asNumberLoose($('tarValor')?.value || '');
+  const valor = asNullableMoney($('tarValor')?.value || '');
   const columna = cleanReminder($('tarColumnaOrigen')?.value || '');
-  const comisionPct = Number((($('tarComisionPct')?.value || '').toString().replace(',','.'))) || 0;
-  const valorProfesional = asNumberLoose($('tarValorProfesional')?.value || '');
+  const comisionPct = asNullablePercent($('tarComisionPct')?.value || '');
+  const valorProfesional = asNullableMoney($('tarValorProfesional')?.value || '');
 
   if($('tarResumen')){
     if(modo === 'archivo'){
@@ -389,30 +443,35 @@ function computeTarPreview(){
         `Valor ${spanPrice('DESDE ARCHIVO')} · ` +
         `Columna ${spanCost(escapeHtml(columna || '—'))}`;
     } else {
-      const utilidad = valor - valorProfesional;
+      const utilidad = (valor !== null && valorProfesional !== null)
+        ? (valor - valorProfesional)
+        : null;
+
       $('tarResumen').innerHTML =
-        `Valor ${spanPrice(clp(valor))} · ` +
-        `Pago profesional ${spanCost(clp(valorProfesional))} · ` +
-        `Utilidad ${spanProfit(clp(utilidad))}`;
+        `Valor ${spanPrice(hasRealValue(valor) ? clp(valor) : '—')} · ` +
+        `Pago profesional ${spanCost(hasRealValue(valorProfesional) ? clp(valorProfesional) : '—')} · ` +
+        `Utilidad ${spanProfit(hasRealValue(utilidad) ? clp(utilidad) : '—')}`;
     }
   }
 
-  if($('tarTotales')){
     if(modo === 'archivo'){
       $('tarTotales').innerHTML = `
         MODO: <b>DESDE ARCHIVO</b><br/>
         COLUMNA ORIGEN: <b>${escapeHtml(columna || '—')}</b><br/>
-        COMISIÓN: <b>${escapeHtml(pct(comisionPct))}</b><br/>
-        PAGO PROFESIONAL: <b>${valorProfesional > 0 ? clp(valorProfesional) : '—'}</b>
+        COMISIÓN: <b>${hasRealValue(comisionPct) ? escapeHtml(pct(comisionPct)) : '—'}</b><br/>
+        PAGO PROFESIONAL: <b>${hasRealValue(valorProfesional) ? clp(valorProfesional) : '—'}</b>
       `;
     } else {
-      const utilidad = valor - valorProfesional;
+      const utilidad = (valor !== null && valorProfesional !== null)
+        ? (valor - valorProfesional)
+        : null;
+
       $('tarTotales').innerHTML = `
-        VALOR: <b>${clp(valor)}</b><br/>
-        COMISIÓN: <b>${escapeHtml(pct(comisionPct))}</b><br/>
-        PAGO PROFESIONAL: <b>${clp(valorProfesional)}</b><br/>
+        VALOR: <b>${hasRealValue(valor) ? clp(valor) : '—'}</b><br/>
+        COMISIÓN: <b>${hasRealValue(comisionPct) ? escapeHtml(pct(comisionPct)) : '—'}</b><br/>
+        PAGO PROFESIONAL: <b>${hasRealValue(valorProfesional) ? clp(valorProfesional) : '—'}</b><br/>
         <div style="height:6px;"></div>
-        UTILIDAD: <b>${clp(utilidad)}</b>
+        UTILIDAD: <b>${hasRealValue(utilidad) ? clp(utilidad) : '—'}</b>
       `;
     }
   }
@@ -456,10 +515,10 @@ function openProcModal(mode, p=null){
     $('procEstado').value = p?.estado || 'activa';
 
     $('tarModoValor').value = p?.tarifa?.modoValor || 'fijo';
-    $('tarValor').value = (Number(p?.tarifa?.valor || 0) > 0) ? clp(p.tarifa.valor) : '';
+    $('tarValor').value = hasRealValue(p?.tarifa?.valor) ? clp(p.tarifa.valor) : '';
     $('tarColumnaOrigen').value = p?.tarifa?.columnaOrigen || '';
-    $('tarComisionPct').value = String(Number(p?.tarifa?.comisionPct || 0) || 0);
-    $('tarValorProfesional').value = (Number(p?.tarifa?.valorProfesional || 0) > 0) ? clp(p.tarifa.valorProfesional) : '';
+    $('tarComisionPct').value = hasRealValue(p?.tarifa?.comisionPct) ? String(p.tarifa.comisionPct) : '';
+    $('tarValorProfesional').value = hasRealValue(p?.tarifa?.valorProfesional) ? clp(p.tarifa.valorProfesional) : '';
   }
 
   toggleModoValorUI();
@@ -479,10 +538,10 @@ async function saveProc(){
   const estado = (cleanReminder($('procEstado').value) || 'activa').toLowerCase();
 
   const modoValor = normalizeModoValor($('tarModoValor').value);
-  const valor = asNumberLoose($('tarValor').value);
+  const valor = asNullableMoney($('tarValor').value);
   const columnaOrigen = cleanReminder($('tarColumnaOrigen').value);
-  const comisionPct = Number((($('tarComisionPct').value || '').toString().replace(',','.'))) || 0;
-  const valorProfesional = asNumberLoose($('tarValorProfesional').value);
+  const comisionPct = asNullablePercent($('tarComisionPct').value);
+  const valorProfesional = asNullableMoney($('tarValorProfesional').value);
 
   if(!codigo || !/^PA\d{4}$/i.test(codigo)){
     toast('Código inválido. Usa formato PA0001');
@@ -523,7 +582,7 @@ async function saveProc(){
     estado,
     tarifa: {
       modoValor,
-      valor: (modoValor === 'fijo') ? valor : 0,
+      valor: (modoValor === 'fijo') ? valor : null,
       columnaOrigen: (modoValor === 'archivo') ? columnaOrigen : '',
       comisionPct,
       valorProfesional,
@@ -704,13 +763,18 @@ async function importXLSX(file){
     }
 
     const modoValor = normalizeModoValor(row.modovalor || 'fijo');
-    const valor = Number(row.valor || 0) || 0;
+    const valor = hasRealValue(row.valor) ? Number(row.valor) : null;
     const columnaOrigen = cleanReminder(row.columnaorigen || '');
-    const comisionPct = Number((row.comisionpct ?? 0)) || 0;
-    let valorProfesional = Number((row.valorprofesional ?? 0)) || 0;
+    const comisionPct = hasRealValue(row.comisionpct) ? Number(row.comisionpct) : null;
+    let valorProfesional = hasRealValue(row.valorprofesional) ? Number(row.valorprofesional) : null;
 
     // Si es fijo y no viene valorProfesional, pero sí valor + comisión, se calcula.
-    if(modoValor === 'fijo' && valorProfesional <= 0 && valor > 0 && comisionPct > 0){
+    if(
+      modoValor === 'fijo' &&
+      valorProfesional === null &&
+      valor !== null &&
+      comisionPct !== null
+    ){
       valorProfesional = Math.round(valor * (comisionPct / 100));
     }
 
@@ -730,7 +794,7 @@ async function importXLSX(file){
       estado,
       tarifa: {
         modoValor,
-        valor: (modoValor === 'fijo') ? valor : 0,
+        valor: (modoValor === 'fijo') ? valor : null,
         columnaOrigen: (modoValor === 'archivo') ? columnaOrigen : '',
         comisionPct,
         valorProfesional,
