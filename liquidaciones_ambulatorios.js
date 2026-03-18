@@ -231,7 +231,9 @@ const state = {
 
   ajustesCache: new Map(),
   ajustesActualKey: '',
-  ajustesActualAgg: null
+  ajustesActualAgg: null,
+  
+  fechaPagoManual: ''
 };
 
 /* =========================
@@ -239,6 +241,35 @@ const state = {
 ========================= */
 const colProfesionales = collection(db, 'profesionales');
 const colProcedimientos = collection(db, 'procedimientos');
+
+function fechaPagoDocRef(){
+  return doc(db, 'liquidaciones_ambulatorias_config', ajustesMonthId(), 'config', 'fechaPago');
+}
+
+async function loadFechaPagoMes(){
+  try{
+    const snap = await getDoc(fechaPagoDocRef());
+    const x = snap.exists() ? (snap.data() || {}) : {};
+
+    state.fechaPagoManual = cleanReminder(x.fechaPago || '');
+  }catch(e){
+    console.warn('No se pudo leer fecha de pago del mes', e);
+    state.fechaPagoManual = '';
+  }
+}
+
+async function saveFechaPagoMes(fechaPago){
+  await setDoc(fechaPagoDocRef(), {
+    monthId: ajustesMonthId(),
+    ano: Number(state.ano),
+    mesNum: Number(state.mesNum),
+    fechaPago: cleanReminder(fechaPago || ''),
+    actualizadoEl: serverTimestamp(),
+    actualizadoPor: state.user?.email || ''
+  }, { merge:true });
+
+  state.fechaPagoManual = cleanReminder(fechaPago || '');
+}
 
 /* =========================
    Catálogos
@@ -1239,6 +1270,37 @@ function closeDetalle(){
 }
 
 /* =========================
+   Modal fecha de pago
+========================= */
+function closeFechaPago(){
+  $('fechaPagoBackdrop').style.display = 'none';
+}
+
+function openFechaPago(){
+  const actual = getFechaPagoTexto();
+
+  $('fechaPagoTitle').textContent = 'Fecha de pago';
+  $('fechaPagoSub').textContent = `${monthNameEs(state.mesNum)} ${state.ano}`;
+  $('fechaPagoInput').value = actual || '';
+
+  $('fechaPagoBackdrop').style.display = 'grid';
+}
+
+async function saveFechaPagoDesdeModal(){
+  const valor = cleanReminder($('fechaPagoInput').value || '');
+
+  if(!valor){
+    toast('Ingresa una fecha de pago');
+    return;
+  }
+
+  await saveFechaPagoMes(valor);
+  toast('Fecha de pago guardada');
+  closeFechaPago();
+  paint();
+}
+
+/* =========================
    Modal ajustes
 ========================= */
 function closeAjustes(){
@@ -1534,10 +1596,14 @@ function getNroLiquidacion(agg){
 }
 
 function getNombreRutPago(agg){
+  const nombrePersona = (agg.nombre || '—').toUpperCase();
+
   if((agg.tipoPersona || '').toLowerCase() === 'juridica'){
-    return (agg.empresaNombre || agg.nombre || '—').toUpperCase();
+    const nombreEmpresa = (agg.empresaNombre || '—').toUpperCase();
+    return `${nombreEmpresa} | ${nombrePersona}`;
   }
-  return (agg.nombre || '—').toUpperCase();
+
+  return nombrePersona;
 }
 
 function getRutPago(agg){
@@ -1557,8 +1623,11 @@ function getDatosBoleta(){
 }
 
 function getFechaPagoTexto(){
-  // Ajuste simple:
-  // se deja día 5 del mes siguiente al liquidado
+  if(cleanReminder(state.fechaPagoManual || '')){
+    return cleanReminder(state.fechaPagoManual);
+  }
+
+  // default: día 5 del mes siguiente al liquidado
   let mes = Number(state.mesNum || 0);
   let ano = Number(state.ano || 0);
 
@@ -2119,6 +2188,7 @@ async function recalc(){
     }
 
     await loadProduccionMes();
+    await loadFechaPagoMes();
     await buildLiquidaciones();
     paint();
 
@@ -2139,6 +2209,7 @@ function bindUI(){
     paint();
   });
 
+  $('btnFechaPago').addEventListener('click', openFechaPago);
   $('btnRecalcular').addEventListener('click', recalc);
   $('btnCSVResumen').addEventListener('click', exportResumenCSV);
   $('btnCSVDetalle').addEventListener('click', exportDetalleCSV);
@@ -2177,6 +2248,13 @@ function bindUI(){
     if(e.target === $('ajustesBackdrop')) closeAjustes();
   });
   $('btnAjustesGuardar').addEventListener('click', saveAjustesDesdeModal);
+  
+  $('btnFechaPagoClose').addEventListener('click', closeFechaPago);
+  $('btnFechaPagoCancelar').addEventListener('click', closeFechaPago);
+  $('fechaPagoBackdrop').addEventListener('click', (e)=>{
+    if(e.target === $('fechaPagoBackdrop')) closeFechaPago();
+  });
+  $('btnFechaPagoGuardar').addEventListener('click', saveFechaPagoDesdeModal);
 }
 
 /* =========================
