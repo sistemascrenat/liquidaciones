@@ -454,6 +454,7 @@ function computeTarPreview(){
     }
   }
 
+  if($('tarTotales')){
     if(modo === 'archivo'){
       $('tarTotales').innerHTML = `
         MODO: <b>DESDE ARCHIVO</b><br/>
