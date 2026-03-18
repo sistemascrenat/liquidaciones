@@ -1780,8 +1780,8 @@ async function generarPDFLiquidacionProfesional(agg){
   y -= totalH + 16;
 
   // Resumen montos
-  const resumenX = tableX + 235;
-  const resumenW = tableW - 235;
+  const resumenX = tableX;
+  const resumenW = tableW;
   const resumenHeadH = 20;
   const resumenRowH = 18;
   
@@ -1795,36 +1795,52 @@ async function generarPDFLiquidacionProfesional(agg){
   
   const rmH = resumenHeadH + resumenMontoRows.length * resumenRowH;
   
-  // ✅ Derecha más ancha para que los montos respiren mejor
-  const rmC1 = 120;
-  const rmC2 = resumenW - rmC1;
-
+  // ✅ Inverso a DATOS BOLETA:
+  // izquierda más ancha, derecha más angosta
+  const rmC1 = tableW - 140;
+  const rmC2 = 140;
+  
   drawBox(page1, resumenX, y, resumenW, rmH, rgb(1,1,1), BORDER_SOFT, 1);
   drawBox(page1, resumenX, y, resumenW, resumenHeadH, RENNAT_BLUE, RENNAT_BLUE, 1);
   
-  // ✅ Centrado manual real del título
-  {
-    const t = 'RESUMEN';
-    const size = 9;
-    const wTxt = measure(t, size, true);
-    const xTxt = resumenX + ((resumenW - wTxt) / 2);
-    const yTxt = y - (resumenHeadH * 0.72);
+  // ✅ Título centrado sobre todo el ancho real de la tabla
+  drawCellTextCenter(page1, 'RESUMEN', resumenX, y, resumenW, resumenHeadH, 9.5, true, rgb(1,1,1));
   
-    drawText(page1, t, xTxt, yTxt, size, true, rgb(1,1,1));
-  }
-
   drawVLine(page1, resumenX + rmC1, y, rmH, 1, BORDER_SOFT);
-
+  
   for(let i=0;i<resumenMontoRows.length;i++){
     const r = resumenMontoRows[i];
     const yTop = y - resumenHeadH - i*resumenRowH;
     drawHLine(page1, resumenX, yTop, resumenW, 1, BORDER_SOFT);
-
+  
     const isLiquido = i === resumenMontoRows.length - 1;
-    drawCellText(page1, wrapClip(r[0], 34), resumenX, yTop, resumenRowH, 8.3, isLiquido, TEXT_MAIN, 6);
-    drawCellTextRight(page1, r[1], resumenX + rmC1, yTop, rmC2, resumenRowH, 8.3, true, TEXT_MAIN, 6);
+  
+    drawCellText(
+      page1,
+      wrapClip(r[0], 52),
+      resumenX,
+      yTop,
+      resumenRowH,
+      8.3,
+      isLiquido,
+      TEXT_MAIN,
+      6
+    );
+  
+    drawCellTextRight(
+      page1,
+      r[1],
+      resumenX + rmC1,
+      yTop,
+      rmC2,
+      resumenRowH,
+      8.3,
+      true,
+      TEXT_MAIN,
+      8
+    );
   }
-
+  
   y -= rmH + 16;
 
   // Datos boleta
