@@ -58,6 +58,10 @@ function escapeHtml(s=''){
     .replaceAll("'","&#039;");
 }
 
+function hasRealValue(v){
+  return !(v === undefined || v === null || String(v).trim() === '');
+}
+
 function asNumberLoose(v){
   const s = (v ?? '').toString().replace(/[^\d]/g,'');
   return Number(s || 0) || 0;
@@ -314,10 +318,10 @@ function normalizeProcDocAmb(id, x){
 
     tarifa: {
       modoValor: normalizeModoValor(tarifaRaw.modoValor),
-      valor: Number(tarifaRaw.valor || 0) || 0,
+      valor: hasRealValue(tarifaRaw.valor) ? Number(tarifaRaw.valor) : null,
       columnaOrigen: cleanReminder(tarifaRaw.columnaOrigen || ''),
-      comisionPct: Number(tarifaRaw.comisionPct || 0) || 0,
-      valorProfesional: Number(tarifaRaw.valorProfesional || 0) || 0
+      comisionPct: hasRealValue(tarifaRaw.comisionPct) ? Number(tarifaRaw.comisionPct) : null,
+      valorProfesional: hasRealValue(tarifaRaw.valorProfesional) ? Number(tarifaRaw.valorProfesional) : null
     }
   };
 }
@@ -479,10 +483,10 @@ function getTarifaAmbulatoria(procDoc){
 
   return {
     modoValor: normalizeModoValor(t.modoValor),
-    valor: Number(t.valor || 0) || 0,
+    valor: hasRealValue(t.valor) ? Number(t.valor) : null,
     columnaOrigen: cleanReminder(t.columnaOrigen || ''),
-    comisionPct: Number(t.comisionPct || 0) || 0,
-    valorProfesional: Number(t.valorProfesional || 0) || 0
+    comisionPct: hasRealValue(t.comisionPct) ? Number(t.comisionPct) : null,
+    valorProfesional: hasRealValue(t.valorProfesional) ? Number(t.valorProfesional) : null
   };
 }
 
@@ -530,13 +534,13 @@ function calcularPagoSegunOrigen(x, procDoc){
     valorBase =
       tarifa.modoValor === 'archivo'
         ? getValorDesdeRaw(raw, tarifa.columnaOrigen) || getValorMKFallback(raw)
-        : getValorMKFallback(raw) || Number(tarifa.valor || 0) || 0;
+        : getValorMKFallback(raw) || Number(tarifa.valor ?? 0) || 0;
 
-    if(tarifa.comisionPct > 0 && valorBase > 0){
-      pagoProfesional = Math.round(valorBase * (tarifa.comisionPct / 100));
-    }else if(Number(tarifa.valorProfesional || 0) > 0){
+    if(hasRealValue(tarifa.comisionPct) && Number(tarifa.comisionPct) > 0 && valorBase > 0){
+      pagoProfesional = Math.round(valorBase * (Number(tarifa.comisionPct) / 100));
+    }else if(hasRealValue(tarifa.valorProfesional)){
       // fallback de seguridad
-      pagoProfesional = Number(tarifa.valorProfesional || 0) || 0;
+      pagoProfesional = Number(tarifa.valorProfesional) || 0;
     }
 
     utilidad = valorBase - pagoProfesional;
@@ -545,13 +549,13 @@ function calcularPagoSegunOrigen(x, procDoc){
     valorBase =
       tarifa.modoValor === 'archivo'
         ? getValorDesdeRaw(raw, tarifa.columnaOrigen)
-        : Number(tarifa.valor || 0) || 0;
+        : Number(tarifa.valor ?? 0) || 0;
 
-    if(Number(tarifa.valorProfesional || 0) > 0){
-      pagoProfesional = Number(tarifa.valorProfesional || 0) || 0;
-    }else if(tarifa.comisionPct > 0 && valorBase > 0){
+    if(hasRealValue(tarifa.valorProfesional)){
+      pagoProfesional = Number(tarifa.valorProfesional) || 0;
+    }else if(hasRealValue(tarifa.comisionPct) && Number(tarifa.comisionPct) > 0 && valorBase > 0){
       // fallback por seguridad
-      pagoProfesional = Math.round(valorBase * (tarifa.comisionPct / 100));
+      pagoProfesional = Math.round(valorBase * (Number(tarifa.comisionPct) / 100));
     }
 
     utilidad = valorBase - pagoProfesional;
@@ -822,11 +826,11 @@ async function buildLiquidaciones(){
         if(valorBase <= 0){
           pendientes.push('MK sin valor base desde archivo');
         }
-        if(comisionPct <= 0 && pagoProfesional <= 0){
-          pendientes.push('MK sin porcentaje / pago válido');
+        if(!hasRealValue(calc.tarifa?.comisionPct) && !hasRealValue(calc.tarifa?.valorProfesional)){
+          pendientes.push('MK sin porcentaje / pago configurado');
         }
       } else {
-        if(Number(calc.tarifa?.valorProfesional || 0) <= 0 && pagoProfesional <= 0){
+        if(!hasRealValue(calc.tarifa?.valorProfesional) && !hasRealValue(calc.tarifa?.comisionPct)){
           pendientes.push('Reservo sin valor a pagar al profesional');
         }
       }
@@ -1403,11 +1407,11 @@ function exportDetalleCSV(){
 
         tarifaModoValor: l.tarifaModoValor || '',
         tarifaColumnaOrigen: l.tarifaColumnaOrigen || '',
-        comisionPct: String(l.comisionPct || 0),
-
-        valorBase: String(l.valorBase || 0),
-        pagoProfesional: String(l.pagoProfesional || 0),
-        utilidad: String(l.utilidad || 0),
+        comisionPct: hasRealValue(l.comisionPct) ? String(l.comisionPct) : '',
+        
+        valorBase: hasRealValue(l.valorBase) ? String(l.valorBase) : '',
+        pagoProfesional: hasRealValue(l.pagoProfesional) ? String(l.pagoProfesional) : '',
+        utilidad: hasRealValue(l.utilidad) ? String(l.utilidad) : '',
 
         estadoLinea: pickDisplayEstadoLinea(l),
         observacion: l.observacion || '',
