@@ -397,9 +397,14 @@ function clasificarEstadoCitaReservo(v) {
 function clasificarEstadoPagoReservo(v) {
   const t = normalizarTexto(v);
   if (!t) return "otro";
+
   if (t.includes("NO PAG")) return "no_pagado";
+
+  // ✅ NUEVO: "PLAN" se considera positivo igual que pagado
   if (t.includes("PAGAD")) return "pagado";
+  if (t.includes("PLAN")) return "plan";
   if (t.includes("DESCARTAD")) return "descartado";
+
   return "otro";
 }
 
@@ -417,9 +422,25 @@ function evaluarAplicacionReservo(raw) {
     };
   }
 
+  // ✅ NUEVO: PLAN se considera positivo
+  if (estadoCita === "atendido" && estadoPago === "plan") {
+    return {
+      aplicacion: construirAplicacion("aplica", "Atendido y plan"),
+      alertas
+    };
+  }
+
   if (estadoCita === "no_llego" && estadoPago === "pagado") {
     return {
       aplicacion: construirAplicacion("aplica", "No llegó y pagado"),
+      alertas
+    };
+  }
+
+  // ✅ NUEVO: PLAN se considera positivo
+  if (estadoCita === "no_llego" && estadoPago === "plan") {
+    return {
+      aplicacion: construirAplicacion("aplica", "No llegó y plan"),
       alertas
     };
   }
@@ -440,10 +461,10 @@ function evaluarAplicacionReservo(raw) {
     };
   }
 
-  if (estadoCita === "otro" && (estadoPago === "pagado" || estadoPago === "descartado")) {
-    alertas.push("Inconsistencia: pago/descartado sin estado cita reconocido");
+  if (estadoCita === "otro" && (estadoPago === "pagado" || estadoPago === "plan" || estadoPago === "descartado")) {
+    alertas.push("Inconsistencia: pago/plan/descartado sin estado cita reconocido");
     return {
-      aplicacion: construirAplicacion("revisar", "Pago/descartado sin estado cita reconocido"),
+      aplicacion: construirAplicacion("revisar", "Pago/plan/descartado sin estado cita reconocido"),
       alertas
     };
   }
