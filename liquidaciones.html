@@ -233,7 +233,9 @@
           <div class="pill" id="modalPillTotal">TOTAL: —</div>
           <div class="mini" id="modalPillPendientes">Pendientes: —</div>
         </div>
-
+      
+        <div id="modalResumenLiquidacion"></div>
+      
         <div class="tableWrap">
           <table style="min-width:1100px;">
             <thead>
@@ -260,37 +262,71 @@
     </div>
   </div>
 
-    <!-- MODAL UF (usa el mismo sistema de modal que ya tienes) -->
-    <div class="backdrop" id="ufBackdrop">
+    <!-- MODAL FECHAS DE PAGO -->
+    <div class="backdrop" id="fechasPagoBackdrop">
       <div class="modal" style="width:min(520px, 96vw);">
         <div class="modalHead">
           <div>
-            <div class="modalTitle" id="ufTitle" style="margin:0;">UF del mes</div>
-            <div class="modalSub" id="ufSub">—</div>
+            <div class="modalTitle" style="margin:0;">Fechas de pago</div>
+            <div class="modalSub" id="fechasPagoSub">—</div>
           </div>
-          <button class="closeX" id="btnUfClose" type="button" aria-label="Cerrar">✕</button>
+          <button class="closeX" id="btnFechasPagoClose" type="button" aria-label="Cerrar">✕</button>
         </div>
-  
+    
         <div class="modalBody">
+          <div class="field" style="min-width:auto; margin-bottom:12px;">
+            <label>Fecha pago 1</label>
+            <input id="fechaPago1" type="text" placeholder="Ej: 5 DE ENERO 2026">
+          </div>
+    
           <div class="field" style="min-width:auto;">
-            <label>Valor UF (CLP)</label>
-            <input id="ufValor" type="text" inputmode="decimal" placeholder="Ej: 39000,45">
+            <label>Fecha pago 2</label>
+            <input id="fechaPago2" type="text" placeholder="Ej: 27 DE ENERO 2026">
           </div>
         </div>
-  
+    
         <div class="modalFoot ufFoot">
-          <button class="btn ufBtnOutline" id="btnUfCancelar" type="button">Cancelar</button>
+          <button class="btn ufBtnOutline" id="btnFechasPagoCancelar" type="button">Cancelar</button>
           <span style="flex:1"></span>
-          <button class="btn ufBtnPrimary" id="btnUfGuardar" type="button">Guardar</button>
+          <button class="btn ufBtnPrimary" id="btnFechasPagoGuardar" type="button">Guardar</button>
         </div>
       </div>
     </div>
-  </div>
-
-
-  <!-- Sidebar loader -->
-  <script type="module" src="layout.js"></script>
-  <!-- JS del módulo -->
-  <script type="module" src="liquidaciones.js"></script>
+    
+    <!-- MODAL FECHAS DE PAGO -->
+    <div class="backdrop" id="fechasPagoBackdrop">
+      <div class="modal" style="width:min(520px, 96vw);">
+        <div class="modalHead">
+          <div>
+            <div class="modalTitle" style="margin:0;">Fechas de pago</div>
+            <div class="modalSub" id="fechasPagoSub">—</div>
+          </div>
+          <button class="closeX" id="btnFechasPagoClose" type="button" aria-label="Cerrar">✕</button>
+        </div>
+    
+        <div class="modalBody">
+          <div class="field" style="min-width:auto; margin-bottom:12px;">
+            <label>Fecha pago 1</label>
+            <input id="fechaPago1" type="text" placeholder="Ej: 5 DE ENERO 2026">
+          </div>
+    
+          <div class="field" style="min-width:auto;">
+            <label>Fecha pago 2</label>
+            <input id="fechaPago2" type="text" placeholder="Ej: 27 DE ENERO 2026">
+          </div>
+        </div>
+    
+        <div class="modalFoot ufFoot">
+          <button class="btn ufBtnOutline" id="btnFechasPagoCancelar" type="button">Cancelar</button>
+          <span style="flex:1"></span>
+          <button class="btn ufBtnPrimary" id="btnFechasPagoGuardar" type="button">Guardar</button>
+        </div>
+      </div>
+    </div>
+    
+    <!-- Sidebar loader -->
+    <script type="module" src="layout.js"></script>
+    <!-- JS del módulo -->
+    <script type="module" src="liquidaciones.js"></script>
 </body>
 </html>
