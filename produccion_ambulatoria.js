@@ -260,6 +260,10 @@ function nowId() {
   ].join("");
 }
 
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 function monthId(year, monthNum) {
   return `${year}-${pad(monthNum, 2)}`;
 }
@@ -1776,36 +1780,72 @@ async function saveStagingToFirestore() {
 
   const itemsCol = collection(db, "produccion_ambulatoria_imports", importId, "items");
 
-  const chunkSize = 350;
+  // Más chico para no saturar Firestore
+  const chunkSize = 150;
   let idx = 0;
+  let guardados = 0;
 
-  while (idx < consolidado.length) {
-    const batch = writeBatch(db);
-    const slice = consolidado.slice(idx, idx + chunkSize);
+  try {
+    while (idx < consolidado.length) {
+      const batch = writeBatch(db);
+      const slice = consolidado.slice(idx, idx + chunkSize);
 
-    slice.forEach((it, k) => {
-      const itemId = it.itemId || `${it.origen || "ITEM"}_${String(idx + k + 1).padStart(4, "0")}`;
-      it.itemId = itemId;
+      slice.forEach((it, k) => {
+        const itemId = it.itemId || `${it.origen || "ITEM"}_${String(idx + k + 1).padStart(4, "0")}`;
+        it.itemId = itemId;
 
-      if (typeof it.confirmadoEnProduccion === "undefined") it.confirmadoEnProduccion = false;
-      if (typeof it.confirmadoEl === "undefined") it.confirmadoEl = null;
-      if (typeof it.confirmadoPor === "undefined") it.confirmadoPor = null;
-      if (typeof it.finalItemId === "undefined") it.finalItemId = null;
-      if (typeof it.pacienteId === "undefined") it.pacienteId = null;
+        if (typeof it.confirmadoEnProduccion === "undefined") it.confirmadoEnProduccion = false;
+        if (typeof it.confirmadoEl === "undefined") it.confirmadoEl = null;
+        if (typeof it.confirmadoPor === "undefined") it.confirmadoPor = null;
+        if (typeof it.finalItemId === "undefined") it.finalItemId = null;
+        if (typeof it.pacienteId === "undefined") it.pacienteId = null;
 
-      batch.set(doc(itemsCol, itemId), {
-        ...serializeAmbItem(it),
-        idx: idx + k + 1,
-        estado: "staged",
-        creadoEl: serverTimestamp(),
-        creadoPor: stateImport.user?.email || "",
-        actualizadoEl: serverTimestamp(),
-        actualizadoPor: stateImport.user?.email || ""
-      }, { merge: true });
-    });
+        batch.set(doc(itemsCol, itemId), {
+          ...serializeAmbItem(it),
+          idx: idx + k + 1,
+          estado: "staged",
+          creadoEl: serverTimestamp(),
+          creadoPor: stateImport.user?.email || "",
+          actualizadoEl: serverTimestamp(),
+          actualizadoPor: stateImport.user?.email || ""
+        }, { merge: true });
+      });
 
-    await batch.commit();
-    idx += chunkSize;
+      await batch.commit();
+
+      guardados += slice.length;
+      idx += chunkSize;
+
+      setStatus(`🟡 Guardando staging... ${guardados}/${consolidado.length}`);
+      console.log(`STAGING OK: ${guardados}/${consolidado.length}`);
+
+      await sleep(250);
+    }
+
+    await setDoc(refImport, {
+      estado: "staged",
+      filas: consolidado.length,
+      totalGuardadosStaging: guardados,
+      actualizadoEl: serverTimestamp(),
+      actualizadoPor: stateImport.user?.email || ""
+    }, { merge: true });
+
+    setStatus(`🟡 Staging listo: ${guardados}/${consolidado.length} filas · ImportID: ${importId}`);
+    toast(`Staging guardado correctamente: ${guardados} filas`);
+  } catch (err) {
+    console.error("Error guardando staging:", err);
+
+    await setDoc(refImport, {
+      estado: "staged_error",
+      totalGuardadosStaging: guardados,
+      errorStaging: String(err?.message || err || "Error desconocido"),
+      actualizadoEl: serverTimestamp(),
+      actualizadoPor: stateImport.user?.email || ""
+    }, { merge: true });
+
+    setStatus(`⚠️ Error guardando staging: ${guardados}/${consolidado.length}`);
+    toast(`Error guardando staging. Avance: ${guardados}/${consolidado.length}`);
+    throw err;
   }
 }
 
@@ -2130,140 +2170,167 @@ async function confirmarImportacion() {
   const YYYY = String(stateImport.year);
   const MM = pad(stateImport.monthNum, 2);
 
-  if (stateImport.status === "staged") {
-    const replacedCount = await reemplazarMesAntesDeConfirmar(YYYY, MM, stateImport.importId);
-    if (replacedCount > 0) {
-      toast(`Mes ${YYYY}-${MM}: ${replacedCount} items previos marcados como reemplazados.`);
-    }
-  }
+  try {
+    setStatus(`🟠 Iniciando confirmación... 0/${itemsConfirmables.length}`);
+    toast(`Iniciando confirmación de ${itemsConfirmables.length} ítems...`);
 
-  await setDoc(doc(db, "produccion_ambulatoria", YYYY), {
-    ano: stateImport.year,
-    actualizadoEl: serverTimestamp(),
-    actualizadoPor: stateImport.user?.email || ""
-  }, { merge: true });
-
-  await setDoc(doc(db, "produccion_ambulatoria", YYYY, "meses", MM), {
-    ano: stateImport.year,
-    mesNum: stateImport.monthNum,
-    mes: stateImport.monthName,
-    monthId: monthId(stateImport.year, stateImport.monthNum),
-    actualizadoEl: serverTimestamp(),
-    actualizadoPor: stateImport.user?.email || ""
-  }, { merge: true });
-
-  const batchSize = 300;
-  let i = 0;
-
-  while (i < itemsConfirmables.length) {
-    const batch = writeBatch(db);
-    const slice = itemsConfirmables.slice(i, i + batchSize);
-
-    for (const reg of slice) {
-      const rutKey = normalizarRutKey(reg.rut || "");
-      const pacienteId = rutKey || `SINRUT_${stateImport.importId}`;
-      const itemDocId = finalItemId(reg);
-
-      reg.confirmadoEnProduccion = true;
-      reg.confirmadoEl = new Date().toISOString();
-      reg.confirmadoPor = stateImport.user?.email || "";
-      reg.finalItemId = itemDocId;
-      reg.pacienteId = pacienteId;
-
-      const refPaciente = doc(
-        db,
-        "produccion_ambulatoria",
-        YYYY,
-        "meses",
-        MM,
-        "pacientes",
-        pacienteId
-      );
-
-      const refItem = doc(
-        db,
-        "produccion_ambulatoria",
-        YYYY,
-        "meses",
-        MM,
-        "pacientes",
-        pacienteId,
-        "items",
-        itemDocId
-      );
-
-      const refStaging = doc(
-        db,
-        "produccion_ambulatoria_imports",
-        stateImport.importId,
-        "items",
-        reg.itemId
-      );
-
-      batch.set(refPaciente, {
-        rut: reg.rut || null,
-        rutNorm: reg.rutNorm || null,
-        paciente: reg.paciente || null,
-        pacienteNorm: reg.pacienteNorm || null,
-        actualizadoEl: serverTimestamp(),
-        actualizadoPor: stateImport.user?.email || ""
-      }, { merge: true });
-
-      batch.set(refItem, {
-        ...serializeAmbItem(reg),
-        finalItemId: itemDocId,
-        pacienteId,
-        importId: stateImport.importId,
-        ano: stateImport.year,
-        mesNum: stateImport.monthNum,
-        monthId: monthId(stateImport.year, stateImport.monthNum),
-        estadoRegistro: "activo",
-        reemplazadoEl: null,
-        reemplazadoPor: null,
-        reemplazadoPorImportId: null,
-        creadoEl: serverTimestamp(),
-        creadoPor: stateImport.user?.email || "",
-        actualizadoEl: serverTimestamp(),
-        actualizadoPor: stateImport.user?.email || ""
-      }, { merge: true });
-
-      batch.set(refStaging, {
-        ...serializeAmbItem(reg),
-        estado: "confirmada",
-        actualizadoEl: serverTimestamp(),
-        actualizadoPor: stateImport.user?.email || ""
-      }, { merge: true });
+    if (stateImport.status === "staged") {
+      const replacedCount = await reemplazarMesAntesDeConfirmar(YYYY, MM, stateImport.importId);
+      if (replacedCount > 0) {
+        toast(`Mes ${YYYY}-${MM}: ${replacedCount} items previos marcados como reemplazados.`);
+      }
     }
 
-    await batch.commit();
-    i += batchSize;
+    await setDoc(doc(db, "produccion_ambulatoria", YYYY), {
+      ano: stateImport.year,
+      actualizadoEl: serverTimestamp(),
+      actualizadoPor: stateImport.user?.email || ""
+    }, { merge: true });
+
+    await setDoc(doc(db, "produccion_ambulatoria", YYYY, "meses", MM), {
+      ano: stateImport.year,
+      mesNum: stateImport.monthNum,
+      mes: stateImport.monthName,
+      monthId: monthId(stateImport.year, stateImport.monthNum),
+      actualizadoEl: serverTimestamp(),
+      actualizadoPor: stateImport.user?.email || ""
+    }, { merge: true });
+
+    // Más chico para no saturar Firestore
+    const batchSize = 120;
+    let i = 0;
+    let confirmadosNuevos = 0;
+
+    while (i < itemsConfirmables.length) {
+      const batch = writeBatch(db);
+      const slice = itemsConfirmables.slice(i, i + batchSize);
+
+      for (const reg of slice) {
+        const rutKey = normalizarRutKey(reg.rut || "");
+        const pacienteId = rutKey || `SINRUT_${stateImport.importId}`;
+        const itemDocId = finalItemId(reg);
+
+        reg.confirmadoEnProduccion = true;
+        reg.confirmadoEl = new Date().toISOString();
+        reg.confirmadoPor = stateImport.user?.email || "";
+        reg.finalItemId = itemDocId;
+        reg.pacienteId = pacienteId;
+
+        const refPaciente = doc(
+          db,
+          "produccion_ambulatoria",
+          YYYY,
+          "meses",
+          MM,
+          "pacientes",
+          pacienteId
+        );
+
+        const refItem = doc(
+          db,
+          "produccion_ambulatoria",
+          YYYY,
+          "meses",
+          MM,
+          "pacientes",
+          pacienteId,
+          "items",
+          itemDocId
+        );
+
+        const refStaging = doc(
+          db,
+          "produccion_ambulatoria_imports",
+          stateImport.importId,
+          "items",
+          reg.itemId
+        );
+
+        batch.set(refPaciente, {
+          rut: reg.rut || null,
+          rutNorm: reg.rutNorm || null,
+          paciente: reg.paciente || null,
+          pacienteNorm: reg.pacienteNorm || null,
+          actualizadoEl: serverTimestamp(),
+          actualizadoPor: stateImport.user?.email || ""
+        }, { merge: true });
+
+        batch.set(refItem, {
+          ...serializeAmbItem(reg),
+          finalItemId: itemDocId,
+          pacienteId,
+          importId: stateImport.importId,
+          ano: stateImport.year,
+          mesNum: stateImport.monthNum,
+          monthId: monthId(stateImport.year, stateImport.monthNum),
+          estadoRegistro: "activo",
+          reemplazadoEl: null,
+          reemplazadoPor: null,
+          reemplazadoPorImportId: null,
+          creadoEl: serverTimestamp(),
+          creadoPor: stateImport.user?.email || "",
+          actualizadoEl: serverTimestamp(),
+          actualizadoPor: stateImport.user?.email || ""
+        }, { merge: true });
+
+        batch.set(refStaging, {
+          ...serializeAmbItem(reg),
+          estado: "confirmada",
+          actualizadoEl: serverTimestamp(),
+          actualizadoPor: stateImport.user?.email || ""
+        }, { merge: true });
+      }
+
+      await batch.commit();
+
+      confirmadosNuevos += slice.length;
+      i += batchSize;
+
+      setStatus(`🟠 Confirmando... ${confirmadosNuevos}/${itemsConfirmables.length}`);
+      console.log(`CONFIRMACION OK: ${confirmadosNuevos}/${itemsConfirmables.length}`);
+
+      await sleep(250);
+    }
+
+    const totalConfirmadosAcumulados = consolidado.filter(x => x.confirmadoEnProduccion).length;
+    const totalPendientesAcumulados = consolidado.length - totalConfirmadosAcumulados;
+
+    await setDoc(doc(db, "produccion_ambulatoria_imports", stateImport.importId), {
+      estado: "confirmada",
+      confirmadoEl: serverTimestamp(),
+      confirmadoPor: stateImport.user?.email || "",
+      confirmadoEn: `produccion_ambulatoria/${YYYY}/meses/${MM}/pacientes/{RUT}/items/{itemId}`,
+      totalItems: consolidado.length,
+      totalConfirmados: totalConfirmadosAcumulados,
+      totalPendientes: totalPendientesAcumulados,
+      totalConfirmadosNuevosUltimaEjecucion: confirmadosNuevos,
+      actualizadoEl: serverTimestamp(),
+      actualizadoPor: stateImport.user?.email || ""
+    }, { merge: true });
+
+    stateImport.status = "confirmada";
+
+    setStatus(
+      `✅ Confirmada: ${stateImport.importId} · ` +
+      `${totalConfirmadosAcumulados} items ya están en producción final · ` +
+      `${totalPendientesAcumulados} siguen pendientes dentro del import`
+    );
+
+    render();
+    toast(`✅ Confirmación completada: ${confirmadosNuevos} nuevos items pasaron a producción`);
+  } catch (err) {
+    console.error("Error en confirmarImportacion():", err);
+
+    await setDoc(doc(db, "produccion_ambulatoria_imports", stateImport.importId), {
+      estado: "confirmada_error",
+      errorConfirmacion: String(err?.message || err || "Error desconocido"),
+      actualizadoEl: serverTimestamp(),
+      actualizadoPor: stateImport.user?.email || ""
+    }, { merge: true });
+
+    setStatus(`⚠️ Error durante confirmación: ${stateImport.importId}`);
+    toast(`Error durante la confirmación. Revisa consola e import ${stateImport.importId}`);
   }
-
-  const totalConfirmadosAcumulados = consolidado.filter(x => x.confirmadoEnProduccion).length;
-  const totalPendientesAcumulados = consolidado.length - totalConfirmadosAcumulados;
-
-  await setDoc(doc(db, "produccion_ambulatoria_imports", stateImport.importId), {
-    estado: "confirmada",
-    confirmadoEl: serverTimestamp(),
-    confirmadoPor: stateImport.user?.email || "",
-    confirmadoEn: `produccion_ambulatoria/${YYYY}/meses/${MM}/pacientes/{RUT}/items/{itemId}`,
-    totalItems: consolidado.length,
-    totalConfirmados: totalConfirmadosAcumulados,
-    totalPendientes: totalPendientesAcumulados,
-    actualizadoEl: serverTimestamp(),
-    actualizadoPor: stateImport.user?.email || ""
-  }, { merge: true });
-
-  stateImport.status = "confirmada";
-
-  setStatus(
-    `✅ Confirmada: ${stateImport.importId} · ` +
-    `${totalConfirmadosAcumulados} items ya están en producción final · ` +
-    `${totalPendientesAcumulados} siguen pendientes dentro del import`
-  );
-
-  render();
-  toast(`Confirmación ejecutada: ${itemsConfirmables.length} nuevos items pasaron a producción`);
 }
 
 /* ======================
