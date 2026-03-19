@@ -337,16 +337,123 @@ function nombreProcedimientoCatalogo(p) {
   return p?.nombre || p?.procedimiento || p?.descripcion || p?.id || "";
 }
 
-function buscarProfesional(texto) {
-  const t = normalizarTexto(texto);
-  if (!t) return null;
+function tokensNombreComparacion(texto, { ignorarTitulos = false } = {}) {
+  const ignorar = new Set([
+    "DR", "DRA", "DOC", "DOCTOR", "DOCTORA",
+    "NUT", "NUTRICIONISTA",
+    "KINE", "KINESIOLOGO", "KINESIOLOGA",
+    "PS", "PSICOLOGO", "PSICOLOGA",
+    "FONO", "FONOAUDIOLOGO", "FONOAUDIOLOGA",
+    "TM", "TENS", "EU", "MAT", "MED"
+  ]);
 
-  return profesionales.find(p => {
-    const nombre = normalizarTexto(nombreProfesionalCatalogo(p));
-    if (!nombre) return false;
-    const palabras = nombre.split(" ").filter(Boolean);
-    return palabras.some(w => w.length > 2 && t.includes(w));
-  }) || null;
+  return normalizarTexto(texto)
+    .replace(/\./g, " ")
+    .replace(/[^A-Z0-9Ñ\s]/g, " ")
+    .split(/\s+/)
+    .map(x => x.trim())
+    .filter(x => x && x.length > 2 && (!ignorarTitulos || !ignorar.has(x)));
+}
+
+function analizarBusquedaProfesional(texto) {
+  const textoOriginal = clean(texto);
+  const tokensTexto = tokensNombreComparacion(textoOriginal, { ignorarTitulos: true });
+
+  if (!tokensTexto.length) {
+    return {
+      profesional: null,
+      score: 0,
+      ambiguo: false,
+      candidatos: [],
+      alerta: textoOriginal ? "No se pudo interpretar el nombre del profesional" : "Profesional vacío"
+    };
+  }
+
+  const candidatos = [];
+
+  for (const p of profesionales) {
+    const nombreCatalogo = nombreProfesionalCatalogo(p);
+    const tokensCatalogo = tokensNombreComparacion(nombreCatalogo);
+
+    if (!tokensCatalogo.length) continue;
+
+    const interseccion = tokensCatalogo.filter(tk => tokensTexto.includes(tk));
+    const coinc = interseccion.length;
+
+    if (!coinc) continue;
+
+    let score = coinc;
+
+    // bonus si el primer token del archivo aparece en el catálogo
+    if (tokensTexto[0] && tokensCatalogo.includes(tokensTexto[0])) score += 0.75;
+
+    // bonus si el segundo token del archivo también aparece
+    if (tokensTexto[1] && tokensCatalogo.includes(tokensTexto[1])) score += 0.5;
+
+    // bonus si el texto completo del catálogo está parcialmente contenido
+    const normArchivo = normalizarTexto(textoOriginal).replace(/\./g, " ");
+    const normCatalogo = normalizarTexto(nombreCatalogo).replace(/\./g, " ");
+    if (normArchivo.includes(normCatalogo) || normCatalogo.includes(normArchivo)) {
+      score += 0.5;
+    }
+
+    candidatos.push({
+      profesional: p,
+      nombre: nombreCatalogo,
+      score,
+      coincidencias: interseccion
+    });
+  }
+
+  candidatos.sort((a, b) => {
+    if (b.score !== a.score) return b.score - a.score;
+    return a.nombre.localeCompare(b.nombre, "es", { sensitivity: "base" });
+  });
+
+  const mejor = candidatos[0] || null;
+  const segundo = candidatos[1] || null;
+
+  // Seguridad mínima: exigir al menos 2 coincidencias útiles
+  if (!mejor || mejor.score < 2) {
+    return {
+      profesional: null,
+      score: mejor?.score || 0,
+      ambiguo: false,
+      candidatos,
+      alerta: `No se encontró coincidencia suficientemente segura para "${textoOriginal}"`
+    };
+  }
+
+  // Ambigüedad: si el segundo está muy cerca del primero, no decidir automático
+  const esAmbiguo = !!(
+    segundo &&
+    segundo.score >= 2 &&
+    Math.abs(mejor.score - segundo.score) <= 0.5
+  );
+
+  if (esAmbiguo) {
+    return {
+      profesional: null,
+      score: mejor.score,
+      ambiguo: true,
+      candidatos,
+      alerta:
+        `Coincidencia ambigua en profesional: "${textoOriginal}" ` +
+        `podría ser "${mejor.nombre}" o "${segundo.nombre}"`
+    };
+  }
+
+  return {
+    profesional: mejor.profesional,
+    score: mejor.score,
+    ambiguo: false,
+    candidatos,
+    alerta: null
+  };
+}
+
+function buscarProfesional(texto) {
+  return analizarBusquedaProfesional(texto)?.profesional || null;
 }
 
 function buscarProcedimiento(texto) {
@@ -575,11 +682,14 @@ function aplicarManualOverrides(items) {
 
 function procesarReservo() {
   return dataReservo.map((r, i) => {
-    const profesionalDetectado = buscarProfesional(r["Profesional"]);
+    const analisisProf = analizarBusquedaProfesional(r["Profesional"]);
+    const profesionalDetectado = analisisProf?.profesional || null;
     const procedimientoDetectado = buscarProcedimiento(r["Tratamiento"]);
 
     const evalApp = evaluarAplicacionReservo(r);
     const alertas = [...evalApp.alertas];
+
+    if (analisisProf?.alerta) alertas.push(analisisProf.alerta);
 
     if (!normalizarRut(r["Rut"])) alertas.push("RUT vacío o inválido");
     if (!normalizarTexto(r["Profesional"])) alertas.push("Profesional vacío");
@@ -648,10 +758,12 @@ function procesarReservo() {
 
 function procesarMK() {
   let items = dataMK.map((r, i) => {
-    const profesionalDetectado = buscarProfesional(r["D Médico"]);
+    const analisisProf = analizarBusquedaProfesional(r["D Médico"]);
+    const profesionalDetectado = analisisProf?.profesional || null;
     const procedimientoDetectado = buscarProcedimiento(r["D Artículo"]);
 
     const alertas = [];
+    if (analisisProf?.alerta) alertas.push(analisisProf.alerta);
     if (!normalizarRut(r["Rut"])) alertas.push("RUT vacío o inválido");
     if (!normalizarTexto(r["D Médico"])) alertas.push("Profesional vacío");
     if (!normalizarTexto(r["D Artículo"])) alertas.push("Procedimiento vacío");
@@ -749,9 +861,14 @@ function recalcularTodo() {
 ====================== */
 
 function recomputeItemFromCurrentValues(reg) {
-  const profesionalDetectado = reg.resolved?.profesionalId
-    ? profesionales.find(p => p.id === reg.resolved.profesionalId) || null
-    : buscarProfesional(reg.profesional);
+  const analisisProf = reg.resolved?.profesionalId
+    ? {
+        profesional: profesionales.find(p => p.id === reg.resolved.profesionalId) || null,
+        alerta: null
+      }
+    : analizarBusquedaProfesional(reg.profesional);
+
+  const profesionalDetectado = analisisProf?.profesional || null;
 
   const procedimientoDetectado = reg.resolved?.procedimientoId
     ? procedimientos.find(p => p.id === reg.resolved.procedimientoId) || null
@@ -801,6 +918,7 @@ function recomputeItemFromCurrentValues(reg) {
     alertas = reg.review?.alertas || [];
   }
 
+  if (analisisProf?.alerta) alertas.push(analisisProf.alerta);
   if (!reg.rutNorm) alertas.push("RUT vacío o inválido");
   if (!normalizarTexto(reg.profesional)) alertas.push("Profesional vacío");
   if (!normalizarTexto(reg.prestacion)) alertas.push("Procedimiento vacío");
