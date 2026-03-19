@@ -28,11 +28,44 @@
       padding:0 10px; background:#fff;
     }
 
-    .btn{ height:38px; padding:0 12px; border-radius:10px; border:1px solid var(--border); background:#fff; cursor:pointer; font-weight:800; }
-    .btn.primary{ background:var(--bg-strong); border-color:var(--bg-strong); color:#fff; }
-    .btn.soft{ background:var(--accent-soft); border-color:#bfeee8; }
-    .btn.danger{ background:var(--danger); border-color:var(--danger); color:#fff; }
-    .btn:disabled{ opacity:.6; cursor:not-allowed; }
+    .liquidacionesScope .btn{
+      height:38px;
+      padding:0 12px;
+      border-radius:10px;
+      border:1px solid var(--border);
+      background:#fff;
+      cursor:pointer;
+      font-weight:800;
+    }
+    
+    .liquidacionesScope .btn.primary{
+      background:#11a79c;
+      border-color:#11a79c;
+      color:#fff;
+    }
+    
+    .liquidacionesScope .btn.soft{
+      background:#11a79c;
+      border-color:#11a79c;
+      color:#fff;
+    }
+    
+    .liquidacionesScope .btn.danger{
+      background:var(--danger);
+      border-color:var(--danger);
+      color:#fff;
+    }
+    
+    .liquidacionesScope .btn.dark{
+      background:#002738;
+      border-color:#002738;
+      color:#fff;
+    }
+    
+    .liquidacionesScope .btn:disabled{
+      opacity:.6;
+      cursor:not-allowed;
+    }
 
     .pill{
       display:inline-flex; align-items:center; gap:6px;
@@ -113,7 +146,7 @@
     <!-- Sidebar común -->
     <div id="sidebar-slot"></div>
 
-    <main class="main">
+    <main class="main liquidacionesScope">
       <div class="topRow">
         <div>
           <h1 class="pageTitle">Liquidaciones Cirugías</h1>
