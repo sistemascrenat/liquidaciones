@@ -8,337 +8,130 @@
   <link rel="stylesheet" href="estilos.css" />
 
   <style>
-    :root{
-      --bg:#f4f6fb;
-      --card:#ffffff;
-      --line:#d7dde6;
-      --text:#18212b;
-      --muted:#64748b;
-      --blue:#002738;
-      --green:#1f8c73;
-      --green-soft:#0f766e;
-      --bad:#b91c1c;
-      --warn:#b45309;
-      --ok:#166534;
-      --sidebar-w:260px;
-    }
-
-    *{ box-sizing:border-box; }
-    body{
-      margin:0;
-      background:var(--bg);
-      color:var(--text);
-      font-family: Inter, Arial, Helvetica, sans-serif;
-    }
-
-    .appShell{
-      display:flex;
-      min-height:100vh;
-      background:var(--bg);
-    }
-    #sidebar-slot{
-      flex:0 0 var(--sidebar-w);
-      min-width:var(--sidebar-w);
-      background:#0b8d83;
-    }
-    .main{
-      flex:1;
-      min-width:0;
-      padding:22px;
-    }
-
-    .pageHead{
-      display:flex;
-      justify-content:space-between;
-      align-items:flex-start;
-      gap:16px;
-      margin-bottom:16px;
-    }
-    .pageHead h1{
-      margin:0 0 6px 0;
-      font-size:34px;
-      line-height:1.1;
-      color:#0f172a;
-    }
-    .sub{
-      color:var(--muted);
-      font-size:14px;
-    }
-
-    .card{
-      background:var(--card);
-      border:1px solid var(--line);
-      border-radius:18px;
-      box-shadow:0 8px 24px rgba(2,12,27,.05);
-    }
-
-    .toolbar{
-      padding:18px;
-      margin-bottom:16px;
-    }
-
-    .grid3{
-      display:grid;
-      grid-template-columns: 180px 180px 1fr;
-      gap:12px;
-      margin-bottom:12px;
-    }
-    .grid2{
-      display:grid;
-      grid-template-columns:1fr 1fr;
-      gap:12px;
-    }
-    .field label{
-      display:block;
-      font-size:13px;
-      font-weight:700;
-      color:#334155;
-      margin-bottom:6px;
-    }
-    .field input,
-    .field select,
-    .field textarea{
-      width:100%;
-      padding:11px 12px;
-      border:1px solid var(--line);
-      border-radius:12px;
+    /* Base coherente con liquidaciones.js */
+    .page{ display:flex; min-height:100vh; }
+    .main{ flex:1; padding:18px 18px 30px; }
+    .topRow{ display:flex; align-items:flex-start; justify-content:space-between; gap:14px; margin-bottom:14px; }
+    .pageTitle{ font-size:20px; font-weight:900; margin:0; }
+    .pageSub{ color:var(--muted); margin-top:2px; font-size:13px; }
+  
+    .card{ background:var(--card); border:1px solid var(--border); border-radius:14px; box-shadow:0 8px 22px rgba(15,23,42,.06); }
+    .cardPad{ padding:14px; }
+    .toolbar{ display:flex; gap:10px; flex-wrap:wrap; align-items:end; justify-content:space-between; }
+    .filters{ display:flex; gap:10px; flex-wrap:wrap; align-items:end; }
+    .field{ display:flex; flex-direction:column; gap:6px; min-width:170px; }
+    .field label{ font-size:12px; color:var(--muted); font-weight:800; }
+    .field select, .field input, .field textarea{
+      min-height:38px;
+      border-radius:10px;
+      border:1px solid var(--border);
+      padding:8px 10px;
       background:#fff;
-      color:#0f172a;
-      font-size:14px;
     }
     .field textarea{
-      min-height:86px;
+      min-height:90px;
       resize:vertical;
     }
-
-    .actions{
-      display:flex;
-      flex-wrap:wrap;
-      gap:10px;
-      margin-top:14px;
-    }
-
-    .btn{
-      border:1px solid var(--line);
-      background:#fff;
-      color:#0f172a;
-      padding:10px 14px;
-      border-radius:12px;
-      font-weight:800;
-      font-size:14px;
-      cursor:pointer;
-    }
-    .btn:hover{ filter:brightness(.98); }
-    .btn:disabled{
-      opacity:.55;
-      cursor:not-allowed;
-    }
-    .btn.primary{
-      background:var(--green);
-      border-color:var(--green);
-      color:#fff;
-    }
-    .btn.soft{
-      background:#ecfeff;
-      color:#0f766e;
-      border-color:#99f6e4;
-    }
-    .btn.dark{
-      background:var(--blue);
-      border-color:var(--blue);
-      color:#fff;
-    }
-
-    .pills{
-      display:flex;
-      flex-wrap:wrap;
-      gap:10px;
-      margin-top:14px;
-    }
+  
+    .btn{ height:38px; padding:0 12px; border-radius:10px; border:1px solid var(--border); background:#fff; cursor:pointer; font-weight:800; }
+    .btn.primary{ background:var(--bg-strong); border-color:var(--bg-strong); color:#fff; }
+    .btn.soft{ background:var(--accent-soft); border-color:#bfeee8; }
+    .btn.danger{ background:var(--danger); border-color:var(--danger); color:#fff; }
+    .btn.dark{ background:#002738; border-color:#002738; color:#fff; }
+    .btn:disabled{ opacity:.6; cursor:not-allowed; }
+  
     .pill{
-      display:inline-flex;
-      align-items:center;
-      gap:8px;
-      border-radius:999px;
-      padding:8px 12px;
-      font-size:13px;
-      font-weight:800;
-      border:1px solid #cbd5e1;
-      background:#fff;
-      color:#334155;
+      display:inline-flex; align-items:center; gap:6px;
+      border:1px solid var(--border); border-radius:999px;
+      padding:4px 10px; font-size:12px; font-weight:900; background:#fff;
     }
-    .pill.ok{
-      color:var(--ok);
-      border-color:#bbf7d0;
-      background:#f0fdf4;
-    }
-    .pill.warn{
-      color:var(--warn);
-      border-color:#fed7aa;
-      background:#fff7ed;
-    }
-    .pill.bad{
-      color:var(--bad);
-      border-color:#fecaca;
-      background:#fef2f2;
-    }
-
-    .tableCard{
-      padding:18px;
-    }
-    .tableTop{
-      display:flex;
-      justify-content:space-between;
-      gap:12px;
-      align-items:end;
-      margin-bottom:12px;
-    }
-    .tableTop .field{
-      flex:1;
-      max-width:500px;
-    }
-
-    table{
-      width:100%;
-      border-collapse:collapse;
-    }
-    thead th{
-      text-align:left;
-      background:#f8fafc;
-      color:#475569;
-      border-bottom:1px solid var(--line);
-      font-size:13px;
-      padding:12px 10px;
-      white-space:nowrap;
-    }
-    tbody td{
-      border-bottom:1px solid var(--line);
-      padding:12px 10px;
-      vertical-align:top;
-      font-size:14px;
-    }
-    tbody tr:hover{
-      background:#fafafa;
-    }
-
-    .mono{ font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
-    .mini{ font-size:12px; }
-    .big{ font-size:15px; font-weight:800; }
-    .muted{ color:var(--muted); }
-
-    .actionsMini{
-      display:flex;
-      gap:8px;
-      align-items:center;
-      flex-wrap:wrap;
-    }
-    .iconBtn{
-      border:1px solid var(--line);
-      background:#fff;
-      border-radius:10px;
-      padding:7px 10px;
-      cursor:pointer;
-      font-size:14px;
-      font-weight:800;
-    }
-
-    .modalBackdrop{
-      position:fixed;
-      inset:0;
-      background:rgba(2,6,23,.45);
-      display:none;
-      place-items:center;
-      z-index:1000;
-      padding:18px;
+    .pill.ok{ background:#e9fff6; border-color:#b7f2d5; color:#0a7a49; }
+    .pill.warn{ background:#fff7ed; border-color:#fed7aa; color:#9a3412; }
+    .pill.bad{ background:#ffe4e6; border-color:#fecdd3; color:#9f1239; }
+  
+    .tableWrap{ overflow:auto; border-radius:12px; border:1px solid var(--border); }
+    table{ width:100%; border-collapse:collapse; min-width:980px; background:#fff; }
+    th, td{ padding:10px 10px; border-bottom:1px solid #eef2f7; vertical-align:top; }
+    th{ text-align:left; font-size:12px; color:var(--muted); font-weight:900; background:#fbfcfe; position:sticky; top:0; z-index:1; }
+    td .mini{ font-size:12px; color:var(--muted); }
+    td .big{ font-weight:900; }
+    .mono{ font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .actionsMini{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+    .iconBtn{ height:34px; width:40px; border-radius:10px; border:1px solid var(--border); background:#fff; cursor:pointer; font-weight:900; }
+    .iconBtn:hover{ filter:brightness(.98); }
+  
+    .split{ display:flex; gap:12px; flex-wrap:wrap; align-items:center; justify-content:space-between; }
+    .right{ display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+    .help{ color:var(--muted); font-size:13px; line-height:1.4; }
+    .sectionTitle{ font-size:16px; font-weight:900; margin:0 0 12px 0; color:#0f172a; }
+    .hidden{ display:none !important; }
+  
+    /* Modal coherente con liquidaciones.js */
+    .backdrop{
+      position:fixed; inset:0; background:rgba(2,6,23,.55);
+      display:none; place-items:center; z-index:50; padding:18px;
     }
     .modal{
-      width:min(1180px, 96vw);
+      width:min(1100px, 98vw);
       max-height:92vh;
       overflow:auto;
+      border-radius:16px;
       background:#fff;
-      border-radius:20px;
-      border:1px solid var(--line);
-      box-shadow:0 20px 60px rgba(15,23,42,.28);
+      border:1px solid var(--border);
+      box-shadow:0 18px 55px rgba(2,6,23,.28);
     }
     .modal.small{
       width:min(760px, 96vw);
     }
     .modalHead{
+      padding:14px 14px 10px;
+      border-bottom:1px solid #eef2f7;
       display:flex;
-      justify-content:space-between;
       align-items:flex-start;
-      gap:12px;
-      padding:18px 20px 12px 20px;
-      border-bottom:1px solid var(--line);
-    }
-    .modalHead h2{
-      margin:0 0 6px 0;
-      font-size:24px;
-    }
-    .modalBody{
-      padding:18px 20px;
-    }
-    .modalFoot{
-      padding:14px 20px 20px 20px;
-      display:flex;
       justify-content:space-between;
       gap:10px;
-      flex-wrap:wrap;
     }
-
-    .summaryLine{
-      display:flex;
-      gap:10px;
-      flex-wrap:wrap;
-      align-items:center;
-      margin-bottom:14px;
+    .modalTitle{ font-size:16px; font-weight:1000; margin:0; }
+    .modalSub{ font-size:12px; color:var(--muted); margin-top:3px; }
+    .modalBody{ padding:14px; }
+    .modalFoot{ padding:12px 14px; border-top:1px solid #eef2f7; display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; }
+    .closeX{ height:34px; width:38px; border-radius:10px; border:1px solid var(--border); background:#fff; cursor:pointer; font-weight:1000; }
+  
+    /* Modal fecha pago / UF estilo Rennat */
+    .rennPrimary{
+      background:#002738 !important;
+      border-color:#002738 !important;
+      color:#fff !important;
     }
-
-    .detailTable th, .detailTable td{
-      font-size:13px;
-      padding:10px 8px;
+    .rennOutline{
+      background:#fff !important;
+      border-color:#002738 !important;
+      color:#002738 !important;
     }
-
-    .help{
-      color:#64748b;
-      font-size:13px;
-      line-height:1.4;
+    .rennOutline:hover{
+      background:rgba(0,39,56,.06) !important;
     }
-
-    .right{
-      text-align:right;
-    }
-
-    .sectionTitle{
-      font-size:16px;
-      font-weight:900;
-      margin:0 0 12px 0;
-      color:#0f172a;
-    }
-
-    .hidden{
-      display:none !important;
-    }
-
+  
     @media (max-width: 1100px){
-      .grid3{ grid-template-columns:1fr; }
-      .grid2{ grid-template-columns:1fr; }
-      .pageHead{ flex-direction:column; }
-      .tableTop{ flex-direction:column; align-items:stretch; }
-      .tableTop .field{ max-width:none; }
+      .topRow{ flex-direction:column; }
     }
   </style>
 </head>
 <body>
-  <div class="appShell">
-    <aside id="sidebar-slot"></aside>
 
+  <div class="page">
+    <div id="sidebar-slot"></div>
+  
     <main class="main">
-      <div class="pageHead">
+      <div class="topRow">
         <div>
-          <h1>Liquidaciones Ambulatorias</h1>
-          <div class="sub" id="who">Conectado: —</div>
-          <div class="sub" id="lastLoad">—</div>
+          <h1 class="pageTitle">Liquidaciones Ambulatorias</h1>
+          <div class="pageSub" id="who">Conectado: —</div>
+        </div>
+  
+        <div class="right">
+          <span class="pill" id="pillEstado">Estado: —</span>
+          <span class="pill" id="pillCount">0 profesionales</span>
         </div>
       </div>
 
