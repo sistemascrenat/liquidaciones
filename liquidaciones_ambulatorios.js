@@ -1626,13 +1626,25 @@ async function fetchAsArrayBuffer(url){
 }
 
 function buildModalResumenHtml(agg){
-  const rows = buildPdfResumenRows(agg);
+  const rows = (agg?.resumenModalidades || []).map(r => ({
+    modalidad: r?.modalidad || '',
+    cantidad: Number(r?.cantidad || 0) || 0,
+    subtotal: Number(r?.subtotal || 0) || 0
+  }));
+
+  if((agg?.ajustes?.balonSubtotal || 0) > 0){
+    rows.push({
+      modalidad: agg?.ajustes?.balonAsunto || 'INSTALACIÓN DE BALÓN',
+      cantidad: Number(agg?.ajustes?.balonCantidad || 0) || 0,
+      subtotal: Number(agg?.ajustes?.balonSubtotal || 0) || 0
+    });
+  }
 
   const body = rows.map(r => `
     <tr>
-      <td>${escapeHtml((r.modalidad || '').toUpperCase())}</td>
-      <td class="mono" style="text-align:center;">${escapeHtml(String(r.cantidad || 0))}</td>
-      <td class="mono" style="text-align:right;"><b>${escapeHtml(clp(r.subtotal || 0))}</b></td>
+      <td style="padding:8px; border:1px solid #d1d5db;">${escapeHtml((r.modalidad || '').toUpperCase())}</td>
+      <td class="mono" style="text-align:center; padding:8px; border:1px solid #d1d5db;">${escapeHtml(String(r.cantidad || 0))}</td>
+      <td class="mono" style="text-align:right; padding:8px; border:1px solid #d1d5db;"><b>${escapeHtml(clp(r.subtotal || 0))}</b></td>
     </tr>
   `).join('');
 
@@ -1655,8 +1667,8 @@ function buildModalResumenHtml(agg){
             ${body}
             <tr style="background:#ccfbf1; font-weight:700;">
               <td style="padding:8px; border:1px solid #d1d5db;">TOTAL</td>
-              <td class="mono" style="text-align:center; padding:8px; border:1px solid #d1d5db;">${escapeHtml(String(agg.casos || 0))}</td>
-              <td class="mono" style="text-align:right; padding:8px; border:1px solid #d1d5db;"><b>${escapeHtml(clp(agg.ajustes?.totalValorizado || 0))}</b></td>
+              <td class="mono" style="text-align:center; padding:8px; border:1px solid #d1d5db;">${escapeHtml(String(agg?.casos || 0))}</td>
+              <td class="mono" style="text-align:right; padding:8px; border:1px solid #d1d5db;"><b>${escapeHtml(clp(agg?.ajustes?.totalValorizado || 0))}</b></td>
             </tr>
           </tbody>
         </table>
@@ -1664,27 +1676,27 @@ function buildModalResumenHtml(agg){
         <div style="margin-top:12px; display:grid; gap:6px;">
           <div style="display:flex; justify-content:space-between; gap:12px; padding:8px 10px; border:1px solid #d1d5db; border-radius:8px;">
             <span>$ Valorizado</span>
-            <b class="mono">${escapeHtml(clp(agg.ajustes?.totalValorizado || 0))}</b>
+            <b class="mono">${escapeHtml(clp(agg?.ajustes?.totalValorizado || 0))}</b>
           </div>
 
           <div style="display:flex; justify-content:space-between; gap:12px; padding:8px 10px; border:1px solid #d1d5db; border-radius:8px;">
             <span>$ Boleta</span>
-            <b class="mono">${escapeHtml(clp(agg.ajustes?.totalBoleta || 0))}</b>
+            <b class="mono">${escapeHtml(clp(agg?.ajustes?.totalBoleta || 0))}</b>
           </div>
 
           <div style="display:flex; justify-content:space-between; gap:12px; padding:8px 10px; border:1px solid #d1d5db; border-radius:8px;">
             <span>$ Retención</span>
-            <b class="mono">${escapeHtml(clp(agg.ajustes?.retencionCLP || 0))}</b>
+            <b class="mono">${escapeHtml(clp(agg?.ajustes?.retencionCLP || 0))}</b>
           </div>
 
           <div style="display:flex; justify-content:space-between; gap:12px; padding:8px 10px; border:1px solid #d1d5db; border-radius:8px;">
-            <span>${escapeHtml(agg.ajustes?.descuentoAsunto || 'Descuento seguro complementario')}</span>
-            <b class="mono">${escapeHtml(clp(agg.ajustes?.descuentoCLP || 0))}</b>
+            <span>${escapeHtml(agg?.ajustes?.descuentoAsunto || 'Descuento seguro complementario')}</span>
+            <b class="mono">${escapeHtml(clp(agg?.ajustes?.descuentoCLP || 0))}</b>
           </div>
 
           <div style="display:flex; justify-content:space-between; gap:12px; padding:10px 12px; border:1px solid #99f6e4; background:#ecfeff; border-radius:8px; font-size:14px;">
             <span><b>Total a pagar</b></span>
-            <b class="mono">${escapeHtml(clp(agg.ajustes?.liquido || 0))}</b>
+            <b class="mono">${escapeHtml(clp(agg?.ajustes?.liquido || 0))}</b>
           </div>
         </div>
       </div>
