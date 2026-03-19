@@ -1227,7 +1227,10 @@ function paint(){
     tb.appendChild(tr);
   }
 
-  $('lastLoad').textContent = `Items producción ambulatoria: ${state.prodRows.length} · Último cálculo: ${new Date().toLocaleString()}`;
+ const lastLoadEl = $('lastLoad');
+  if(lastLoadEl){
+    lastLoadEl.textContent = `Items producción ambulatoria: ${state.prodRows.length} · Último cálculo: ${new Date().toLocaleString()}`;
+  }
 }
 
 /* =========================
