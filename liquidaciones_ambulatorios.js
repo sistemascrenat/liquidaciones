@@ -1255,6 +1255,11 @@ function openDetalle(agg){
 
   const tb = $('modalTbody');
   tb.innerHTML = '';
+  
+  const resumenHost = $('modalResumen');
+  if(resumenHost){
+    resumenHost.innerHTML = buildModalResumenHtml(agg);
+  }
 
   const lines = [...(agg.lines || [])].sort((a,b)=>{
     const fa = normalize(a.fecha);
@@ -1300,6 +1305,9 @@ function openDetalle(agg){
 
 function closeDetalle(){
   $('modalBackdrop').style.display = 'none';
+
+  const resumenHost = $('modalResumen');
+  if(resumenHost) resumenHost.innerHTML = '';
 }
 
 /* =========================
@@ -1617,22 +1625,71 @@ async function fetchAsArrayBuffer(url){
   }
 }
 
-function buildPdfResumenRows(agg){
-  const rows = (agg.resumenModalidades || []).map(r=>({
-    modalidad: r.modalidad,
-    cantidad: r.cantidad,
-    subtotal: r.subtotal
-  }));
+function buildModalResumenHtml(agg){
+  const rows = buildPdfResumenRows(agg);
 
-  if((agg.ajustes?.balonSubtotal || 0) > 0){
-    rows.push({
-      modalidad: agg.ajustes?.balonAsunto || 'INSTALACIÓN DE BALÓN',
-      cantidad: Number(agg.ajustes?.balonCantidad || 0) || 0,
-      subtotal: Number(agg.ajustes?.balonSubtotal || 0) || 0
-    });
-  }
+  const body = rows.map(r => `
+    <tr>
+      <td>${escapeHtml((r.modalidad || '').toUpperCase())}</td>
+      <td class="mono" style="text-align:center;">${escapeHtml(String(r.cantidad || 0))}</td>
+      <td class="mono" style="text-align:right;"><b>${escapeHtml(clp(r.subtotal || 0))}</b></td>
+    </tr>
+  `).join('');
 
-  return rows;
+  return `
+    <div class="card" style="margin:12px 0 14px 0; overflow:hidden;">
+      <div style="padding:10px 12px; background:#0f3b4a; color:#fff; font-weight:700;">
+        Resumen de la liquidación
+      </div>
+
+      <div style="padding:12px;">
+        <table style="width:100%; border-collapse:collapse; font-size:13px;">
+          <thead>
+            <tr style="background:#1f8c73; color:#fff;">
+              <th style="text-align:left; padding:8px; border:1px solid #d1d5db;">Modalidad</th>
+              <th style="text-align:center; padding:8px; border:1px solid #d1d5db;">Cantidad</th>
+              <th style="text-align:right; padding:8px; border:1px solid #d1d5db;">Subtotal</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${body}
+            <tr style="background:#ccfbf1; font-weight:700;">
+              <td style="padding:8px; border:1px solid #d1d5db;">TOTAL</td>
+              <td class="mono" style="text-align:center; padding:8px; border:1px solid #d1d5db;">${escapeHtml(String(agg.casos || 0))}</td>
+              <td class="mono" style="text-align:right; padding:8px; border:1px solid #d1d5db;"><b>${escapeHtml(clp(agg.ajustes?.totalValorizado || 0))}</b></td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div style="margin-top:12px; display:grid; gap:6px;">
+          <div style="display:flex; justify-content:space-between; gap:12px; padding:8px 10px; border:1px solid #d1d5db; border-radius:8px;">
+            <span>$ Valorizado</span>
+            <b class="mono">${escapeHtml(clp(agg.ajustes?.totalValorizado || 0))}</b>
+          </div>
+
+          <div style="display:flex; justify-content:space-between; gap:12px; padding:8px 10px; border:1px solid #d1d5db; border-radius:8px;">
+            <span>$ Boleta</span>
+            <b class="mono">${escapeHtml(clp(agg.ajustes?.totalBoleta || 0))}</b>
+          </div>
+
+          <div style="display:flex; justify-content:space-between; gap:12px; padding:8px 10px; border:1px solid #d1d5db; border-radius:8px;">
+            <span>$ Retención</span>
+            <b class="mono">${escapeHtml(clp(agg.ajustes?.retencionCLP || 0))}</b>
+          </div>
+
+          <div style="display:flex; justify-content:space-between; gap:12px; padding:8px 10px; border:1px solid #d1d5db; border-radius:8px;">
+            <span>${escapeHtml(agg.ajustes?.descuentoAsunto || 'Descuento seguro complementario')}</span>
+            <b class="mono">${escapeHtml(clp(agg.ajustes?.descuentoCLP || 0))}</b>
+          </div>
+
+          <div style="display:flex; justify-content:space-between; gap:12px; padding:10px 12px; border:1px solid #99f6e4; background:#ecfeff; border-radius:8px; font-size:14px;">
+            <span><b>Total a pagar</b></span>
+            <b class="mono">${escapeHtml(clp(agg.ajustes?.liquido || 0))}</b>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
 }
 
 function getNroLiquidacion(agg){
