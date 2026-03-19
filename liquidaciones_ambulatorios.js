@@ -1625,6 +1625,24 @@ async function fetchAsArrayBuffer(url){
   }
 }
 
+function buildPdfResumenRows(agg){
+  const rows = (agg?.resumenModalidades || []).map(r => ({
+    modalidad: r?.modalidad || '',
+    cantidad: Number(r?.cantidad || 0) || 0,
+    subtotal: Number(r?.subtotal || 0) || 0
+  }));
+
+  if((agg?.ajustes?.balonSubtotal || 0) > 0){
+    rows.push({
+      modalidad: agg?.ajustes?.balonAsunto || 'INSTALACIÓN DE BALÓN',
+      cantidad: Number(agg?.ajustes?.balonCantidad || 0) || 0,
+      subtotal: Number(agg?.ajustes?.balonSubtotal || 0) || 0
+    });
+  }
+
+  return rows;
+}
+
 function buildModalResumenHtml(agg){
   const rows = (agg?.resumenModalidades || []).map(r => ({
     modalidad: r?.modalidad || '',
@@ -1674,6 +1692,11 @@ function buildModalResumenHtml(agg){
         </table>
 
         <div style="margin-top:12px; display:grid; gap:6px;">
+          <div style="display:flex; justify-content:space-between; gap:12px; padding:8px 10px; border:1px solid #d1d5db; border-radius:8px;">
+            <span>Fecha de pago</span>
+            <b class="mono">${escapeHtml(getFechaPagoTexto() || '—')}</b>
+          </div>
+        
           <div style="display:flex; justify-content:space-between; gap:12px; padding:8px 10px; border:1px solid #d1d5db; border-radius:8px;">
             <span>$ Valorizado</span>
             <b class="mono">${escapeHtml(clp(agg?.ajustes?.totalValorizado || 0))}</b>
