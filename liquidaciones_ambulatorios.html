@@ -135,46 +135,43 @@
         </div>
       </div>
 
-      <section class="card toolbar">
-        <div class="grid3">
-          <div class="field">
-            <label for="mes">Mes</label>
-            <select id="mes"></select>
-          </div>
-
-          <div class="field">
-            <label for="ano">Año</label>
-            <select id="ano"></select>
-          </div>
-
-          <div class="field">
-            <label>&nbsp;</label>
-            <div class="actions" style="margin-top:0;">
-              <button id="btnFechaPago" type="button" class="btn">
-                Fecha de pago
-              </button>
-              <button id="btnRecalcular" class="btn primary" type="button">Recalcular</button>
-              <button id="btnCSVResumen" class="btn" type="button">XLSX Resumen</button>
-              <button id="btnCSVDetalle" class="btn" type="button">XLSX Detalle</button>
+      <section class="card cardPad" style="margin-bottom:14px;">
+        <div class="toolbar">
+          <div class="filters">
+            <div class="field">
+              <label for="mes">Mes</label>
+              <select id="mes"></select>
+            </div>
+      
+            <div class="field" style="min-width:120px;">
+              <label for="ano">Año</label>
+              <select id="ano"></select>
+            </div>
+      
+            <div class="field" style="min-width:260px;">
+              <label for="q">Buscar</label>
+              <input id="q" type="text" placeholder="Profesional, procedimiento, paciente, modalidad, observación..." />
             </div>
           </div>
+      
+          <div class="right">
+            <button id="btnFechaPago" type="button" class="btn">Fecha de pago</button>
+            <button id="btnRecalcular" class="btn primary" type="button">Recalcular</button>
+            <button id="btnCSVResumen" class="btn" type="button">XLSX Resumen</button>
+            <button id="btnCSVDetalle" class="btn" type="button">XLSX Detalle</button>
+          </div>
         </div>
-
-        <div class="pills">
-          <span id="pillCount" class="pill">0 profesionales</span>
-          <span id="pillEstado" class="pill warn">—</span>
+      
+        <div class="split" style="margin-top:12px;">
+          <div class="mini" id="hint">
+            Fuente: <b>Producción ambulatoria confirmada</b> del mes seleccionado.
+          </div>
+          <div class="mini" id="lastLoad">—</div>
         </div>
       </section>
 
-      <section class="card tableCard">
-        <div class="tableTop">
-          <div class="field">
-            <label for="q">Buscar</label>
-            <input id="q" type="text" placeholder="Profesional, procedimiento, paciente, modalidad, observación..." />
-          </div>
-        </div>
-
-        <div style="overflow:auto;">
+      <section class="card cardPad">
+        <div class="tableWrap">
           <table>
             <thead>
               <tr>
