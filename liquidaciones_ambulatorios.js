@@ -798,17 +798,17 @@ function classifyModalidadByRole(roleId, line){
 
   if(role === 'r_nutricionista'){
     if(containsAny(texto, ['pad'])) return 'BONO PAD';
-    if(containsAny(texto, ['promo', 'promocion', 'promoción'])) return 'PROMOCIÓN';
+    if(containsAny(texto, ['balon'])) return 'PROMO BALÓN GÁSTRICO';
     return 'CONSULTA';
   }
 
   if(role === 'r_psicologo'){
-    if(containsAny(texto, ['promo', 'promocion', 'promoción'])) return 'PROMOCIÓN';
+    if(containsAny(texto, ['balon'])) return 'PROMO BALÓN GÁSTRICO';
     return 'CONSULTA';
   }
 
   if(role === 'r_nutrilogo'){
-    if(containsAny(texto, ['online', 'telemedicina', 'telemed', 'telemedico', 'telemedico', 'remoto'])) return 'ONLINE';
+    if(containsAny(texto, ['online', 'telemedicina', 'telemed', 'telemedico', 'remoto'])) return 'ONLINE';
     if(containsAny(texto, ['presensial', 'presencial'])) return 'PRESENCIAL';
     return 'PRESENCIAL';
   }
