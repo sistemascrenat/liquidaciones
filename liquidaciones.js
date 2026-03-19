@@ -2659,6 +2659,7 @@ function openDetalle(agg){
 
 function closeDetalle(){
   $('modalBackdrop').style.display = 'none';
+  if ($('modalResumenLiquidacion')) $('modalResumenLiquidacion').innerHTML = '';
 }
 
 function closeFechasPago(){
