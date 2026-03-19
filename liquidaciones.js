@@ -924,20 +924,18 @@ async function generarPDFLiquidacionProfesional(agg){
     if (shouldShow) {
   
       // helper fecha texto
-      const MES_TXT = String(monthNameEs(state.mesNum)).toUpperCase();
-      const ANO_TXT = String(state.ano);
-      const fechaPagoTxt = (day) => `${day} DE ${MES_TXT} ${ANO_TXT}`;
-  
-      // armado asunto (sin mencionar bono si no aplica)
+      const fechasPago = calcularDesglosePagos(agg);
+
+      // armado asunto
       const asuntoPart = 'PAGO DE PROCEDIMIENTOS';
       const asuntoFona = 'PAGO DE PROCEDIMIENTOS FONASA';
-  
+
       // medidas tabla
       const headH3 = 22;
       const rowH3  = 22;
       const rows3 = [
-        { fecha: fechaPagoTxt(5),  asunto: asuntoPart, monto: montoPart },
-        { fecha: fechaPagoTxt(27), asunto: asuntoFona, monto: montoFona }
+        { fecha: fechasPago.fechaPago1, asunto: asuntoPart, monto: fechasPago.montoPago1 },
+        { fecha: fechasPago.fechaPago2, asunto: asuntoFona, monto: fechasPago.montoPago2 }
       ];
   
       const tableH = headH3 + rows3.length * rowH3;
@@ -1345,6 +1343,9 @@ const state = {
   ufValorCLP: 0,           // UF CLP del mes
   bonosTramosGlobal: [],   // config/bonos.tramos
 
+  fechaPago1Manual: '',
+  fechaPago2Manual: '',
+
   prodRows: [],              // docs items del mes
   liquidResumen: [],
   lastDetailExportLines: []
@@ -1574,22 +1575,92 @@ async function loadUFDelMes(){
   }
 }
 
-async function saveUFDelMes(nuevoValorCLP){
-  const id = yyyymm(state.ano, state.mesNum);
-  state.ufDocId = id;
+function fechasPagoDocRef(){
+  return doc(db, 'liquidaciones_config', yyyymm(state.ano, state.mesNum));
+}
 
-  // ✅ Ruta válida: config/uf/meses/{YYYYMM}
-  const ref = doc(db, 'config', 'uf', 'meses', id);
+async function loadFechasPagoMes(){
+  try{
+    const snap = await getDoc(fechasPagoDocRef());
+    const x = snap.exists() ? (snap.data() || {}) : {};
 
-  const payload = {
-    ufValorCLP: Number(nuevoValorCLP || 0) || 0,
-    fecha: `${state.ano}-${String(state.mesNum).padStart(2,'0')}-01`,
+    state.fechaPago1Manual = cleanReminder(x.fechaPago1 || '');
+    state.fechaPago2Manual = cleanReminder(x.fechaPago2 || '');
+  }catch(e){
+    console.warn('No se pudo leer fechas de pago del mes', e);
+    state.fechaPago1Manual = '';
+    state.fechaPago2Manual = '';
+  }
+}
+
+async function saveFechasPagoMes(fechaPago1, fechaPago2){
+  await setDoc(fechasPagoDocRef(), {
+    monthId: yyyymm(state.ano, state.mesNum),
+    ano: Number(state.ano),
+    mesNum: Number(state.mesNum),
+    fechaPago1: cleanReminder(fechaPago1 || ''),
+    fechaPago2: cleanReminder(fechaPago2 || ''),
     actualizadoEl: serverTimestamp(),
     actualizadoPor: state.user?.email || ''
-  };
+  }, { merge:true });
 
-  await setDoc(ref, payload, { merge:true });
-  state.ufValorCLP = payload.ufValorCLP;
+  state.fechaPago1Manual = cleanReminder(fechaPago1 || '');
+  state.fechaPago2Manual = cleanReminder(fechaPago2 || '');
+}
+
+function getFechaPago1Texto(){
+  if(cleanReminder(state.fechaPago1Manual || '')){
+    return cleanReminder(state.fechaPago1Manual);
+  }
+  return `5 DE ${String(monthNameEs(state.mesNum)).toUpperCase()} ${state.ano}`;
+}
+
+function getFechaPago2Texto(){
+  if(cleanReminder(state.fechaPago2Manual || '')){
+    return cleanReminder(state.fechaPago2Manual);
+  }
+  return `27 DE ${String(monthNameEs(state.mesNum)).toUpperCase()} ${state.ano}`;
+}
+
+function calcularDesglosePagos(agg){
+  const lines = Array.isArray(agg?.lines) ? agg.lines : [];
+
+  const totalProcedimientos = Number(agg?.ajustes?.totalProcedimientos ?? agg?.total ?? 0) || 0;
+  const descuentoCLP = Number(agg?.ajustes?.descuentoCLP || 0) || 0;
+  const bonoCLP = Number(agg?.ajustes?.bonoCLP || 0) || 0;
+  const totalAPagar = Number(agg?.ajustes?.totalAPagar ?? (totalProcedimientos - descuentoCLP + bonoCLP)) || 0;
+
+  const baseDia2 = lines.reduce((acc, l) => {
+    const tp = String(l?.tipoPaciente || '').toLowerCase().trim();
+    const isFonasa = tp.includes('fona');
+    const isCirujano = String(l?.roleId || '') === 'r_cirujano';
+    const m = Number(l?.monto || 0) || 0;
+    return (isFonasa && isCirujano) ? (acc + m) : acc;
+  }, 0);
+
+  const baseDia1 = lines.reduce((acc, l) => {
+    const tp = String(l?.tipoPaciente || '').toLowerCase().trim();
+    const isFonasa = tp.includes('fona');
+    const isCirujano = String(l?.roleId || '') === 'r_cirujano';
+    const m = Number(l?.monto || 0) || 0;
+    return (isFonasa && isCirujano) ? acc : (acc + m);
+  }, 0);
+
+  let monto1 = Math.round(baseDia1 - descuentoCLP + bonoCLP);
+  let monto2 = Math.round(baseDia2);
+
+  if (monto1 < 0) {
+    monto2 = Math.max(0, monto2 + monto1);
+    monto1 = 0;
+  }
+
+  return {
+    fechaPago1: getFechaPago1Texto(),
+    fechaPago2: getFechaPago2Texto(),
+    montoPago1: monto1,
+    montoPago2: monto2,
+    totalAPagar
+  };
 }
 
 /* =========================
@@ -2395,10 +2466,8 @@ function paint(){
 function openDetalle(agg){
   $('modalBackdrop').style.display = 'grid';
 
-  // título siempre el nombre del profesional (persona)
   $('modalTitle').textContent = agg.nombre || 'Detalle';
 
-  // subtítulo: mes/año + casos + rut personal + (rut empresa si aplica)
   const extraEmpresa = (agg.tipoPersona === 'juridica' && (agg.empresaNombre || agg.empresaRut))
     ? ` · Empresa: ${agg.empresaNombre || ''}${agg.empresaRut ? ' ('+agg.empresaRut+')' : ''}`
     : '';
@@ -2408,11 +2477,132 @@ function openDetalle(agg){
     (agg.rut ? ` · RUT: ${agg.rut}` : '') +
     extraEmpresa;
 
-  $('modalPillTotal').textContent = `TOTAL: ${clp(agg?.ajustes?.totalAPagar ?? agg.total)}`;
+  $('modalPillTotal').textContent = `TOTAL A PAGAR: ${clp(agg?.ajustes?.totalAPagar ?? agg.total)}`;
   $('modalPillPendientes').textContent =
     agg.alertasCount > 0
       ? `Alertas: ${agg.alertasCount} · Pendientes: ${agg.pendientesCount}`
       : `Pendientes: ${agg.pendientesCount}`;
+
+  const totalProcedimientos = Number(agg?.ajustes?.totalProcedimientos ?? agg?.total ?? 0) || 0;
+  const descuentoUF = Number(agg?.ajustes?.descuentoUF || 0) || 0;
+  const descuentoCLP = Number(agg?.ajustes?.descuentoCLP || 0) || 0;
+  const bonoCLP = Number(agg?.ajustes?.bonoCLP || 0) || 0;
+  const cirugiasComoPrincipal = Number(agg?.ajustes?.cirugiasComoPrincipal || 0) || 0;
+  const ufValorCLP = Number(agg?.ajustes?.ufValorCLP || 0) || 0;
+  const totalAPagar = Number(agg?.ajustes?.totalAPagar ?? agg?.total ?? 0) || 0;
+
+  const desglose = calcularDesglosePagos(agg);
+
+  const modalBody = $('modalBody') || $('modalBackdrop');
+  const resumenHost = $('modalResumenLiquidacion');
+
+  if (resumenHost) {
+    const ajustesHtml = [];
+
+    if (descuentoUF > 0 && descuentoCLP > 0 && ufValorCLP > 0) {
+      ajustesHtml.push(`
+        <tr>
+          <td>Descuento</td>
+          <td class="mono">1</td>
+          <td class="mono">-${escapeHtml(clp(descuentoCLP))}</td>
+          <td class="mini muted">${escapeHtml(`${descuentoUF} UF · UF ${clp(ufValorCLP)}`)}</td>
+        </tr>
+      `);
+    }
+
+    if (bonoCLP > 0) {
+      const tramoIdx = Number(agg?.ajustes?.bonoTramoIndex || 0) || 0;
+      const tramo = agg?.ajustes?.bonoTramo || null;
+
+      const tramoTxt = tramo
+        ? (
+            (tramo.max === null || tramo.max === undefined || tramo.max === '')
+              ? `Tramo ${tramoIdx || ''} (${tramo.min} a más cirugías)`
+              : `Tramo ${tramoIdx || ''} (${tramo.min} a ${tramo.max} cirugías)`
+          )
+        : (tramoIdx ? `Tramo ${tramoIdx}` : '');
+
+      ajustesHtml.push(`
+        <tr>
+          <td>Bono cirujano</td>
+          <td class="mono">${escapeHtml(String(cirugiasComoPrincipal || 0))}</td>
+          <td class="mono">${escapeHtml(clp(bonoCLP))}</td>
+          <td class="mini muted">${escapeHtml(tramoTxt)}</td>
+        </tr>
+      `);
+    }
+
+    resumenHost.innerHTML = `
+      <div class="card" style="margin-bottom:14px; padding:14px;">
+        <div style="font-weight:800; margin-bottom:10px;">Resumen liquidación</div>
+
+        <div style="display:grid; grid-template-columns:repeat(4, minmax(150px,1fr)); gap:10px; margin-bottom:14px;">
+          <div class="miniCard">
+            <div class="mini muted">Total procedimientos</div>
+            <div><b>${escapeHtml(clp(totalProcedimientos))}</b></div>
+          </div>
+          <div class="miniCard">
+            <div class="mini muted">Descuento</div>
+            <div><b>${escapeHtml(clp(descuentoCLP))}</b></div>
+          </div>
+          <div class="miniCard">
+            <div class="mini muted">Bono</div>
+            <div><b>${escapeHtml(clp(bonoCLP))}</b></div>
+          </div>
+          <div class="miniCard">
+            <div class="mini muted">Total a pagar</div>
+            <div><b>${escapeHtml(clp(totalAPagar))}</b></div>
+          </div>
+        </div>
+
+        <div style="font-weight:800; margin:12px 0 8px;">Desglose pagos</div>
+        <div style="overflow:auto; margin-bottom:14px;">
+          <table class="table">
+            <thead>
+              <tr>
+                <th>Fecha</th>
+                <th>Asunto</th>
+                <th>Monto</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>${escapeHtml(desglose.fechaPago1)}</td>
+                <td>PAGO DE PROCEDIMIENTOS</td>
+                <td class="mono"><b>${escapeHtml(clp(desglose.montoPago1))}</b></td>
+              </tr>
+              <tr>
+                <td>${escapeHtml(desglose.fechaPago2)}</td>
+                <td>PAGO DE PROCEDIMIENTOS FONASA</td>
+                <td class="mono"><b>${escapeHtml(clp(desglose.montoPago2))}</b></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div style="font-weight:800; margin:12px 0 8px;">Ajustes</div>
+        <div style="overflow:auto;">
+          <table class="table">
+            <thead>
+              <tr>
+                <th>Concepto</th>
+                <th>Cantidad</th>
+                <th>Monto</th>
+                <th>Detalle</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${ajustesHtml.length ? ajustesHtml.join('') : `
+                <tr>
+                  <td colspan="4" class="mini muted">Sin ajustes para este profesional.</td>
+                </tr>
+              `}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    `;
+  }
 
   const tb = $('modalTbody');
   tb.innerHTML = '';
@@ -2429,13 +2619,11 @@ function openDetalle(agg){
   for(const l of lines){
     const st = l.isAlerta ? pillHtml('bad','ALERTA') : (l.isPendiente ? pillHtml('warn','PENDIENTE') : pillHtml('ok','OK'));
 
-    // Mostrar en observación: primero alertas, luego pendientes (separado)
     const obs = [
       ...(l.alerts?.length ? [`ALERTA: ${l.alerts.join(' · ')}`] : []),
       ...(l.pendings?.length ? [`PENDIENTE: ${l.pendings.join(' · ')}`] : []),
     ].join(' | ');
 
-    // En clínica/procedimiento: mostrar lo que venga pero si falta maestro, dejar evidencia
     const clinWarn = (!l.clinicaId || !l.clinicaExists)
       ? `<div class="mini muted">${escapeHtml(l.clinicaId ? 'No existe en catálogo' : 'Sin clinicaId')}</div>`
       : '';
@@ -2471,6 +2659,27 @@ function openDetalle(agg){
 
 function closeDetalle(){
   $('modalBackdrop').style.display = 'none';
+}
+
+function closeFechasPago(){
+  $('fechasPagoBackdrop').style.display = 'none';
+}
+
+function openFechasPago(){
+  $('fechasPagoBackdrop').style.display = 'grid';
+  $('fechasPagoSub').textContent = `${monthNameEs(state.mesNum)} ${state.ano}`;
+  $('fechaPago1').value = state.fechaPago1Manual || '';
+  $('fechaPago2').value = state.fechaPago2Manual || '';
+}
+
+async function saveFechasPagoDesdeModal(){
+  const fecha1 = cleanReminder($('fechaPago1').value || '');
+  const fecha2 = cleanReminder($('fechaPago2').value || '');
+
+  await saveFechasPagoMes(fecha1, fecha2);
+  toast('Fechas de pago guardadas');
+  closeFechasPago();
+  await recalc();
 }
 
 /* =========================
@@ -2690,6 +2899,9 @@ async function recalc(){
     // ✅ Cargar UF del mes seleccionado (config/uf/YYYYMM)
     await loadUFDelMes();
 
+    // ✅ Cargar fechas de pago del mes
+    await loadFechasPagoMes();
+
     buildLiquidaciones();
     
     // 🔎 DEBUG: confirmar tramos de bonos cargados
@@ -2753,6 +2965,7 @@ requireAuth({
     $('btnRecalcular').addEventListener('click', recalc);
     $('btnCSVResumen').addEventListener('click', exportResumenCSV);
     $('btnCSVDetalle').addEventListener('click', exportDetalleCSV);
+    $('btnFechasPago')?.addEventListener('click', openFechasPago);
 
     $('btnUF')?.addEventListener('click', ()=>{
       $('ufBackdrop').style.display = 'grid';
@@ -2796,6 +3009,13 @@ requireAuth({
     $('modalBackdrop').addEventListener('click', (e)=>{
       if(e.target === $('modalBackdrop')) closeDetalle();
     });
+
+    $('btnFechasPagoClose')?.addEventListener('click', closeFechasPago);
+    $('btnFechasPagoCancelar')?.addEventListener('click', closeFechasPago);
+    $('fechasPagoBackdrop')?.addEventListener('click', (e)=>{
+      if(e.target === $('fechasPagoBackdrop')) closeFechasPago();
+    });
+    $('btnFechasPagoGuardar')?.addEventListener('click', saveFechasPagoDesdeModal);
 
     $('btnExportDetalleProf').addEventListener('click', ()=>{
       if(!state.lastDetailExportLines.length){
