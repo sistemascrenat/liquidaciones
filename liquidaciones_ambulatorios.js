@@ -221,18 +221,18 @@ function pickDisplayEstadoLinea(l){
 function roleLabel(roleId=''){
   const r = normalize(roleId);
   if(r === 'r_nutricionista') return 'NUTRICIONISTA';
-  if(r === 'r_psicologo') return 'PSICÓLOGO';
-  if(r === 'r_nutriologo') return 'NUTRIÓLOGO';
-  if(r === 'r_cirujano') return 'CIRUJANO';
+  if(r === 'r_psicologo' || r === 'r_psicologa') return 'PSICÓLOGO';
+  if(r === 'r_nutriologo' || r === 'r_nutriologa') return 'NUTRIÓLOGO';
+  if(r === 'r_cirujano' || r === 'r_cirujana') return 'CIRUJANO';
   return String(roleId || '').toUpperCase();
 }
 
 function professionFromRole(roleId=''){
   const r = normalize(roleId);
   if(r === 'r_nutricionista') return 'NUTRICIONISTA';
-  if(r === 'r_psicologo') return 'PSICÓLOGO';
-  if(r === 'r_nutriologo') return 'NUTRIÓLOGO';
-  if(r === 'r_cirujano') return 'CIRUJANO';
+  if(r === 'r_psicologo' || r === 'r_psicologa') return 'PSICÓLOGO';
+  if(r === 'r_nutriologo' || r === 'r_nutriologa') return 'NUTRIÓLOGO';
+  if(r === 'r_cirujano' || r === 'r_cirujana') return 'CIRUJANO';
   return 'PROFESIONAL';
 }
 
