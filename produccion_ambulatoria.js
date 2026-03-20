@@ -1473,11 +1473,24 @@ function cerrarResolver() {
    FILTRO / PAGINACIÓN
 ====================== */
 
-function esKinesiologiaReservo(it) {
+const PRESTACIONES_EXCLUIDAS_RESERVO = [
+  "CONSULTA KINESIOLOGIA TELEMEDICINA",
+  "CONSULTA KINESIOLOGIA PRESENCIAL",
+  "KINESIOLOGIA PACK PRESENCIAL",
+  "KINESIOLOGIA PACK TELEMEDICINA",
+  "INBODY GOOGLE",
+  "CONSULTA KINESIOLOGIA PRESENCIAL INGRESO",
+  "EDUCACION KINESIOLOGICA POST CIRUGIA TELEMEDICINA (PAD)",
+  "CONSULTA KINESIOLOGIA TELEMEDICINA INGRESO",
+  "ESPIROMETRIA PACK",
+  "ESPIROMETRIA",
+  "ESPIROMOETRIA"
+];
+
+function esPrestacionExcluidaReservo(it) {
   // ✅ Solo aplica a origen Reservo
   if (clean(it?.origen) !== "Reservo") return false;
 
-  // ✅ Nos basamos en el texto de la prestación / tratamiento
   const texto = normalizarTexto(
     it?.prestacion ||
     it?.dataReservo?.["Tratamiento"] ||
@@ -1486,23 +1499,19 @@ function esKinesiologiaReservo(it) {
 
   if (!texto) return false;
 
-  return (
-    texto.includes("KINESIOLOGIA") ||
-    texto.includes("KINESIO") ||
-    texto.includes("KINE")
-  );
+  return PRESTACIONES_EXCLUIDAS_RESERVO.some(p => texto.includes(p));
 }
 
 function itemsOperables() {
-  // ✅ Si Kine está activada, entra todo
+  // ✅ Si está activado, entra todo
   if (uiState.incluirKinesiologia) return [...consolidado];
 
-  // ✅ Si Kine está apagada, excluimos solo Kine de Reservo
-  return consolidado.filter(it => !esKinesiologiaReservo(it));
+  // ✅ Si está apagado, excluimos las prestaciones especiales de Reservo
+  return consolidado.filter(it => !esPrestacionExcluidaReservo(it));
 }
 
-function totalKinesiologiaOculta() {
-  return consolidado.filter(esKinesiologiaReservo).length;
+function totalPrestacionesExcluidasOcultas() {
+  return consolidado.filter(esPrestacionExcluidaReservo).length;
 }
 
 function itemSearchText(it) {
@@ -1658,7 +1667,7 @@ function render() {
   }
 
   const operables = itemsOperables();
-  const ocultosKine = totalKinesiologiaOculta();
+ const ocultosKine = totalPrestacionesExcluidasOcultas();
 
   const pendientes = operables.filter(x => x.review?.estadoRevision === "pendiente").length;
   const alertas = operables.filter(x => (x.review?.alertas || []).length > 0).length;
@@ -1692,8 +1701,8 @@ function render() {
     const est = stateImport.status ? ` · Estado import: ${stateImport.status}` : "";
     const imp = stateImport.importId ? ` · ImportID: ${stateImport.importId}` : "";
     const kineTxt = uiState.incluirKinesiologia
-      ? ` · Kinesiología: activa`
-      : ` · Kinesiología: oculta (${ocultosKine})`;
+      ? ` · Prestaciones excluidas: activas`
+      : ` · Prestaciones excluidas: ocultas (${ocultosKine})`;
 
     $("statusInfo").textContent = consolidado.length
       ? `${vista}${est}${imp}${kineTxt} · Confirmados: ${confirmados} · Nuevos confirmables: ${confirmables} · Catálogos: ${profesionales.length} profesionales · ${totalAmbulatorios} procedimientos ambulatorios`
@@ -1708,8 +1717,8 @@ function render() {
 
   if ($("btnToggleKine")) {
     $("btnToggleKine").textContent = uiState.incluirKinesiologia
-      ? "Ocultar Kinesiología"
-      : "Activar Kinesiología";
+      ? "Ocultar prestaciones excluidas"
+      : "Activar prestaciones excluidas";
   }
 
   if ($("btnResolver")) $("btnResolver").disabled = consolidado.length === 0;
