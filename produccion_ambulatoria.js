@@ -1680,17 +1680,24 @@ function render() {
   }
 
   const operables = itemsOperables();
- const ocultosKine = totalPrestacionesExcluidasOcultas();
+  const ocultosKine = totalPrestacionesExcluidasOcultas();
 
-  const pendientes = operables.filter(x => x.review?.estadoRevision === "pendiente").length;
-  const alertas = operables.filter(x => (x.review?.alertas || []).length > 0).length;
-  const ok = operables.filter(x => x.review?.estadoRevision === "ok").length;
+  // ✅ Universo base según la vista actual
+  // - Vista normal: excluye no_aplica
+  // - Vista "Ver no aplica": solo incluye no_aplica
+  const universoVista = uiState.mostrarNoAplica
+    ? operables.filter(x => x.aplicacion?.estado === "no_aplica")
+    : operables.filter(x => x.aplicacion?.estado !== "no_aplica");
+
+  const pendientes = universoVista.filter(x => x.review?.estadoRevision === "pendiente").length;
+  const alertas = universoVista.filter(x => (x.review?.alertas || []).length > 0).length;
+  const ok = universoVista.filter(x => x.review?.estadoRevision === "ok").length;
   const noAplica = operables.filter(x => x.aplicacion?.estado === "no_aplica").length;
-  const pendProf = operables.filter(x => x.review?.pendientes?.profesional).length;
-  const reservoAplica = operables.filter(x => x.origen === "Reservo" && x.aplicacion?.estado === "aplica").length;
-  const mkAplica = operables.filter(x => x.origen === "MK" && x.aplicacion?.estado === "aplica").length;
-  const confirmados = operables.filter(x => x.confirmadoEnProduccion).length;
-  const confirmables = operables.filter(it =>
+  const pendProf = universoVista.filter(x => x.review?.pendientes?.profesional).length;
+  const reservoAplica = universoVista.filter(x => x.origen === "Reservo" && x.aplicacion?.estado === "aplica").length;
+  const mkAplica = universoVista.filter(x => x.origen === "MK" && x.aplicacion?.estado === "aplica").length;
+  const confirmados = universoVista.filter(x => x.confirmadoEnProduccion).length;
+  const confirmables = universoVista.filter(it =>
     esItemConfirmable(it) && !it.confirmadoEnProduccion
   ).length;
 
@@ -1699,7 +1706,11 @@ function render() {
   if ($("pillAlertas")) $("pillAlertas").textContent = `Alertas: ${alertas}`;
   if ($("pillProf")) $("pillProf").textContent = `Pend. profesional: ${pendProf}`;
   if ($("pillCoincidencias")) $("pillCoincidencias").textContent = `OK: ${ok} · Nuevos confirmables: ${confirmables}`;
-  if ($("pillFusionados")) $("pillFusionados").textContent = `No aplica: ${noAplica}`;
+  if ($("pillFusionados")) {
+    $("pillFusionados").textContent = uiState.mostrarNoAplica
+      ? `No aplica (vista): ${universoVista.length}`
+      : `No aplica: ${noAplica}`;
+  }
   if ($("pillReservoValidos")) $("pillReservoValidos").textContent = `Reservo válidos: ${reservoAplica}`;
   if ($("pillMKValidos")) $("pillMKValidos").textContent = `MK válidos: ${mkAplica}`;
 
