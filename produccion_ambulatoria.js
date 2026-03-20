@@ -1956,6 +1956,14 @@ async function loadStagingFromFirestore(importId) {
   for (const it of consolidado) {
     recomputeItemFromCurrentValues(it);
 
+    // ✅ Si el documento padre quedó "staged" pero los items ya tienen confirmados,
+    // corregimos el estado cargado en memoria para que la UI refleje la realidad.
+    const confirmadosDetectados = consolidado.filter(x => x.confirmadoEnProduccion).length;
+  
+    if (stateImport.status === "staged" && confirmadosDetectados > 0) {
+      stateImport.status = "confirmada";
+    }
+
     manualOverrides[it.itemId] = {
       profesionalId: it.resolved?.confirmadoManualProfesional ? (it.resolved?.profesionalId || null) : null,
       procedimientoId: it.resolved?.confirmadoManualProcedimiento ? (it.resolved?.procedimientoId || null) : null
@@ -2149,6 +2157,35 @@ async function confirmarImportacion() {
   const totalQuedanFuera = consolidado.length - (totalConfirmadosActuales + itemsConfirmables.length);
 
   if (!itemsConfirmables.length) {
+    // ✅ Caso especial:
+    // no hay nuevos items por confirmar, pero puede que este import
+    // ya tenga items confirmados y el doc padre aún haya quedado en "staged".
+    if (totalConfirmadosActuales > 0) {
+      await setDoc(doc(db, "produccion_ambulatoria_imports", stateImport.importId), {
+        estado: "confirmada",
+        confirmadoEl: serverTimestamp(),
+        confirmadoPor: stateImport.user?.email || "",
+        confirmadoEn: `produccion_ambulatoria/${String(stateImport.year)}/meses/${pad(stateImport.monthNum, 2)}/pacientes/{RUT}/items/{itemId}`,
+        totalItems: consolidado.length,
+        totalConfirmados: totalConfirmadosActuales,
+        totalPendientes: consolidado.length - totalConfirmadosActuales,
+        totalConfirmadosNuevosUltimaEjecucion: 0,
+        actualizadoEl: serverTimestamp(),
+        actualizadoPor: stateImport.user?.email || ""
+      }, { merge: true });
+
+      stateImport.status = "confirmada";
+
+      setStatus(
+        `✅ Import regularizado como confirmado: ${stateImport.importId} · ` +
+        `${totalConfirmadosActuales} items ya estaban en producción final`
+      );
+
+      render();
+      toast("Este import ya tenía ítems confirmados. Se actualizó su estado a confirmada.");
+      return;
+    }
+
     toast("No hay nuevos ítems válidos para pasar a producción final.");
     return;
   }
