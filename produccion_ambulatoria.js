@@ -1405,14 +1405,16 @@ function renderResolver() {
 
   if (!resumen || !listResumen || !listProf || !listProc || !listAlert) return;
 
-  const pendientes = consolidado.filter(x => x.review?.estadoRevision === "pendiente");
-  const pendProf = consolidado.filter(x => x.review?.pendientes?.profesional);
-  const pendProc = consolidado.filter(x => x.review?.pendientes?.procedimiento);
-  const conAlerta = consolidado.filter(x => (x.review?.alertas || []).length > 0);
-  const revisarApp = consolidado.filter(x => x.aplicacion?.estado === "revisar");
-  const aplica = consolidado.filter(x => x.aplicacion?.estado === "aplica");
-  const noAplica = consolidado.filter(x => x.aplicacion?.estado === "no_aplica");
-
+  const operables = itemsOperables();
+  
+  const pendientes = operables.filter(x => x.review?.estadoRevision === "pendiente");
+  const pendProf = operables.filter(x => x.review?.pendientes?.profesional);
+  const pendProc = operables.filter(x => x.review?.pendientes?.procedimiento);
+  const conAlerta = operables.filter(x => (x.review?.alertas || []).length > 0);
+  const revisarApp = operables.filter(x => x.aplicacion?.estado === "revisar");
+  const aplica = operables.filter(x => x.aplicacion?.estado === "aplica");
+  const noAplica = operables.filter(x => x.aplicacion?.estado === "no_aplica");
+  
   const resumenItems = getResolverItemsByFiltro();
 
   resumen.innerHTML = [
