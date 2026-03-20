@@ -1672,7 +1672,9 @@ function render() {
       <th>Rut</th>
       <th>Paciente</th>
       <th>Profesional archivo</th>
+      <th>Profesional resuelto</th>
       <th>Procedimiento archivo</th>
+      <th>Procedimiento resuelto</th>
       <th>Valor</th>
       <th>Revisión</th>
       <th>Aplicación</th>
@@ -1709,7 +1711,9 @@ function render() {
       <td>${escapeHtml(r.rut || "")}</td>
       <td>${escapeHtml(r.paciente || "")}</td>
       <td>${escapeHtml(r.profesional || "")}</td>
+      <td>${escapeHtml(r.profesionalDetectado || r.resolved?.profesionalNombre || "—")}</td>
       <td>${escapeHtml(r.prestacion || "")}</td>
+      <td>${escapeHtml(r.procedimientoDetectado || r.resolved?.procedimientoNombre || "—")}</td>
       <td>${escapeHtml(r.valor ?? "")}</td>
       <td>${estado === "ok" ? `<span class="ok">OK</span>` : `<span class="warn">Pendiente</span>`}</td>
       <td>${escapeHtml(r.aplicacion?.estado || "—")}</td>
