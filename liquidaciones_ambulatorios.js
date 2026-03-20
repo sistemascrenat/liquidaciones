@@ -222,7 +222,7 @@ function roleLabel(roleId=''){
   const r = normalize(roleId);
   if(r === 'r_nutricionista') return 'NUTRICIONISTA';
   if(r === 'r_psicologo') return 'PSICÓLOGO';
-  if(r === 'r_nutrilogo') return 'NUTRIÓLOGO';
+  if(r === 'r_nutriologo') return 'NUTRIÓLOGO';
   if(r === 'r_cirujano') return 'CIRUJANO';
   return String(roleId || '').toUpperCase();
 }
@@ -231,7 +231,7 @@ function professionFromRole(roleId=''){
   const r = normalize(roleId);
   if(r === 'r_nutricionista') return 'NUTRICIONISTA';
   if(r === 'r_psicologo') return 'PSICÓLOGO';
-  if(r === 'r_nutrilogo') return 'NUTRIÓLOGO';
+  if(r === 'r_nutriologo') return 'NUTRIÓLOGO';
   if(r === 'r_cirujano') return 'CIRUJANO';
   return 'PROFESIONAL';
 }
