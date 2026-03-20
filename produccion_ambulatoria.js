@@ -99,6 +99,7 @@ let uiState = {
   page: 0,
   pageSize: 60,
   mostrarNoAplica: false,
+  incluirKinesiologia: false, // ✅ por defecto Kine queda oculta
   resolverFiltro: "base" // base | pendientes | aplica | no_aplica | revisar | todos
 };
 
@@ -1328,7 +1329,7 @@ function bindEditButtonsIn(container) {
 }
 
 function getResolverBaseItems() {
-  return consolidado.filter(it =>
+  return itemsOperables().filter(it =>
     it.review?.estadoRevision === "pendiente" ||
     it.aplicacion?.estado === "revisar"
   );
@@ -1336,22 +1337,23 @@ function getResolverBaseItems() {
 
 function getResolverItemsByFiltro() {
   const base = getResolverBaseItems();
+  const operables = itemsOperables();
 
   switch (uiState.resolverFiltro) {
     case "pendientes":
       return base.filter(it => it.review?.estadoRevision === "pendiente");
 
     case "aplica":
-      return consolidado.filter(it => it.aplicacion?.estado === "aplica");
+      return operables.filter(it => it.aplicacion?.estado === "aplica");
 
     case "no_aplica":
-      return consolidado.filter(it => it.aplicacion?.estado === "no_aplica");
+      return operables.filter(it => it.aplicacion?.estado === "no_aplica");
 
     case "revisar":
-      return consolidado.filter(it => it.aplicacion?.estado === "revisar");
+      return operables.filter(it => it.aplicacion?.estado === "revisar");
 
     case "todos":
-      return consolidado;
+      return operables;
 
     case "base":
     default:
@@ -1471,6 +1473,38 @@ function cerrarResolver() {
    FILTRO / PAGINACIÓN
 ====================== */
 
+function esKinesiologiaReservo(it) {
+  // ✅ Solo aplica a origen Reservo
+  if (clean(it?.origen) !== "Reservo") return false;
+
+  // ✅ Nos basamos en el texto de la prestación / tratamiento
+  const texto = normalizarTexto(
+    it?.prestacion ||
+    it?.dataReservo?.["Tratamiento"] ||
+    ""
+  );
+
+  if (!texto) return false;
+
+  return (
+    texto.includes("KINESIOLOGIA") ||
+    texto.includes("KINESIO") ||
+    texto.includes("KINE")
+  );
+}
+
+function itemsOperables() {
+  // ✅ Si Kine está activada, entra todo
+  if (uiState.incluirKinesiologia) return [...consolidado];
+
+  // ✅ Si Kine está apagada, excluimos solo Kine de Reservo
+  return consolidado.filter(it => !esKinesiologiaReservo(it));
+}
+
+function totalKinesiologiaOculta() {
+  return consolidado.filter(esKinesiologiaReservo).length;
+}
+
 function itemSearchText(it) {
   return [
     it.itemId,
@@ -1491,7 +1525,7 @@ function itemSearchText(it) {
 }
 
 function filteredItems() {
-  let items = [...consolidado];
+  let items = itemsOperables();
 
   if (uiState.mostrarNoAplica) {
     items = items.filter(it => it.aplicacion?.estado === "no_aplica");
@@ -1623,22 +1657,25 @@ function render() {
     tbody.appendChild(tr);
   }
 
-  const pendientes = consolidado.filter(x => x.review?.estadoRevision === "pendiente").length;
-  const alertas = consolidado.filter(x => (x.review?.alertas || []).length > 0).length;
-  const ok = consolidado.filter(x => x.review?.estadoRevision === "ok").length;
-  const noAplica = consolidado.filter(x => x.aplicacion?.estado === "no_aplica").length;
-  const pendProf = consolidado.filter(x => x.review?.pendientes?.profesional).length;
-  const reservoAplica = consolidado.filter(x => x.origen === "Reservo" && x.aplicacion?.estado === "aplica").length;
-  const mkAplica = consolidado.filter(x => x.origen === "MK" && x.aplicacion?.estado === "aplica").length;
-  const confirmados = consolidado.filter(x => x.confirmadoEnProduccion).length;
-  const confirmables = consolidado.filter(it =>
+  const operables = itemsOperables();
+  const ocultosKine = totalKinesiologiaOculta();
+
+  const pendientes = operables.filter(x => x.review?.estadoRevision === "pendiente").length;
+  const alertas = operables.filter(x => (x.review?.alertas || []).length > 0).length;
+  const ok = operables.filter(x => x.review?.estadoRevision === "ok").length;
+  const noAplica = operables.filter(x => x.aplicacion?.estado === "no_aplica").length;
+  const pendProf = operables.filter(x => x.review?.pendientes?.profesional).length;
+  const reservoAplica = operables.filter(x => x.origen === "Reservo" && x.aplicacion?.estado === "aplica").length;
+  const mkAplica = operables.filter(x => x.origen === "MK" && x.aplicacion?.estado === "aplica").length;
+  const confirmados = operables.filter(x => x.confirmadoEnProduccion).length;
+  const confirmables = operables.filter(it =>
     esItemConfirmable(it) && !it.confirmadoEnProduccion
   ).length;
 
   if ($("countPill")) $("countPill").textContent = `Vista: ${items.length} · Total import: ${consolidado.length}`;
   if ($("pillPendientes")) $("pillPendientes").textContent = `Pendientes: ${pendientes}`;
   if ($("pillAlertas")) $("pillAlertas").textContent = `Alertas: ${alertas}`;
-  if ($("pillProf")) $("pillProf").textContent = `Profesionales: ${pendProf}`;
+  if ($("pillProf")) $("pillProf").textContent = `Pend. profesional: ${pendProf}`;
   if ($("pillCoincidencias")) $("pillCoincidencias").textContent = `OK: ${ok} · Nuevos confirmables: ${confirmables}`;
   if ($("pillFusionados")) $("pillFusionados").textContent = `No aplica: ${noAplica}`;
   if ($("pillReservoValidos")) $("pillReservoValidos").textContent = `Reservo válidos: ${reservoAplica}`;
@@ -1654,9 +1691,12 @@ function render() {
     const vista = uiState.mostrarNoAplica ? "Vista: NO APLICA" : "Vista: APLICABLES / REVISAR";
     const est = stateImport.status ? ` · Estado import: ${stateImport.status}` : "";
     const imp = stateImport.importId ? ` · ImportID: ${stateImport.importId}` : "";
+    const kineTxt = uiState.incluirKinesiologia
+      ? ` · Kinesiología: activa`
+      : ` · Kinesiología: oculta (${ocultosKine})`;
 
     $("statusInfo").textContent = consolidado.length
-      ? `${vista}${est}${imp} · Confirmados: ${confirmados} · Nuevos confirmables: ${confirmables} · Catálogos: ${profesionales.length} profesionales · ${totalAmbulatorios} procedimientos ambulatorios`
+      ? `${vista}${est}${imp}${kineTxt} · Confirmados: ${confirmados} · Nuevos confirmables: ${confirmables} · Catálogos: ${profesionales.length} profesionales · ${totalAmbulatorios} procedimientos ambulatorios`
       : "—";
   }
 
@@ -1664,6 +1704,12 @@ function render() {
     $("btnToggleNoAplica").textContent = uiState.mostrarNoAplica
       ? "Ver aplicables"
       : "Ver no aplica";
+  }
+
+  if ($("btnToggleKine")) {
+    $("btnToggleKine").textContent = uiState.incluirKinesiologia
+      ? "Ocultar Kinesiología"
+      : "Activar Kinesiología";
   }
 
   if ($("btnResolver")) $("btnResolver").disabled = consolidado.length === 0;
@@ -2146,15 +2192,17 @@ async function confirmarImportacion() {
     recomputeItemFromCurrentValues(reg);
   }
 
-  const itemsConfirmables = consolidado.filter(it =>
+  const operables = itemsOperables();
+
+  const itemsConfirmables = operables.filter(it =>
     esItemConfirmable(it) && !it.confirmadoEnProduccion
   );
 
-  const totalConfirmadosActuales = consolidado.filter(it => it.confirmadoEnProduccion).length;
-  const totalPend = consolidado.filter(x => x.review?.estadoRevision === "pendiente").length;
-  const totalRevisar = consolidado.filter(x => x.aplicacion?.estado === "revisar").length;
-  const totalNoAplica = consolidado.filter(x => x.aplicacion?.estado === "no_aplica").length;
-  const totalQuedanFuera = consolidado.length - (totalConfirmadosActuales + itemsConfirmables.length);
+  const totalConfirmadosActuales = operables.filter(it => it.confirmadoEnProduccion).length;
+  const totalPend = operables.filter(x => x.review?.estadoRevision === "pendiente").length;
+  const totalRevisar = operables.filter(x => x.aplicacion?.estado === "revisar").length;
+  const totalNoAplica = operables.filter(x => x.aplicacion?.estado === "no_aplica").length;
+  const totalQuedanFuera = operables.length - (totalConfirmadosActuales + itemsConfirmables.length);
 
   if (!itemsConfirmables.length) {
     // ✅ Caso especial:
@@ -2497,6 +2545,14 @@ if ($("btnNext")) {
 if ($("btnToggleNoAplica")) {
   $("btnToggleNoAplica").onclick = () => {
     uiState.mostrarNoAplica = !uiState.mostrarNoAplica;
+    uiState.page = 0;
+    render();
+  };
+}
+
+if ($("btnToggleKine")) {
+  $("btnToggleKine").onclick = () => {
+    uiState.incluirKinesiologia = !uiState.incluirKinesiologia;
     uiState.page = 0;
     render();
   };
