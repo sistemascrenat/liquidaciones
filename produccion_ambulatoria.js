@@ -1341,7 +1341,7 @@ function getResolverItemsByFiltro() {
 
   switch (uiState.resolverFiltro) {
     case "pendientes":
-      return base.filter(it => it.review?.estadoRevision === "pendiente");
+      return operables.filter(it => it.review?.estadoRevision === "pendiente");
 
     case "aplica":
       return operables.filter(it => it.aplicacion?.estado === "aplica");
@@ -1357,7 +1357,7 @@ function getResolverItemsByFiltro() {
 
     case "base":
     default:
-      return "Pendientes y revisar";
+      return base;
   }
 }
 
@@ -1370,7 +1370,7 @@ function resolverFiltroLabel() {
     case "todos": return "Todos";
     case "base":
     default:
-      return "Por resolver";
+      return "Pendientes y revisar";
   }
 }
 
@@ -1418,7 +1418,7 @@ function renderResolver() {
   const resumenItems = getResolverItemsByFiltro();
 
   resumen.innerHTML = [
-    resolverResumenLink("Items", consolidado.length, "base"),
+    resolverResumenLink("Pend. + revisar", getResolverBaseItems().length, "base"),
     `<span> · </span>`,
     resolverResumenLink("Pendientes", pendientes.length, "pendientes"),
     `<span> · </span>`,
@@ -1427,6 +1427,8 @@ function renderResolver() {
     resolverResumenLink("No aplica", noAplica.length, "no_aplica"),
     `<span> · </span>`,
     resolverResumenLink("Revisar", revisarApp.length, "revisar"),
+    `<span> · </span>`,
+    resolverResumenLink("Todos", operables.length, "todos"),
     `<div class="help" style="margin-top:8px;">Vista actual: <b>${escapeHtml(resolverFiltroLabel())}</b></div>`
   ].join("");
 
