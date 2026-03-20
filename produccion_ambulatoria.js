@@ -1487,7 +1487,8 @@ const PRESTACIONES_EXCLUIDAS_RESERVO = [
   "ESPIROMETRIA PACK",
   "ESPIROMETRIA",
   "ESPIROMOETRIA",
-  "KIT KINE"
+  "KIT KINE",
+  "CONSULTA SIN COSTO"
 ];
 
 function esPrestacionExcluidaReservo(it) {
