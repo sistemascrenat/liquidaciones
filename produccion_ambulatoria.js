@@ -1330,8 +1330,11 @@ function bindEditButtonsIn(container) {
 
 function getResolverBaseItems() {
   return itemsOperables().filter(it =>
-    it.review?.estadoRevision === "pendiente" ||
-    it.aplicacion?.estado === "revisar"
+    it.aplicacion?.estado !== "no_aplica" &&
+    (
+      it.review?.estadoRevision === "pendiente" ||
+      it.aplicacion?.estado === "revisar"
+    )
   );
 }
 
@@ -1341,7 +1344,10 @@ function getResolverItemsByFiltro() {
 
   switch (uiState.resolverFiltro) {
     case "pendientes":
-      return operables.filter(it => it.review?.estadoRevision === "pendiente");
+      return operables.filter(it =>
+        it.aplicacion?.estado !== "no_aplica" &&
+        it.review?.estadoRevision === "pendiente"
+      );
 
     case "aplica":
       return operables.filter(it => it.aplicacion?.estado === "aplica");
@@ -1353,7 +1359,7 @@ function getResolverItemsByFiltro() {
       return operables.filter(it => it.aplicacion?.estado === "revisar");
 
     case "todos":
-      return operables;
+      return operables.filter(it => it.aplicacion?.estado !== "no_aplica");
 
     case "base":
     default:
@@ -1406,13 +1412,14 @@ function renderResolver() {
   if (!resumen || !listResumen || !listProf || !listProc || !listAlert) return;
 
   const operables = itemsOperables();
+  const operablesSinNoAplica = operables.filter(x => x.aplicacion?.estado !== "no_aplica");
   
-  const pendientes = operables.filter(x => x.review?.estadoRevision === "pendiente");
-  const pendProf = operables.filter(x => x.review?.pendientes?.profesional);
-  const pendProc = operables.filter(x => x.review?.pendientes?.procedimiento);
-  const conAlerta = operables.filter(x => (x.review?.alertas || []).length > 0);
-  const revisarApp = operables.filter(x => x.aplicacion?.estado === "revisar");
-  const aplica = operables.filter(x => x.aplicacion?.estado === "aplica");
+  const pendientes = operablesSinNoAplica.filter(x => x.review?.estadoRevision === "pendiente");
+  const pendProf = operablesSinNoAplica.filter(x => x.review?.pendientes?.profesional);
+  const pendProc = operablesSinNoAplica.filter(x => x.review?.pendientes?.procedimiento);
+  const conAlerta = operablesSinNoAplica.filter(x => (x.review?.alertas || []).length > 0);
+  const revisarApp = operablesSinNoAplica.filter(x => x.aplicacion?.estado === "revisar");
+  const aplica = operablesSinNoAplica.filter(x => x.aplicacion?.estado === "aplica");
   const noAplica = operables.filter(x => x.aplicacion?.estado === "no_aplica");
   
   const resumenItems = getResolverItemsByFiltro();
