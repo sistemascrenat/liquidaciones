@@ -1782,52 +1782,6 @@ function render() {
       : "Activar prestaciones excluidas";
   }
 
-  function togglePillFiltro(nombreFiltro) {
-  uiState.pillFiltro = (uiState.pillFiltro === nombreFiltro) ? "" : nombreFiltro;
-  uiState.page = 0;
-
-  // ✅ Si el pill es "no_aplica", sincronizamos también la vista
-  if (nombreFiltro === "no_aplica") {
-    uiState.mostrarNoAplica = (uiState.pillFiltro === "no_aplica");
-  } else if (uiState.pillFiltro !== "no_aplica") {
-    uiState.mostrarNoAplica = false;
-  }
-
-  render();
-}
-
-if ($("pillAlertas")) {
-  $("pillAlertas").onclick = () => togglePillFiltro("alertas");
-}
-
-if ($("pillProf")) {
-  $("pillProf").onclick = () => togglePillFiltro("pend_prof");
-}
-
-if ($("pillProc")) {
-  $("pillProc").onclick = () => togglePillFiltro("pend_proc");
-}
-
-if ($("pillReservoValidos")) {
-  $("pillReservoValidos").onclick = () => togglePillFiltro("reservo_validos");
-}
-
-if ($("pillMKValidos")) {
-  $("pillMKValidos").onclick = () => togglePillFiltro("mk_validos");
-}
-
-if ($("pillOk")) {
-  $("pillOk").onclick = () => togglePillFiltro("ok");
-}
-
-if ($("pillConfirmables")) {
-  $("pillConfirmables").onclick = () => togglePillFiltro("confirmables");
-}
-
-if ($("pillFusionados")) {
-  $("pillFusionados").onclick = () => togglePillFiltro("no_aplica");
-}
-
   if ($("btnResolver")) $("btnResolver").disabled = consolidado.length === 0;
 
   if ($("btnConfirmar")) {
@@ -1846,6 +1800,23 @@ if ($("pillFusionados")) {
   }
 
   renderPagerTabs(totalPages);
+}
+
+function togglePillFiltro(nombreFiltro) {
+  // ✅ Caso especial: el pill "no_aplica" fuerza esa vista
+  if (nombreFiltro === "no_aplica") {
+    uiState.mostrarNoAplica = true;
+    uiState.pillFiltro = "no_aplica";
+    uiState.page = 0;
+    render();
+    return;
+  }
+
+  // ✅ Para todos los demás pills, NO cambiamos la vista actual.
+  // Solo filtramos dentro del universo que ya se está viendo.
+  uiState.pillFiltro = (uiState.pillFiltro === nombreFiltro) ? "" : nombreFiltro;
+  uiState.page = 0;
+  render();
 }
 
 function renderPagerTabs(totalPages) {
@@ -2678,6 +2649,38 @@ if ($("btnToggleKine")) {
     uiState.page = 0;
     render();
   };
+}
+
+if ($("pillAlertas")) {
+  $("pillAlertas").onclick = () => togglePillFiltro("alertas");
+}
+
+if ($("pillProf")) {
+  $("pillProf").onclick = () => togglePillFiltro("pend_prof");
+}
+
+if ($("pillProc")) {
+  $("pillProc").onclick = () => togglePillFiltro("pend_proc");
+}
+
+if ($("pillReservoValidos")) {
+  $("pillReservoValidos").onclick = () => togglePillFiltro("reservo_validos");
+}
+
+if ($("pillMKValidos")) {
+  $("pillMKValidos").onclick = () => togglePillFiltro("mk_validos");
+}
+
+if ($("pillOk")) {
+  $("pillOk").onclick = () => togglePillFiltro("ok");
+}
+
+if ($("pillConfirmables")) {
+  $("pillConfirmables").onclick = () => togglePillFiltro("confirmables");
+}
+
+if ($("pillFusionados")) {
+  $("pillFusionados").onclick = () => togglePillFiltro("no_aplica");
 }
 
 /* resolver */
