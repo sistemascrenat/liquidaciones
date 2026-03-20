@@ -1357,7 +1357,7 @@ function getResolverItemsByFiltro() {
 
     case "base":
     default:
-      return base;
+      return "Pendientes y revisar";
   }
 }
 
@@ -1427,7 +1427,7 @@ function renderResolver() {
     resolverResumenLink("No aplica", noAplica.length, "no_aplica"),
     `<span> · </span>`,
     resolverResumenLink("Revisar", revisarApp.length, "revisar"),
-    `<div class="help" style="margin-top:8px;">Filtro actual: <b>${escapeHtml(resolverFiltroLabel())}</b></div>`
+    `<div class="help" style="margin-top:8px;">Vista actual: <b>${escapeHtml(resolverFiltroLabel())}</b></div>`
   ].join("");
 
   listResumen.innerHTML = resumenItems.length
