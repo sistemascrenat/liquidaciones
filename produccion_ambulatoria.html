@@ -203,7 +203,7 @@
             Cargar Import
           </button>
 
-          <button class="btn soft" id="btnResolver" type="button" disabled>Resolver pendientes</button>
+          <button class="btn soft" id="btnResolver" type="button" disabled>Revisar importación</button>
           <button class="btn soft" id="btnConfirmar" type="button" disabled>Confirmar importación</button>
           <button class="btn danger" id="btnAnular" type="button" disabled>Anular importación</button>
 
@@ -262,9 +262,9 @@
         <div class="modalCard" role="dialog" aria-modal="true">
           <div class="modalHead">
             <div>
-              <div class="h1" style="margin:0;font-size:18px;">Resolver pendientes</div>
+              <div class="h1" style="margin:0;font-size:18px;">Revisar importación</div>
               <div class="muted" style="font-size:12px;margin-top:2px;" id="resolverSub">
-                Revisa alertas de estado y resuelve profesionales / procedimientos faltantes.
+                Revisa pendientes, casos por revisar, registros que aplican y registros que no aplican.
               </div>
             </div>
             <button class="iconBtn" id="btnResolverClose" type="button" aria-label="Cerrar" title="Cerrar">✖️</button>
@@ -283,9 +283,9 @@
 
             <!-- Coincidencias -->
             <section class="card" style="padding:12px;">
-              <div class="sectionTitle">Resumen de revisión</div>
+              <div class="sectionTitle">Vista de estados del import</div>
               <div class="muted tiny" style="margin-bottom:8px;">
-                Aquí verás los ítems con alertas y los que siguen pendientes de profesional o procedimiento.
+                Aquí verás los ítems según la vista seleccionada: pendientes, revisar, aplican, no aplica o todos.
               </div>
               <div id="resolverCoincidenciasList"></div>
             </section>
@@ -295,7 +295,7 @@
             <div class="grid2">
               <!-- Profesionales -->
               <section class="card" style="padding:12px;">
-                <div class="sectionTitle">Profesionales</div>
+                <div class="sectionTitle">Pendientes de profesional</div>
                 <div class="muted tiny" style="margin-bottom:8px;">
                   Se sugieren desde la base de datos de profesionales. Basta una palabra útil en común para sugerir, pero se confirma manualmente.
                 </div>
@@ -304,7 +304,7 @@
 
               <!-- Prestaciones -->
               <section class="card" style="padding:12px;">
-                <div class="sectionTitle">Prestaciones</div>
+               <div class="sectionTitle">Pendientes de procedimiento</div>
                 <div class="muted tiny" style="margin-bottom:8px;">
                   Relación entre <b>Tratamiento</b> (Reservo) y <b>D Artículo</b> (MK).
                 </div>
