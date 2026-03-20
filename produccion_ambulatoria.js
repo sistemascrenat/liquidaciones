@@ -1330,37 +1330,39 @@ function bindEditButtonsIn(container) {
 }
 
 function getResolverBaseItems() {
-  return itemsOperables().filter(it =>
-    it.aplicacion?.estado !== "no_aplica" &&
-    (
-      it.review?.estadoRevision === "pendiente" ||
-      it.aplicacion?.estado === "revisar"
-    )
+  const operables = itemsOperables();
+
+  const universoResolver = uiState.mostrarNoAplica
+    ? operables.filter(it => it.aplicacion?.estado === "no_aplica")
+    : operables.filter(it => it.aplicacion?.estado !== "no_aplica");
+
+  return universoResolver.filter(it =>
+    it.review?.estadoRevision === "pendiente" ||
+    it.aplicacion?.estado === "revisar"
   );
 }
 
 function getResolverItemsByFiltro() {
-  const base = getResolverBaseItems();
   const operables = itemsOperables();
+
+  const universoResolver = uiState.mostrarNoAplica
+    ? operables.filter(it => it.aplicacion?.estado === "no_aplica")
+    : operables.filter(it => it.aplicacion?.estado !== "no_aplica");
+
+  const base = universoResolver.filter(it =>
+    it.review?.estadoRevision === "pendiente" ||
+    it.aplicacion?.estado === "revisar"
+  );
 
   switch (uiState.resolverFiltro) {
     case "pendientes":
-      return operables.filter(it =>
-        it.aplicacion?.estado !== "no_aplica" &&
-        it.review?.estadoRevision === "pendiente"
-      );
-
-    case "aplica":
-      return operables.filter(it => it.aplicacion?.estado === "aplica");
-
-    case "no_aplica":
-      return operables.filter(it => it.aplicacion?.estado === "no_aplica");
+      return universoResolver.filter(it => it.review?.estadoRevision === "pendiente");
 
     case "revisar":
-      return operables.filter(it => it.aplicacion?.estado === "revisar");
+      return universoResolver.filter(it => it.aplicacion?.estado === "revisar");
 
-    case "todos":
-      return operables.filter(it => it.aplicacion?.estado !== "no_aplica");
+    case "no_aplica":
+      return uiState.mostrarNoAplica ? base : [];
 
     case "base":
     default:
@@ -1369,15 +1371,15 @@ function getResolverItemsByFiltro() {
 }
 
 function resolverFiltroLabel() {
+  const sufijo = uiState.mostrarNoAplica ? " · No aplica" : "";
+
   switch (uiState.resolverFiltro) {
-    case "pendientes": return "Pendientes";
-    case "aplica": return "Aplican";
-    case "no_aplica": return "No aplica";
-    case "revisar": return "Revisar";
-    case "todos": return "Todos";
+    case "pendientes": return `Pendientes${sufijo}`;
+    case "revisar": return `Revisar${sufijo}`;
+    case "no_aplica": return "Pendientes y revisar · No aplica";
     case "base":
     default:
-      return "Pendientes y revisar";
+      return `Pendientes y revisar${sufijo}`;
   }
 }
 
@@ -1397,6 +1399,14 @@ function bindResolverResumenFiltros() {
   resumen.querySelectorAll("[data-resolver-filter]").forEach(btn => {
     btn.onclick = () => {
       const filtro = btn.getAttribute("data-resolver-filter") || "base";
+
+      if (filtro === "no_aplica") {
+        uiState.mostrarNoAplica = !uiState.mostrarNoAplica;
+        uiState.resolverFiltro = "base";
+        renderResolver();
+        return;
+      }
+
       uiState.resolverFiltro = filtro;
       renderResolver();
     };
@@ -1413,30 +1423,36 @@ function renderResolver() {
   if (!resumen || !listResumen || !listProf || !listProc || !listAlert) return;
 
   const operables = itemsOperables();
-  const operablesSinNoAplica = operables.filter(x => x.aplicacion?.estado !== "no_aplica");
-  
-  const pendientes = operablesSinNoAplica.filter(x => x.review?.estadoRevision === "pendiente");
-  const pendProf = operablesSinNoAplica.filter(x => x.review?.pendientes?.profesional);
-  const pendProc = operablesSinNoAplica.filter(x => x.review?.pendientes?.procedimiento);
-  const conAlerta = operablesSinNoAplica.filter(x => (x.review?.alertas || []).length > 0);
-  const revisarApp = operablesSinNoAplica.filter(x => x.aplicacion?.estado === "revisar");
-  const aplica = operablesSinNoAplica.filter(x => x.aplicacion?.estado === "aplica");
-  const noAplica = operables.filter(x => x.aplicacion?.estado === "no_aplica");
-  
+
+  const universoResolver = uiState.mostrarNoAplica
+    ? operables.filter(x => x.aplicacion?.estado === "no_aplica")
+    : operables.filter(x => x.aplicacion?.estado !== "no_aplica");
+
+  const base = universoResolver.filter(x =>
+    x.review?.estadoRevision === "pendiente" ||
+    x.aplicacion?.estado === "revisar"
+  );
+
+  const pendientes = universoResolver.filter(x => x.review?.estadoRevision === "pendiente");
+  const pendProf = universoResolver.filter(x => x.review?.pendientes?.profesional);
+  const pendProc = universoResolver.filter(x => x.review?.pendientes?.procedimiento);
+  const conAlerta = universoResolver.filter(x => (x.review?.alertas || []).length > 0);
+  const revisarApp = universoResolver.filter(x => x.aplicacion?.estado === "revisar");
+
   const resumenItems = getResolverItemsByFiltro();
 
   resumen.innerHTML = [
-    resolverResumenLink("Pend. + revisar", getResolverBaseItems().length, "base"),
+    resolverResumenLink("Pend. + revisar", base.length, "base"),
     `<span> · </span>`,
     resolverResumenLink("Pendientes", pendientes.length, "pendientes"),
     `<span> · </span>`,
-    resolverResumenLink("Aplican", aplica.length, "aplica"),
-    `<span> · </span>`,
-    resolverResumenLink("No aplica", noAplica.length, "no_aplica"),
-    `<span> · </span>`,
     resolverResumenLink("Revisar", revisarApp.length, "revisar"),
     `<span> · </span>`,
-    resolverResumenLink("Todos", operables.length, "todos"),
+    resolverResumenLink(
+      uiState.mostrarNoAplica ? "Salir de no aplica" : "Ver no aplica",
+      uiState.mostrarNoAplica ? base.length : operables.filter(x => x.aplicacion?.estado === "no_aplica").length,
+      "no_aplica"
+    ),
     `<div class="help" style="margin-top:8px;">Vista actual: <b>${escapeHtml(resolverFiltroLabel())}</b></div>`
   ].join("");
 
@@ -1472,6 +1488,7 @@ function abrirResolver() {
   if (!modal) return;
 
   uiState.resolverFiltro = "base";
+  uiState.mostrarNoAplica = false;
   renderResolver();
   modal.style.display = "block";
 }
