@@ -100,7 +100,8 @@ let uiState = {
   pageSize: 60,
   mostrarNoAplica: false,
   incluirKinesiologia: false, // ✅ por defecto Kine queda oculta
-  resolverFiltro: "base" // base | pendientes | aplica | no_aplica | revisar | todos
+  resolverFiltro: "base", // base | pendientes | aplica | no_aplica | revisar | todos
+  pillFiltro: "" // "" | alertas | pend_prof | pend_proc | reservo_validos | mk_validos | ok | confirmables | no_aplica
 };
 
 /* ======================
@@ -1546,6 +1547,38 @@ function itemSearchText(it) {
   ].map(x => normalizarTexto(x)).join(" | ");
 }
 
+function aplicarFiltroPill(items) {
+  switch (uiState.pillFiltro) {
+    case "alertas":
+      return items.filter(it => (it.review?.alertas || []).length > 0);
+
+    case "pend_prof":
+      return items.filter(it => it.review?.pendientes?.profesional === true);
+
+    case "pend_proc":
+      return items.filter(it => it.review?.pendientes?.procedimiento === true);
+
+    case "reservo_validos":
+      return items.filter(it => it.origen === "Reservo" && it.aplicacion?.estado === "aplica");
+
+    case "mk_validos":
+      return items.filter(it => it.origen === "MK" && it.aplicacion?.estado === "aplica");
+
+    case "ok":
+      return items.filter(it => it.review?.estadoRevision === "ok");
+
+    case "confirmables":
+      return items.filter(it => esItemConfirmable(it) && !it.confirmadoEnProduccion);
+
+    case "no_aplica":
+      return items.filter(it => it.aplicacion?.estado === "no_aplica");
+
+    case "":
+    default:
+      return items;
+  }
+}
+
 function filteredItems() {
   let items = itemsOperables();
 
@@ -1554,6 +1587,8 @@ function filteredItems() {
   } else {
     items = items.filter(it => it.aplicacion?.estado !== "no_aplica");
   }
+
+  items = aplicarFiltroPill(items);
 
   if (!clean(uiState.q)) return items;
 
@@ -1694,25 +1729,27 @@ function render() {
   const ok = universoVista.filter(x => x.review?.estadoRevision === "ok").length;
   const noAplica = operables.filter(x => x.aplicacion?.estado === "no_aplica").length;
   const pendProf = universoVista.filter(x => x.review?.pendientes?.profesional).length;
+  const pendProc = universoVista.filter(x => x.review?.pendientes?.procedimiento).length;
   const reservoAplica = universoVista.filter(x => x.origen === "Reservo" && x.aplicacion?.estado === "aplica").length;
   const mkAplica = universoVista.filter(x => x.origen === "MK" && x.aplicacion?.estado === "aplica").length;
   const confirmados = universoVista.filter(x => x.confirmadoEnProduccion).length;
   const confirmables = universoVista.filter(it =>
     esItemConfirmable(it) && !it.confirmadoEnProduccion
   ).length;
-
+  
   if ($("countPill")) $("countPill").textContent = `Vista: ${items.length} · Total import: ${consolidado.length}`;
-  if ($("pillPendientes")) $("pillPendientes").textContent = `Pendientes: ${pendientes}`;
   if ($("pillAlertas")) $("pillAlertas").textContent = `Alertas: ${alertas}`;
   if ($("pillProf")) $("pillProf").textContent = `Pend. profesional: ${pendProf}`;
-  if ($("pillCoincidencias")) $("pillCoincidencias").textContent = `OK: ${ok} · Nuevos confirmables: ${confirmables}`;
+  if ($("pillProc")) $("pillProc").textContent = `Pend. procedimiento: ${pendProc}`;
+  if ($("pillReservoValidos")) $("pillReservoValidos").textContent = `Reservo válidos: ${reservoAplica}`;
+  if ($("pillMKValidos")) $("pillMKValidos").textContent = `MK válidos: ${mkAplica}`;
+  if ($("pillOk")) $("pillOk").textContent = `OK: ${ok}`;
+  if ($("pillConfirmables")) $("pillConfirmables").textContent = `Nuevos confirmables: ${confirmables}`;
   if ($("pillFusionados")) {
     $("pillFusionados").textContent = uiState.mostrarNoAplica
       ? `No aplica (vista): ${universoVista.length}`
       : `No aplica: ${noAplica}`;
   }
-  if ($("pillReservoValidos")) $("pillReservoValidos").textContent = `Reservo válidos: ${reservoAplica}`;
-  if ($("pillMKValidos")) $("pillMKValidos").textContent = `MK válidos: ${mkAplica}`;
 
   if ($("pagerInfo")) {
     $("pagerInfo").textContent =
@@ -1744,6 +1781,52 @@ function render() {
       ? "Ocultar prestaciones excluidas"
       : "Activar prestaciones excluidas";
   }
+
+  function togglePillFiltro(nombreFiltro) {
+  uiState.pillFiltro = (uiState.pillFiltro === nombreFiltro) ? "" : nombreFiltro;
+  uiState.page = 0;
+
+  // ✅ Si el pill es "no_aplica", sincronizamos también la vista
+  if (nombreFiltro === "no_aplica") {
+    uiState.mostrarNoAplica = (uiState.pillFiltro === "no_aplica");
+  } else if (uiState.pillFiltro !== "no_aplica") {
+    uiState.mostrarNoAplica = false;
+  }
+
+  render();
+}
+
+if ($("pillAlertas")) {
+  $("pillAlertas").onclick = () => togglePillFiltro("alertas");
+}
+
+if ($("pillProf")) {
+  $("pillProf").onclick = () => togglePillFiltro("pend_prof");
+}
+
+if ($("pillProc")) {
+  $("pillProc").onclick = () => togglePillFiltro("pend_proc");
+}
+
+if ($("pillReservoValidos")) {
+  $("pillReservoValidos").onclick = () => togglePillFiltro("reservo_validos");
+}
+
+if ($("pillMKValidos")) {
+  $("pillMKValidos").onclick = () => togglePillFiltro("mk_validos");
+}
+
+if ($("pillOk")) {
+  $("pillOk").onclick = () => togglePillFiltro("ok");
+}
+
+if ($("pillConfirmables")) {
+  $("pillConfirmables").onclick = () => togglePillFiltro("confirmables");
+}
+
+if ($("pillFusionados")) {
+  $("pillFusionados").onclick = () => togglePillFiltro("no_aplica");
+}
 
   if ($("btnResolver")) $("btnResolver").disabled = consolidado.length === 0;
 
@@ -2578,6 +2661,12 @@ if ($("btnNext")) {
 if ($("btnToggleNoAplica")) {
   $("btnToggleNoAplica").onclick = () => {
     uiState.mostrarNoAplica = !uiState.mostrarNoAplica;
+
+    // ✅ Si entras/sales manualmente de "no aplica", limpiamos filtro pill conflictivo
+    if (!uiState.mostrarNoAplica && uiState.pillFiltro === "no_aplica") {
+      uiState.pillFiltro = "";
+    }
+
     uiState.page = 0;
     render();
   };
