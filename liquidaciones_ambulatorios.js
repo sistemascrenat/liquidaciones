@@ -1233,9 +1233,9 @@ function paint(){
     tb.appendChild(tr);
   }
 
- const lastLoadEl = $('lastLoad');
-  if(lastLoadEl){
-    lastLoadEl.textContent = `Items producción ambulatoria: ${state.prodRows.length} · Último cálculo: ${new Date().toLocaleString()}`;
+  const lastLoadEl = $('lastLoad');
+  if(lastLoadEl && !String(lastLoadEl.textContent || '').includes('⏳')){
+    lastLoadEl.textContent = `✅ Liquidaciones listas · ${rows.length} profesional${rows.length===1?'':'es'} visibles · ${state.prodRows.length} items producción · ${new Date().toLocaleString()}`;
   }
 }
 
@@ -2323,8 +2323,19 @@ function initMonthYearSelectors(){
 }
 
 async function recalc(){
+  const btn = $('btnRecalcular');
+  const lastLoadEl = $('lastLoad');
+  const originalBtnText = btn?.textContent || 'Recalcular';
+
   try{
-    $('btnRecalcular').disabled = true;
+    if(btn){
+      btn.disabled = true;
+      btn.textContent = 'Cargando...';
+    }
+
+    if(lastLoadEl){
+      lastLoadEl.textContent = '⏳ Cargando liquidaciones ambulatorias...';
+    }
 
     // limpia cache de ajustes del mes si cambió
     const currentMonthId = ajustesMonthId();
@@ -2338,11 +2349,25 @@ async function recalc(){
     await buildLiquidaciones();
     paint();
 
+    if(lastLoadEl){
+      lastLoadEl.textContent = `✅ Liquidaciones listas · ${state.liquidResumen.length} profesional${state.liquidResumen.length===1?'':'es'} · ${state.prodRows.length} items · ${new Date().toLocaleString()}`;
+    }
+
+    toast('Liquidaciones cargadas correctamente');
+
   }catch(err){
     console.error(err);
+
+    if(lastLoadEl){
+      lastLoadEl.textContent = '⚠️ Error recalculando liquidaciones';
+    }
+
     toast('Error recalculando (ver consola)');
   }finally{
-    $('btnRecalcular').disabled = false;
+    if(btn){
+      btn.disabled = false;
+      btn.textContent = originalBtnText;
+    }
   }
 }
 
