@@ -907,6 +907,12 @@ async function buildLiquidaciones(){
       }
     }
 
+    // ✅ Regla de liquidación:
+    // si el pago al profesional es 0 o menor, esta línea NO entra a la liquidación
+    if(Number(pagoProfesional || 0) <= 0){
+      continue;
+    }
+
     const baseLine = {
       prodId: row.id,
 
