@@ -1253,11 +1253,7 @@ async function buildLiquidaciones(){
 
     const resumenModalidades = [...modalidadesMap.values()]
       .sort((a,b)=> (b.subtotal||0) - (a.subtotal||0));
-
-    const totalValorizado = linesFinales.reduce((acc, l)=> acc + (Number(l.valorLiquidadoFinal || 0) || 0), 0);
-    const totalBoleta = totalValorizado;
-    const retencionCLP = 0;
-
+    
     const descuentoMensualNormalCLP = ajustesCfg.descuentoAplica
       ? (Number(ajustesCfg.descuentoCLP || 0) || 0)
       : 0;
@@ -1290,7 +1286,6 @@ async function buildLiquidaciones(){
       - retencionCLP
       + balonSubtotal
     );
-
     let status = 'ok';
     if(x.alertasCount > 0) status = 'alerta';
     else if(x.pendientesCount > 0) status = 'pendiente';
@@ -1305,7 +1300,7 @@ async function buildLiquidaciones(){
       
         // ✅ descuento mensual normal: NO afecta boleta
         descuentoCLP: descuentoMensualNormalCLP,
-        descuentoMensualNormalCLP,
+        descuentoMensualNormalCLP: descuentoMensualNormalCLP,
         descuentoAsunto: ajustesCfg.descuentoAsunto || '',
       
         // ✅ descuento fijo especial: SÍ afecta boleta
