@@ -268,11 +268,18 @@ const state = {
   prodRows: [],
   liquidResumen: [],
   lastDetailExportLines: [],
+  lastDetailAgg: null,
 
   ajustesCache: new Map(),
+  overridesCache: new Map(),
+
   ajustesActualKey: '',
   ajustesActualAgg: null,
   
+  overrideActualAgg: null,
+  overrideActualLineUid: '',
+  overrideActualLine: null,
+
   fechaPagoManual: ''
 };
 
@@ -742,25 +749,41 @@ async function loadAjustesProfesional(profKey){
       descuentoAplica: x.descuentoAplica === true,
       descuentoCLP: Number(x.descuentoCLP || 0) || 0,
       descuentoAsunto: cleanReminder(x.descuentoAsunto || ''),
+
       balonAplica: x.balonAplica === true,
       balonCantidad: Number(x.balonCantidad || 0) || 0,
       balonValorUnitario: Number(x.balonValorUnitario || 0) || 0,
-      balonAsunto: cleanReminder(x.balonAsunto || 'Instalación de balón')
+      balonAsunto: cleanReminder(x.balonAsunto || 'Instalación de balón'),
+
+      reglasEspecialesActivas: x.reglasEspecialesActivas === true,
+      usarValorBaseComoPago: x.usarValorBaseComoPago === true,
+      descuentoFijoEspecialAplica: x.descuentoFijoEspecialAplica === true,
+      descuentoFijoEspecialCLP: Number(x.descuentoFijoEspecialCLP || 0) || 0,
+      especificacionObservacion: cleanReminder(x.especificacionObservacion || '')
     };
 
     state.ajustesCache.set(cacheKey, data);
     return data;
   }catch(e){
     console.warn('No se pudo leer ajustes ambulatorios', profKey, e);
+
     const data = {
       descuentoAplica: false,
       descuentoCLP: 0,
       descuentoAsunto: '',
+
       balonAplica: false,
       balonCantidad: 0,
       balonValorUnitario: 0,
-      balonAsunto: 'Instalación de balón'
+      balonAsunto: 'Instalación de balón',
+
+      reglasEspecialesActivas: false,
+      usarValorBaseComoPago: false,
+      descuentoFijoEspecialAplica: false,
+      descuentoFijoEspecialCLP: 0,
+      especificacionObservacion: ''
     };
+
     state.ajustesCache.set(cacheKey, data);
     return data;
   }
@@ -778,6 +801,118 @@ async function saveAjustesProfesional(profKey, payload){
 
   const cacheKey = `${ajustesMonthId()}__${profKey}`;
   state.ajustesCache.set(cacheKey, payload);
+}
+
+function safeKeyPart(v=''){
+  return String(v ?? '')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+    .replace(/[^a-zA-Z0-9]+/g,'_')
+    .replace(/^_+|_+$/g,'')
+    .slice(0, 60) || 'x';
+}
+
+function buildLineUid(line){
+  return [
+    safeKeyPart(line.prodId || ''),
+    safeKeyPart(line.profesionalId || line.profesionalRut || ''),
+    safeKeyPart(line.pacienteRut || line.pacienteNombre || ''),
+    safeKeyPart(line.fecha || ''),
+    safeKeyPart(line.hora || ''),
+    safeKeyPart(line.procedimientoId || line.procedimientoNombre || '')
+  ].join('__');
+}
+
+function overridesCollectionRef(profKey){
+  return collection(
+    db,
+    'liquidaciones_ambulatorias_config',
+    ajustesMonthId(),
+    'profesionales',
+    profKey,
+    'overrides'
+  );
+}
+
+function overrideDocRef(profKey, lineUid){
+  return doc(
+    db,
+    'liquidaciones_ambulatorias_config',
+    ajustesMonthId(),
+    'profesionales',
+    profKey,
+    'overrides',
+    lineUid
+  );
+}
+
+async function loadOverridesProfesional(profKey){
+  const cacheKey = `${ajustesMonthId()}__${profKey}`;
+  if(state.overridesCache.has(cacheKey)) return state.overridesCache.get(cacheKey);
+
+  try{
+    const snap = await getDocs(overridesCollectionRef(profKey));
+    const map = new Map();
+
+    snap.forEach(d=>{
+      const x = d.data() || {};
+      map.set(d.id, {
+        enabled: x.enabled === true,
+        valorManual: Number(x.valorManual || 0) || 0,
+        motivo: cleanReminder(x.motivo || ''),
+        lineUid: d.id
+      });
+    });
+
+    state.overridesCache.set(cacheKey, map);
+    return map;
+  }catch(e){
+    console.warn('No se pudieron leer overrides del profesional', profKey, e);
+    const map = new Map();
+    state.overridesCache.set(cacheKey, map);
+    return map;
+  }
+}
+
+async function saveOverridePrestacion(profKey, line, payload){
+  const lineUid = line.lineUid || buildLineUid(line);
+
+  await setDoc(overrideDocRef(profKey, lineUid), {
+    monthId: ajustesMonthId(),
+    ano: Number(state.ano),
+    mesNum: Number(state.mesNum),
+
+    lineUid,
+    prodId: line.prodId || '',
+    fecha: line.fecha || '',
+    hora: line.hora || '',
+    pacienteNombre: line.pacienteNombre || '',
+    pacienteRut: line.pacienteRut || '',
+    procedimientoId: line.procedimientoId || '',
+    procedimientoNombre: line.procedimientoNombre || '',
+    profesionalNombre: line.profesionalNombre || '',
+    profesionalId: line.profesionalId || '',
+
+    enabled: payload.enabled === true,
+    valorManual: Number(payload.valorManual || 0) || 0,
+    motivo: cleanReminder(payload.motivo || ''),
+
+    actualizadoEl: serverTimestamp(),
+    actualizadoPor: state.user?.email || ''
+  }, { merge:true });
+
+  const cacheKey = `${ajustesMonthId()}__${profKey}`;
+  let map = state.overridesCache.get(cacheKey);
+  if(!map){
+    map = new Map();
+    state.overridesCache.set(cacheKey, map);
+  }
+
+  map.set(lineUid, {
+    enabled: payload.enabled === true,
+    valorManual: Number(payload.valorManual || 0) || 0,
+    motivo: cleanReminder(payload.motivo || ''),
+    lineUid
+  });
 }
 
 /* =========================
@@ -858,6 +993,7 @@ async function buildLiquidaciones(){
 
     const procedimientoLabel =
       toUpperSafe(procDoc?.nombre || procCandidate.rawName || '') || '(Sin procedimiento)';
+
     const procedimientoId =
       cleanReminder(procDoc?.codigo || procDoc?.id || procCandidate.paCode || procCandidate.rawId || '');
 
@@ -900,16 +1036,17 @@ async function buildLiquidaciones(){
         if(!hasRealValue(calc.tarifa?.comisionPct) && !hasRealValue(calc.tarifa?.valorProfesional)){
           pendientes.push('MK sin porcentaje / pago configurado');
         }
-      } else {
+      }else{
         if(!hasRealValue(calc.tarifa?.valorProfesional) && !hasRealValue(calc.tarifa?.comisionPct)){
           pendientes.push('Reservo sin valor a pagar al profesional');
         }
       }
     }
 
-    // ✅ Regla de liquidación:
-    // si el pago al profesional es 0 o menor, esta línea NO entra a la liquidación
-    if(Number(pagoProfesional || 0) <= 0){
+    // ✅ antes se excluía si pagoProfesional <= 0
+    // ✅ ahora dejamos pasar líneas cuyo valorBase sea > 0,
+    // porque una regla especial puede liquidar por valor base.
+    if(Number(pagoProfesional || 0) <= 0 && Number(valorBase || 0) <= 0){
       continue;
     }
 
@@ -947,7 +1084,16 @@ async function buildLiquidaciones(){
       pagoProfesional,
       utilidad,
 
+      valorCalculadoOriginal: pagoProfesional,
+      valorLiquidadoBase: pagoProfesional,
+      valorLiquidadoFinal: pagoProfesional,
+
       modalidad: '',
+
+      specialModeApplied: false,
+      overrideApplied: false,
+      overrideMotivo: '',
+      overrideValorManual: 0,
 
       isAlerta: alertas.length > 0,
       isPendiente: pendientes.length > 0,
@@ -957,6 +1103,7 @@ async function buildLiquidaciones(){
     };
 
     baseLine.modalidad = classifyModalidadByRole(roleId, baseLine);
+    baseLine.lineUid = buildLineUid(baseLine);
 
     baseLine.observacion = [
       ...(alertas.length ? [`ALERTA: ${alertas.join(' · ')}`] : []),
@@ -1000,11 +1147,19 @@ async function buildLiquidaciones(){
           descuentoAplica: false,
           descuentoCLP: 0,
           descuentoAsunto: '',
+
           balonAplica: false,
           balonCantidad: 0,
           balonValorUnitario: 0,
           balonSubtotal: 0,
           balonAsunto: 'Instalación de balón',
+
+          reglasEspecialesActivas: false,
+          usarValorBaseComoPago: false,
+          descuentoFijoEspecialAplica: false,
+          descuentoFijoEspecialCLP: 0,
+          especificacionObservacion: '',
+
           totalValorizado: 0,
           totalBoleta: 0,
           retencionCLP: 0,
@@ -1036,12 +1191,53 @@ async function buildLiquidaciones(){
   }
 
   const resumen = [];
+
   for(const x of map.values()){
     const ajustesCfg = await loadAjustesProfesional(x.key);
+    const overridesMap = await loadOverridesProfesional(x.key);
 
-    // agrupación por modalidad
+    // ✅ aplicar reglas especiales y overrides línea por línea
+    const linesFinales = (x.lines || []).map(line => {
+      let valorLiquidadoBase = Number(line.pagoProfesional || 0) || 0;
+      let specialModeApplied = false;
+
+      if(ajustesCfg.reglasEspecialesActivas && ajustesCfg.usarValorBaseComoPago){
+        valorLiquidadoBase = Number(line.valorBase || 0) || 0;
+        specialModeApplied = true;
+      }
+
+      let valorLiquidadoFinal = valorLiquidadoBase;
+      let overrideApplied = false;
+      let overrideMotivo = '';
+      let overrideValorManual = 0;
+
+      const override = overridesMap.get(line.lineUid);
+      if(override?.enabled === true){
+        valorLiquidadoFinal = Number(override.valorManual || 0) || 0;
+        overrideApplied = true;
+        overrideMotivo = cleanReminder(override.motivo || '');
+        overrideValorManual = Number(override.valorManual || 0) || 0;
+      }
+
+      const partesObs = [];
+      if(line.observacion) partesObs.push(line.observacion);
+      if(specialModeApplied) partesObs.push('ESPECIFICACIÓN: usa valor base como pago');
+      if(overrideApplied) partesObs.push(`OVERRIDE: ${clp(overrideValorManual)}${overrideMotivo ? ' · ' + overrideMotivo : ''}`);
+
+      return {
+        ...line,
+        valorLiquidadoBase,
+        valorLiquidadoFinal,
+        specialModeApplied,
+        overrideApplied,
+        overrideMotivo,
+        overrideValorManual,
+        observacion: partesObs.filter(Boolean).join(' | ')
+      };
+    });
+
     const modalidadesMap = new Map();
-    for(const l of (x.lines || [])){
+    for(const l of linesFinales){
       const mod = l.modalidad || 'CONSULTA';
       if(!modalidadesMap.has(mod)){
         modalidadesMap.set(mod, {
@@ -1052,24 +1248,38 @@ async function buildLiquidaciones(){
       }
       const o = modalidadesMap.get(mod);
       o.cantidad += 1;
-      o.subtotal += Number(l.pagoProfesional || 0) || 0;
+      o.subtotal += Number(l.valorLiquidadoFinal || 0) || 0;
     }
 
     const resumenModalidades = [...modalidadesMap.values()]
       .sort((a,b)=> (b.subtotal||0) - (a.subtotal||0));
 
-    const totalValorizado = Number(x.totalPagoProfesional || 0) || 0;
+    const totalValorizado = linesFinales.reduce((acc, l)=> acc + (Number(l.valorLiquidadoFinal || 0) || 0), 0);
     const totalBoleta = totalValorizado;
     const retencionCLP = 0;
 
-    const descuentoCLP = ajustesCfg.descuentoAplica ? (Number(ajustesCfg.descuentoCLP || 0) || 0) : 0;
+    const descuentoCLP = ajustesCfg.descuentoAplica
+      ? (Number(ajustesCfg.descuentoCLP || 0) || 0)
+      : 0;
+
+    const descuentoFijoEspecialCLP =
+      ajustesCfg.reglasEspecialesActivas && ajustesCfg.descuentoFijoEspecialAplica
+        ? (Number(ajustesCfg.descuentoFijoEspecialCLP || 0) || 0)
+        : 0;
 
     const esCirujano = normalize(x.roleId) === 'r_cirujano';
     const balonCantidad = esCirujano && ajustesCfg.balonAplica ? (Number(ajustesCfg.balonCantidad || 0) || 0) : 0;
     const balonValorUnitario = esCirujano && ajustesCfg.balonAplica ? (Number(ajustesCfg.balonValorUnitario || 0) || 0) : 0;
     const balonSubtotal = esCirujano && ajustesCfg.balonAplica ? (balonCantidad * balonValorUnitario) : 0;
 
-    const liquido = Math.max(0, totalBoleta - descuentoCLP - retencionCLP + balonSubtotal);
+    const liquido = Math.max(
+      0,
+      totalBoleta
+      - descuentoCLP
+      - descuentoFijoEspecialCLP
+      - retencionCLP
+      + balonSubtotal
+    );
 
     let status = 'ok';
     if(x.alertasCount > 0) status = 'alerta';
@@ -1078,16 +1288,25 @@ async function buildLiquidaciones(){
     resumen.push({
       ...x,
       status,
+      lines: linesFinales,
       resumenModalidades,
       ajustes: {
         descuentoAplica: !!ajustesCfg.descuentoAplica,
         descuentoCLP,
         descuentoAsunto: ajustesCfg.descuentoAsunto || '',
+
         balonAplica: !!ajustesCfg.balonAplica && esCirujano,
         balonCantidad,
         balonValorUnitario,
         balonSubtotal,
         balonAsunto: ajustesCfg.balonAsunto || 'Instalación de balón',
+
+        reglasEspecialesActivas: !!ajustesCfg.reglasEspecialesActivas,
+        usarValorBaseComoPago: !!ajustesCfg.usarValorBaseComoPago,
+        descuentoFijoEspecialAplica: !!ajustesCfg.descuentoFijoEspecialAplica,
+        descuentoFijoEspecialCLP,
+        especificacionObservacion: ajustesCfg.especificacionObservacion || '',
+
         totalValorizado,
         totalBoleta,
         retencionCLP,
@@ -1106,7 +1325,6 @@ async function buildLiquidaciones(){
 
   state.liquidResumen = resumen;
 }
-
 /* =========================
    Search
 ========================= */
@@ -1243,6 +1461,7 @@ function paint(){
    Modal detalle
 ========================= */
 function openDetalle(agg){
+  state.lastDetailAgg = agg;
   $('modalBackdrop').style.display = 'grid';
 
   $('modalTitle').textContent = agg.nombre || 'Detalle';
@@ -1264,7 +1483,7 @@ function openDetalle(agg){
 
   const tb = $('modalTbody');
   tb.innerHTML = '';
-  
+
   const resumenHost = $('modalResumen');
   if(resumenHost){
     resumenHost.innerHTML = buildModalResumenHtml(agg);
@@ -1287,12 +1506,22 @@ function openDetalle(agg){
 
     const obs = [
       ...(l.alerts?.length ? [`ALERTA: ${l.alerts.join(' · ')}`] : []),
-      ...(l.pendings?.length ? [`PENDIENTE: ${l.pendings.join(' · ')}`] : [])
+      ...(l.pendings?.length ? [`PENDIENTE: ${l.pendings.join(' · ')}`] : []),
+      ...(l.specialModeApplied ? ['ESPEC: usa valor base'] : []),
+      ...(l.overrideApplied ? [`OVERRIDE: ${clp(l.overrideValorManual || 0)}${l.overrideMotivo ? ' · ' + l.overrideMotivo : ''}`] : [])
     ].join(' | ');
 
     const procWarn = (!l.procedimientoExists)
       ? `<div class="mini muted">No existe / no mapeado</div>`
       : '';
+
+    const extraCalc = `
+      <div class="mini muted">
+        Base: ${escapeHtml(clp(l.valorBase || 0))} ·
+        Calc: ${escapeHtml(clp(l.valorCalculadoOriginal || 0))}
+        ${l.overrideApplied ? ` · Final: ${escapeHtml(clp(l.valorLiquidadoFinal || 0))}` : ''}
+      </div>
+    `;
 
     const tr = document.createElement('tr');
     tr.innerHTML = `
@@ -1304,16 +1533,24 @@ function openDetalle(agg){
       </td>
       <td>${escapeHtml(l.pacienteNombre || '')}</td>
       <td class="mono">${escapeHtml(l.pacienteRut || '')}</td>
-      <td><b>${clp(l.pagoProfesional || 0)}</b></td>
+      <td>
+        <b>${clp(l.valorLiquidadoFinal || 0)}</b>
+        ${extraCalc}
+      </td>
       <td>${st}</td>
       <td class="mini">${escapeHtml(obs || '')}</td>
     `;
     tb.appendChild(tr);
   }
+
+  if($('btnDetalleOverrides')){
+    $('btnDetalleOverrides').style.display = 'inline-flex';
+  }
 }
 
 function closeDetalle(){
   $('modalBackdrop').style.display = 'none';
+  state.lastDetailAgg = null;
 
   const resumenHost = $('modalResumen');
   if(resumenHost) resumenHost.innerHTML = '';
@@ -1387,6 +1624,13 @@ function fillAjustesForm(agg){
   $('ajBalonHelp').textContent = esCirujano
     ? 'Este adicional se suma al líquido final del cirujano en el mes.'
     : 'Este adicional solo aplica a profesionales con rol CIRUJANO.';
+
+  // ✅ nuevas especificaciones
+  if($('ajReglasEspecialesActivas')) $('ajReglasEspecialesActivas').checked = !!a.reglasEspecialesActivas;
+  if($('ajUsarValorBaseComoPago')) $('ajUsarValorBaseComoPago').checked = !!a.usarValorBaseComoPago;
+  if($('ajDescuentoFijoEspecialAplica')) $('ajDescuentoFijoEspecialAplica').checked = !!a.descuentoFijoEspecialAplica;
+  if($('ajDescuentoFijoEspecialCLP')) $('ajDescuentoFijoEspecialCLP').value = a.descuentoFijoEspecialCLP ? String(a.descuentoFijoEspecialCLP) : '';
+  if($('ajEspecificacionObservacion')) $('ajEspecificacionObservacion').value = a.especificacionObservacion || '';
 }
 
 function openAjustes(agg){
@@ -1409,16 +1653,152 @@ async function saveAjustesDesdeModal(){
     descuentoAplica: !!$('ajDescuentoAplica').checked,
     descuentoCLP: parseDecimalFlexible($('ajDescuentoCLP').value || ''),
     descuentoAsunto: cleanReminder($('ajDescuentoAsunto').value || ''),
+
     balonAplica: esCirujano ? !!$('ajBalonAplica').checked : false,
     balonCantidad: esCirujano ? (Number($('ajBalonCantidad').value || 0) || 0) : 0,
     balonValorUnitario: esCirujano ? parseDecimalFlexible($('ajBalonValorUnitario').value || '') : 0,
-    balonAsunto: esCirujano ? cleanReminder($('ajBalonAsunto').value || 'Instalación de balón') : 'Instalación de balón'
+    balonAsunto: esCirujano ? cleanReminder($('ajBalonAsunto').value || 'Instalación de balón') : 'Instalación de balón',
+
+    reglasEspecialesActivas: !!($('ajReglasEspecialesActivas')?.checked),
+    usarValorBaseComoPago: !!($('ajUsarValorBaseComoPago')?.checked),
+    descuentoFijoEspecialAplica: !!($('ajDescuentoFijoEspecialAplica')?.checked),
+    descuentoFijoEspecialCLP: parseDecimalFlexible($('ajDescuentoFijoEspecialCLP')?.value || ''),
+    especificacionObservacion: cleanReminder($('ajEspecificacionObservacion')?.value || '')
   };
 
   await saveAjustesProfesional(state.ajustesActualKey, payload);
   toast('Ajustes guardados');
   closeAjustes();
   await recalc();
+}
+
+function closeOverrides(){
+  if($('overridesBackdrop')) $('overridesBackdrop').style.display = 'none';
+  state.overrideActualAgg = null;
+  state.overrideActualLineUid = '';
+  state.overrideActualLine = null;
+}
+
+function openOverrides(agg){
+  if(!agg){
+    toast('No hay profesional seleccionado');
+    return;
+  }
+
+  state.overrideActualAgg = agg;
+  state.overrideActualLineUid = '';
+  state.overrideActualLine = null;
+
+  if($('overridesTitle')) $('overridesTitle').textContent = 'Ajustes por prestación';
+  if($('overridesSub')) $('overridesSub').textContent =
+    `${monthNameEs(state.mesNum)} ${state.ano} · ${agg.nombre || 'Profesional'} · ${agg.casos} casos`;
+
+  if($('ovSelectedInfo')) $('ovSelectedInfo').textContent = 'Selecciona una línea para editar override';
+  if($('ovEnabled')) $('ovEnabled').checked = false;
+  if($('ovValorManual')) $('ovValorManual').value = '';
+  if($('ovMotivo')) $('ovMotivo').value = '';
+
+  paintOverridesTable(agg);
+
+  if($('overridesBackdrop')) $('overridesBackdrop').style.display = 'grid';
+}
+
+function paintOverridesTable(agg){
+  const tb = $('overridesTbody');
+  if(!tb) return;
+
+  tb.innerHTML = '';
+
+  const lines = [...(agg?.lines || [])].sort((a,b)=>{
+    const fa = normalize(a.fecha);
+    const fb = normalize(b.fecha);
+    if(fa !== fb) return fa.localeCompare(fb);
+    const pa = normalize(a.pacienteNombre);
+    const pb = normalize(b.pacienteNombre);
+    if(pa !== pb) return pa.localeCompare(pb);
+    return normalize(a.procedimientoNombre).localeCompare(normalize(b.procedimientoNombre));
+  });
+
+  for(const l of lines){
+    const badge = l.overrideApplied
+      ? `<span class="pill warn">OVERRIDE</span>`
+      : (l.specialModeApplied ? `<span class="pill ok">ESPEC.</span>` : `<span class="pill">NORMAL</span>`);
+
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td class="mono">${escapeHtml(l.fecha || '')} ${escapeHtml(l.hora || '')}</td>
+      <td>
+        ${escapeHtml(l.procedimientoNombre || '')}
+        <div class="mini muted mono">${escapeHtml(l.procedimientoId || '')}</div>
+      </td>
+      <td>${escapeHtml(l.pacienteNombre || '')}</td>
+      <td class="mono">${escapeHtml(l.pacienteRut || '')}</td>
+      <td class="mono">${clp(l.valorBase || 0)}</td>
+      <td class="mono">${clp(l.valorCalculadoOriginal || 0)}</td>
+      <td class="mono"><b>${clp(l.valorLiquidadoFinal || 0)}</b></td>
+      <td>${badge}</td>
+      <td>
+        <button class="iconBtn" type="button" data-lineuid="${escapeHtml(l.lineUid)}" aria-label="EditarOverride">✏️</button>
+      </td>
+    `;
+    tb.appendChild(tr);
+  }
+
+  tb.querySelectorAll('[aria-label="EditarOverride"]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const uid = btn.getAttribute('data-lineuid');
+      const line = (state.overrideActualAgg?.lines || []).find(x => x.lineUid === uid);
+      if(!line) return;
+
+      state.overrideActualLineUid = uid;
+      state.overrideActualLine = line;
+
+      if($('ovSelectedInfo')){
+        $('ovSelectedInfo').textContent =
+          `${line.fecha || ''} · ${line.pacienteNombre || ''} · ${line.procedimientoNombre || ''}`;
+      }
+
+      $('ovEnabled').checked = !!line.overrideApplied;
+      $('ovValorManual').value = line.overrideApplied ? String(line.overrideValorManual || 0) : String(line.valorLiquidadoFinal || 0);
+      $('ovMotivo').value = line.overrideMotivo || '';
+    });
+  });
+}
+
+async function saveOverrideDesdeModal(){
+  if(!state.overrideActualAgg){
+    toast('No hay profesional seleccionado');
+    return;
+  }
+
+  if(!state.overrideActualLine || !state.overrideActualLineUid){
+    toast('Selecciona una prestación');
+    return;
+  }
+
+  const enabled = !!$('ovEnabled').checked;
+  const valorManual = parseDecimalFlexible($('ovValorManual').value || '');
+  const motivo = cleanReminder($('ovMotivo').value || '');
+
+  if(enabled && valorManual <= 0){
+    toast('Ingresa un valor manual mayor a 0');
+    return;
+  }
+
+  await saveOverridePrestacion(
+    state.overrideActualAgg.key,
+    state.overrideActualLine,
+    { enabled, valorManual, motivo }
+  );
+
+  toast('Override guardado');
+  closeOverrides();
+  await recalc();
+
+  const nuevoAgg = state.liquidResumen.find(x => x.key === state.overrideActualAgg.key);
+  if(nuevoAgg){
+    openDetalle(nuevoAgg);
+  }
 }
 
 /* =========================
@@ -1434,6 +1814,7 @@ function exportResumenCSV(){
     'casos',
     'totalValorizado',
     'descuentoCLP',
+    'descuentoFijoEspecialCLP',
     'balonSubtotal',
     'liquido',
     'alertas','pendientes'
@@ -1456,6 +1837,7 @@ function exportResumenCSV(){
 
     totalValorizado: Number(a.ajustes?.totalValorizado || 0),
     descuentoCLP: Number(a.ajustes?.descuentoCLP || 0),
+    descuentoFijoEspecialCLP: Number(a.ajustes?.descuentoFijoEspecialCLP || 0),
     balonSubtotal: Number(a.ajustes?.balonSubtotal || 0),
     liquido: Number(a.ajustes?.liquido || 0),
 
@@ -1486,7 +1868,9 @@ function exportDetalleCSV(){
     'paciente','rutPaciente',
     'origen','categoria',
     'tarifaModoValor','tarifaColumnaOrigen','comisionPct',
-    'valorBase','pagoProfesional','utilidad',
+    'valorBase','pagoProfesional','valorLiquidadoBase','valorLiquidadoFinal','utilidad',
+    'overrideApplied','overrideValorManual','overrideMotivo',
+    'specialModeApplied',
     'estadoLinea',
     'observacion',
     'prodId'
@@ -1528,7 +1912,14 @@ function exportDetalleCSV(){
 
         valorBase: hasRealValue(l.valorBase) ? Number(l.valorBase) : '',
         pagoProfesional: hasRealValue(l.pagoProfesional) ? Number(l.pagoProfesional) : '',
+        valorLiquidadoBase: hasRealValue(l.valorLiquidadoBase) ? Number(l.valorLiquidadoBase) : '',
+        valorLiquidadoFinal: hasRealValue(l.valorLiquidadoFinal) ? Number(l.valorLiquidadoFinal) : '',
         utilidad: hasRealValue(l.utilidad) ? Number(l.utilidad) : '',
+
+        overrideApplied: l.overrideApplied ? 'SI' : 'NO',
+        overrideValorManual: hasRealValue(l.overrideValorManual) ? Number(l.overrideValorManual) : '',
+        overrideMotivo: l.overrideMotivo || '',
+        specialModeApplied: l.specialModeApplied ? 'SI' : 'NO',
 
         estadoLinea: pickDisplayEstadoLinea(l),
         observacion: l.observacion || '',
@@ -1560,7 +1951,9 @@ function exportDetalleProfesional(agg){
     'paciente','rutPaciente',
     'origen','categoria',
     'tarifaModoValor','tarifaColumnaOrigen','comisionPct',
-    'valorBase','pagoProfesional','utilidad',
+    'valorBase','pagoProfesional','valorLiquidadoBase','valorLiquidadoFinal','utilidad',
+    'overrideApplied','overrideValorManual','overrideMotivo',
+    'specialModeApplied',
     'estadoLinea',
     'observacion',
     'prodId'
@@ -1599,7 +1992,14 @@ function exportDetalleProfesional(agg){
 
     valorBase: hasRealValue(l.valorBase) ? Number(l.valorBase) : '',
     pagoProfesional: hasRealValue(l.pagoProfesional) ? Number(l.pagoProfesional) : '',
+    valorLiquidadoBase: hasRealValue(l.valorLiquidadoBase) ? Number(l.valorLiquidadoBase) : '',
+    valorLiquidadoFinal: hasRealValue(l.valorLiquidadoFinal) ? Number(l.valorLiquidadoFinal) : '',
     utilidad: hasRealValue(l.utilidad) ? Number(l.utilidad) : '',
+
+    overrideApplied: l.overrideApplied ? 'SI' : 'NO',
+    overrideValorManual: hasRealValue(l.overrideValorManual) ? Number(l.overrideValorManual) : '',
+    overrideMotivo: l.overrideMotivo || '',
+    specialModeApplied: l.specialModeApplied ? 'SI' : 'NO',
 
     estadoLinea: pickDisplayEstadoLinea(l),
     observacion: l.observacion || '',
@@ -1724,6 +2124,11 @@ function buildModalResumenHtml(agg){
           <div style="display:flex; justify-content:space-between; gap:12px; padding:8px 10px; border:1px solid #d1d5db; border-radius:8px;">
             <span>${escapeHtml(agg?.ajustes?.descuentoAsunto || 'Descuento seguro complementario')}</span>
             <b class="mono">${escapeHtml(clp(agg?.ajustes?.descuentoCLP || 0))}</b>
+          </div>
+
+          <div style="display:flex; justify-content:space-between; gap:12px; padding:8px 10px; border:1px solid #d1d5db; border-radius:8px;">
+            <span>Descuento fijo especial</span>
+            <b class="mono">${escapeHtml(clp(agg?.ajustes?.descuentoFijoEspecialCLP || 0))}</b>
           </div>
 
           <div style="display:flex; justify-content:space-between; gap:12px; padding:10px 12px; border:1px solid #99f6e4; background:#ecfeff; border-radius:8px; font-size:14px;">
@@ -2200,7 +2605,7 @@ let detCols = [
     drawCellText(page, wrapClip(row.pacienteRut || '', 16), xPos, topY, detRowH, 9, false, TEXT_MUTED, 8);
     xPos += detCols[4].w;
     
-    drawCellTextRight(page, money(row.pagoProfesional || 0), xPos, topY, detCols[5].w, detRowH, 9, true, TEXT_MAIN, 8);
+    drawCellTextRight(page, money(row.valorLiquidadoFinal || 0), xPos, topY, detCols[5].w, detRowH, 9, true, TEXT_MAIN, 8);
   }
 
   const allLinesSorted = [...(agg.lines || [])].sort((a,b)=>{
@@ -2341,6 +2746,7 @@ async function recalc(){
     const currentMonthId = ajustesMonthId();
     if(state._lastMonthId !== currentMonthId){
       state.ajustesCache = new Map();
+      state.overridesCache = new Map();
       state._lastMonthId = currentMonthId;
     }
 
@@ -2413,19 +2819,38 @@ function bindUI(){
     exportDetalleProfesional(agg);
   });
 
+  if($('btnDetalleOverrides')){
+    $('btnDetalleOverrides').addEventListener('click', ()=>{
+      if(!state.lastDetailAgg){
+        toast('No hay detalle abierto');
+        return;
+      }
+      openOverrides(state.lastDetailAgg);
+    });
+  }
+
   $('btnAjustesClose').addEventListener('click', closeAjustes);
   $('btnAjustesCancelar').addEventListener('click', closeAjustes);
   $('ajustesBackdrop').addEventListener('click', (e)=>{
     if(e.target === $('ajustesBackdrop')) closeAjustes();
   });
   $('btnAjustesGuardar').addEventListener('click', saveAjustesDesdeModal);
-  
+
   $('btnFechaPagoClose').addEventListener('click', closeFechaPago);
   $('btnFechaPagoCancelar').addEventListener('click', closeFechaPago);
   $('fechaPagoBackdrop').addEventListener('click', (e)=>{
     if(e.target === $('fechaPagoBackdrop')) closeFechaPago();
   });
   $('btnFechaPagoGuardar').addEventListener('click', saveFechaPagoDesdeModal);
+
+  if($('btnOverridesClose')) $('btnOverridesClose').addEventListener('click', closeOverrides);
+  if($('btnOverridesCancelar')) $('btnOverridesCancelar').addEventListener('click', closeOverrides);
+  if($('overridesBackdrop')){
+    $('overridesBackdrop').addEventListener('click', (e)=>{
+      if(e.target === $('overridesBackdrop')) closeOverrides();
+    });
+  }
+  if($('btnOverrideGuardar')) $('btnOverrideGuardar').addEventListener('click', saveOverrideDesdeModal);
 }
 
 /* =========================
