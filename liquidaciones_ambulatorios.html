@@ -267,6 +267,7 @@
         </div>
         <div class="actions" style="margin-top:0;">
           <button id="btnExportDetalleProf" class="btn" type="button">Exportar detalle profesional</button>
+          <button id="btnDetalleOverrides" class="btn" type="button" style="display:none;">⚙️ Ajustes por prestación</button>
           <button id="btnCerrar2" class="btn primary" type="button">Cerrar</button>
         </div>
       </div>
@@ -340,6 +341,46 @@
               Solo se aplicará en el cálculo si el profesional es cirujano.
             </div>
           </section>
+
+          <section class="card" style="padding:16px;">
+            
+          <div class="sectionTitle">Especificaciones de liquidación</div>
+        
+          <div class="field">
+            <label>
+              <input id="ajReglasEspecialesActivas" type="checkbox" style="width:auto; margin-right:8px;" />
+              Activar reglas especiales para este mes
+            </label>
+          </div>
+        
+          <div class="field">
+            <label>
+              <input id="ajUsarValorBaseComoPago" type="checkbox" style="width:auto; margin-right:8px;" />
+              Usar valor base en vez de pago profesional
+            </label>
+          </div>
+        
+          <div class="field">
+            <label>
+              <input id="ajDescuentoFijoEspecialAplica" type="checkbox" style="width:auto; margin-right:8px;" />
+              Aplicar descuento fijo especial
+            </label>
+          </div>
+        
+          <div class="field">
+            <label for="ajDescuentoFijoEspecialCLP">Descuento fijo especial (CLP)</label>
+            <input id="ajDescuentoFijoEspecialCLP" type="text" placeholder="Ej: 100000" />
+          </div>
+        
+          <div class="field">
+            <label for="ajEspecificacionObservacion">Observación</label>
+            <textarea id="ajEspecificacionObservacion" placeholder="Ej: liquidar por valor base y descontar 100.000"></textarea>
+          </div>
+        
+          <div class="help">
+            Esta sección permite activar reglas especiales por profesional para el mes seleccionado.
+          </div>
+        </section>
         </div>
       </div>
 
@@ -373,6 +414,76 @@
       <div class="modalFoot">
         <button id="btnFechaPagoCancelar" type="button" class="btn">Cancelar</button>
         <button id="btnFechaPagoGuardar" type="button" class="btn primary">Guardar</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="overridesBackdrop" class="backdrop" style="display:none;">
+    <div class="modal" style="width:min(1200px, 96vw); max-height:92vh;">
+      <div class="modalHead">
+        <div>
+          <h2 id="overridesTitle" class="modalTitle">Ajustes por prestación</h2>
+          <div id="overridesSub" class="modalSub">—</div>
+        </div>
+        <button id="btnOverridesClose" class="btn" type="button">Cerrar</button>
+      </div>
+  
+      <div class="modalBody">
+        <section class="card cardPad" style="margin-bottom:12px;">
+          <div class="help" id="ovSelectedInfo">Selecciona una línea para editar override</div>
+        </section>
+  
+        <section class="card cardPad" style="margin-bottom:12px;">
+          <div class="grid2">
+            <div class="field">
+              <label>
+                <input id="ovEnabled" type="checkbox" style="width:auto; margin-right:8px;" />
+                Activar override manual para esta prestación
+              </label>
+            </div>
+  
+            <div class="field">
+              <label for="ovValorManual">Valor manual final (CLP)</label>
+              <input id="ovValorManual" type="text" placeholder="Ej: 25000" />
+            </div>
+  
+            <div class="field" style="grid-column:1 / -1;">
+              <label for="ovMotivo">Motivo</label>
+              <textarea id="ovMotivo" placeholder="Ej: ajuste manual autorizado"></textarea>
+            </div>
+          </div>
+        </section>
+  
+        <section class="card cardPad">
+          <div class="tableWrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Fecha</th>
+                  <th>Procedimiento</th>
+                  <th>Paciente</th>
+                  <th>RUT</th>
+                  <th>Valor base</th>
+                  <th>Cálculo normal</th>
+                  <th>Valor final</th>
+                  <th>Estado</th>
+                  <th>Acción</th>
+                </tr>
+              </thead>
+              <tbody id="overridesTbody"></tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+  
+      <div class="modalFoot">
+        <div class="help">
+          Aquí puedes seleccionar una prestación y definir un valor manual que reemplace el cálculo normal.
+        </div>
+        <div class="actions" style="margin-top:0;">
+          <button id="btnOverridesCancelar" class="btn" type="button">Cancelar</button>
+          <button id="btnOverrideGuardar" class="btn primary" type="button">Guardar override</button>
+        </div>
       </div>
     </div>
   </div>
