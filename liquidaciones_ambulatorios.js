@@ -1258,25 +1258,30 @@ async function buildLiquidaciones(){
     const totalBoleta = totalValorizado;
     const retencionCLP = 0;
 
-    const descuentoCLP = ajustesCfg.descuentoAplica
+    const descuentoNormalCLP = ajustesCfg.descuentoAplica
       ? (Number(ajustesCfg.descuentoCLP || 0) || 0)
       : 0;
-
+    
     const descuentoFijoEspecialCLP =
       ajustesCfg.reglasEspecialesActivas && ajustesCfg.descuentoFijoEspecialAplica
         ? (Number(ajustesCfg.descuentoFijoEspecialCLP || 0) || 0)
         : 0;
-
+    
+    // ✅ regla de negocio:
+    // si hay descuento fijo especial activo, reemplaza al descuento normal
+    const usaDescuentoEspecial = descuentoFijoEspecialCLP > 0;
+    const descuentoCLP = usaDescuentoEspecial ? 0 : descuentoNormalCLP;
+    const descuentoAplicadoFinalCLP = usaDescuentoEspecial ? descuentoFijoEspecialCLP : descuentoCLP;
+    
     const esCirujano = normalize(x.roleId) === 'r_cirujano';
     const balonCantidad = esCirujano && ajustesCfg.balonAplica ? (Number(ajustesCfg.balonCantidad || 0) || 0) : 0;
     const balonValorUnitario = esCirujano && ajustesCfg.balonAplica ? (Number(ajustesCfg.balonValorUnitario || 0) || 0) : 0;
     const balonSubtotal = esCirujano && ajustesCfg.balonAplica ? (balonCantidad * balonValorUnitario) : 0;
-
+    
     const liquido = Math.max(
       0,
       totalBoleta
-      - descuentoCLP
-      - descuentoFijoEspecialCLP
+      - descuentoAplicadoFinalCLP
       - retencionCLP
       + balonSubtotal
     );
@@ -1293,20 +1298,23 @@ async function buildLiquidaciones(){
       ajustes: {
         descuentoAplica: !!ajustesCfg.descuentoAplica,
         descuentoCLP,
+        descuentoNormalCLP,
+        descuentoAplicadoFinalCLP,
         descuentoAsunto: ajustesCfg.descuentoAsunto || '',
-
+      
         balonAplica: !!ajustesCfg.balonAplica && esCirujano,
         balonCantidad,
         balonValorUnitario,
         balonSubtotal,
         balonAsunto: ajustesCfg.balonAsunto || 'Instalación de balón',
-
+      
         reglasEspecialesActivas: !!ajustesCfg.reglasEspecialesActivas,
         usarValorBaseComoPago: !!ajustesCfg.usarValorBaseComoPago,
         descuentoFijoEspecialAplica: !!ajustesCfg.descuentoFijoEspecialAplica,
         descuentoFijoEspecialCLP,
+        usaDescuentoEspecial,
         especificacionObservacion: ajustesCfg.especificacionObservacion || '',
-
+      
         totalValorizado,
         totalBoleta,
         retencionCLP,
