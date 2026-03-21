@@ -1258,30 +1258,35 @@ async function buildLiquidaciones(){
     const totalBoleta = totalValorizado;
     const retencionCLP = 0;
 
-    const descuentoNormalCLP = ajustesCfg.descuentoAplica
+    const descuentoMensualNormalCLP = ajustesCfg.descuentoAplica
       ? (Number(ajustesCfg.descuentoCLP || 0) || 0)
       : 0;
     
+    // ✅ este sí afecta boleta
     const descuentoFijoEspecialCLP =
       ajustesCfg.reglasEspecialesActivas && ajustesCfg.descuentoFijoEspecialAplica
         ? (Number(ajustesCfg.descuentoFijoEspecialCLP || 0) || 0)
         : 0;
-    
-    // ✅ regla de negocio:
-    // si hay descuento fijo especial activo, reemplaza al descuento normal
-    const usaDescuentoEspecial = descuentoFijoEspecialCLP > 0;
-    const descuentoCLP = usaDescuentoEspecial ? 0 : descuentoNormalCLP;
-    const descuentoAplicadoFinalCLP = usaDescuentoEspecial ? descuentoFijoEspecialCLP : descuentoCLP;
     
     const esCirujano = normalize(x.roleId) === 'r_cirujano';
     const balonCantidad = esCirujano && ajustesCfg.balonAplica ? (Number(ajustesCfg.balonCantidad || 0) || 0) : 0;
     const balonValorUnitario = esCirujano && ajustesCfg.balonAplica ? (Number(ajustesCfg.balonValorUnitario || 0) || 0) : 0;
     const balonSubtotal = esCirujano && ajustesCfg.balonAplica ? (balonCantidad * balonValorUnitario) : 0;
     
+    // ✅ total valorizado = bruto antes de descuentos
+    const totalValorizado = linesFinales.reduce((acc, l)=> acc + (Number(l.valorLiquidadoFinal || 0) || 0), 0);
+    
+    // ✅ boleta = valorizado menos descuento fijo especial
+    const totalBoleta = Math.max(0, totalValorizado - descuentoFijoEspecialCLP);
+    
+    // ✅ por ahora la retención sigue en 0
+    const retencionCLP = 0;
+    
+    // ✅ líquido = boleta - descuento mensual normal - retención + balón
     const liquido = Math.max(
       0,
       totalBoleta
-      - descuentoAplicadoFinalCLP
+      - descuentoMensualNormalCLP
       - retencionCLP
       + balonSubtotal
     );
@@ -1297,10 +1302,15 @@ async function buildLiquidaciones(){
       resumenModalidades,
       ajustes: {
         descuentoAplica: !!ajustesCfg.descuentoAplica,
-        descuentoCLP,
-        descuentoNormalCLP,
-        descuentoAplicadoFinalCLP,
+      
+        // ✅ descuento mensual normal: NO afecta boleta
+        descuentoCLP: descuentoMensualNormalCLP,
+        descuentoMensualNormalCLP,
         descuentoAsunto: ajustesCfg.descuentoAsunto || '',
+      
+        // ✅ descuento fijo especial: SÍ afecta boleta
+        descuentoFijoEspecialAplica: !!ajustesCfg.descuentoFijoEspecialAplica,
+        descuentoFijoEspecialCLP,
       
         balonAplica: !!ajustesCfg.balonAplica && esCirujano,
         balonCantidad,
@@ -1310,9 +1320,6 @@ async function buildLiquidaciones(){
       
         reglasEspecialesActivas: !!ajustesCfg.reglasEspecialesActivas,
         usarValorBaseComoPago: !!ajustesCfg.usarValorBaseComoPago,
-        descuentoFijoEspecialAplica: !!ajustesCfg.descuentoFijoEspecialAplica,
-        descuentoFijoEspecialCLP,
-        usaDescuentoEspecial,
         especificacionObservacion: ajustesCfg.especificacionObservacion || '',
       
         totalValorizado,
@@ -2120,6 +2127,11 @@ function buildModalResumenHtml(agg){
           </div>
 
           <div style="display:flex; justify-content:space-between; gap:12px; padding:8px 10px; border:1px solid #d1d5db; border-radius:8px;">
+            <span>Descuento fijo especial</span>
+            <b class="mono">${escapeHtml(clp(agg?.ajustes?.descuentoFijoEspecialCLP || 0))}</b>
+          </div>
+
+          <div style="display:flex; justify-content:space-between; gap:12px; padding:8px 10px; border:1px solid #d1d5db; border-radius:8px;">
             <span>$ Boleta</span>
             <b class="mono">${escapeHtml(clp(agg?.ajustes?.totalBoleta || 0))}</b>
           </div>
@@ -2130,13 +2142,8 @@ function buildModalResumenHtml(agg){
           </div>
 
           <div style="display:flex; justify-content:space-between; gap:12px; padding:8px 10px; border:1px solid #d1d5db; border-radius:8px;">
-            <span>${escapeHtml(agg?.ajustes?.descuentoAsunto || 'Descuento seguro complementario')}</span>
-            <b class="mono">${escapeHtml(clp(agg?.ajustes?.descuentoCLP || 0))}</b>
-          </div>
-
-          <div style="display:flex; justify-content:space-between; gap:12px; padding:8px 10px; border:1px solid #d1d5db; border-radius:8px;">
-            <span>Descuento fijo especial</span>
-            <b class="mono">${escapeHtml(clp(agg?.ajustes?.descuentoFijoEspecialCLP || 0))}</b>
+            <span>${escapeHtml(agg?.ajustes?.descuentoAsunto || 'Descuento mensual')}</span>
+            <b class="mono">${escapeHtml(clp(agg?.ajustes?.descuentoMensualNormalCLP || 0))}</b>
           </div>
 
           <div style="display:flex; justify-content:space-between; gap:12px; padding:10px 12px; border:1px solid #99f6e4; background:#ecfeff; border-radius:8px; font-size:14px;">
@@ -2419,9 +2426,10 @@ async function generarPDFLiquidacionProfesional(agg){
   
   const resumenMontoRows = [
     ['$ Valorizado:', money(agg.ajustes?.totalValorizado || 0)],
+    ['Descuento fijo especial:', money(agg.ajustes?.descuentoFijoEspecialCLP || 0)],
     ['$ Boleta:', money(agg.ajustes?.totalBoleta || 0)],
     ['$ Retención:', money(agg.ajustes?.retencionCLP || 0)],
-    [agg.ajustes?.descuentoAsunto || 'Descuento seguro complementario', money(agg.ajustes?.descuentoCLP || 0)],
+    [agg.ajustes?.descuentoAsunto || 'Descuento mensual', money(agg.ajustes?.descuentoMensualNormalCLP || 0)],
     ['$ Líquido:', money(agg.ajustes?.liquido || 0)]
   ];
   
