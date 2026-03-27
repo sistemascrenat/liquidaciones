@@ -473,6 +473,137 @@ function buscarProcedimiento(texto) {
   }) || null;
 }
 
+function labelRolCanon(canon) {
+  switch (canon) {
+    case "CIRUJANO": return "Cirujano/a";
+    case "PSICOLOGIA": return "Psicólogo/a";
+    case "KINESIOLOGIA": return "Kinesiólogo/a";
+    case "NUTRICION": return "Nutricionista";
+    case "NUTRIOLOGIA": return "Nutriólogo/a";
+    default: return canon || "Rol desconocido";
+  }
+}
+
+function canonRolDesdeTexto(texto = "") {
+  const t = normalizarTexto(texto);
+
+  if (!t) return "";
+
+  if (t.includes("CIRUJAN")) return "CIRUJANO";
+  if (t.includes("PSICOLOG")) return "PSICOLOGIA";
+  if (t.includes("KINESIO")) return "KINESIOLOGIA";
+  if (t.includes("NUTRIOLOG")) return "NUTRIOLOGIA";
+  if (t.includes("NUTRICION")) return "NUTRICION";
+
+  return "";
+}
+
+function textosRolProfesional(prof) {
+  const valores = [];
+
+  const push = (v) => {
+    if (Array.isArray(v)) {
+      v.forEach(push);
+      return;
+    }
+    if (v === null || v === undefined) return;
+
+    const s = String(v).trim();
+    if (s) valores.push(s);
+  };
+
+  if (!prof) return valores;
+
+  // Campos más probables del catálogo de profesionales
+  push(prof.rolPrincipalId);
+  push(prof.rolesSecundariosIds);
+  push(prof.rolPrincipal);
+  push(prof.rolPrincipalNombre);
+  push(prof.rolesSecundarios);
+  push(prof.rolesSecundariosNombres);
+  push(prof.rol);
+  push(prof.roles);
+  push(prof.especialidad);
+  push(prof.especialidades);
+
+  return valores;
+}
+
+function rolesCanonProfesional(prof) {
+  const out = new Set();
+
+  textosRolProfesional(prof).forEach(txt => {
+    const canon = canonRolDesdeTexto(txt);
+    if (canon) out.add(canon);
+  });
+
+  return [...out];
+}
+
+function rolEsperadoProcedimiento(proc, textoArchivo = "") {
+  const universo = [
+    proc?.categoria,
+    proc?.nombre,
+    proc?.tratamiento,
+    proc?.procedimiento,
+    proc?.descripcion,
+    textoArchivo
+  ]
+    .map(x => normalizarTexto(x))
+    .filter(Boolean)
+    .join(" | ");
+
+  if (!universo) {
+    return { canon: "", label: "" };
+  }
+
+  // Orden importante: primero lo más específico
+  if (universo.includes("CIRUGIA BARIATR")) {
+    return { canon: "CIRUJANO", label: labelRolCanon("CIRUJANO") };
+  }
+
+  if (universo.includes("PSICOLOG")) {
+    return { canon: "PSICOLOGIA", label: labelRolCanon("PSICOLOGIA") };
+  }
+
+  if (universo.includes("KINESIO") || universo.includes("ESPIROMETR")) {
+    return { canon: "KINESIOLOGIA", label: labelRolCanon("KINESIOLOGIA") };
+  }
+
+  if (universo.includes("NUTRIOLOG")) {
+    return { canon: "NUTRIOLOGIA", label: labelRolCanon("NUTRIOLOGIA") };
+  }
+
+  if (universo.includes("NUTRICION") || universo.includes("BIOIMPEDANCIOMETR")) {
+    return { canon: "NUTRICION", label: labelRolCanon("NUTRICION") };
+  }
+
+  return { canon: "", label: "" };
+}
+
+function construirAlertaRolProcedimiento({ profesional, procedimiento, textoProcedimientoArchivo = "" }) {
+  if (!profesional || !procedimiento) return null;
+
+  const esperado = rolEsperadoProcedimiento(procedimiento, textoProcedimientoArchivo);
+  if (!esperado.canon) return null;
+
+  const rolesProf = rolesCanonProfesional(profesional);
+  if (!rolesProf.length) return null;
+
+  const coincide = rolesProf.includes(esperado.canon);
+  if (coincide) return null;
+
+  const nombreProf = nombreProfesionalCatalogo(profesional) || "Profesional";
+  const nombreProc = nombreProcedimientoCatalogo(procedimiento) || clean(textoProcedimientoArchivo) || "Procedimiento";
+  const rolesProfLabel = rolesProf.map(labelRolCanon).join(" / ");
+
+  return `Rol no corresponde al procedimiento: "${nombreProc}" exige ${esperado.label} y "${nombreProf}" tiene ${rolesProfLabel}`;
+}
+
+function esAlertaBloqueante(alerta = "") {
+  return normalizarTexto(alerta).includes("ROL NO CORRESPONDE AL PROCEDIMIENTO");
+}
+
 /* ======================
    REVISIÓN / APLICACIÓN
 ====================== */
@@ -480,12 +611,14 @@ function buscarProcedimiento(texto) {
 function construirReview({ profesionalId, procedimientoId, alertas = [] }) {
   const pendienteProfesional = !profesionalId;
   const pendienteProcedimiento = !procedimientoId;
+  const pendienteRol = alertas.some(esAlertaBloqueante);
 
   return {
-    estadoRevision: (!pendienteProfesional && !pendienteProcedimiento) ? "ok" : "pendiente",
+    estadoRevision: (!pendienteProfesional && !pendienteProcedimiento && !pendienteRol) ? "ok" : "pendiente",
     pendientes: {
       profesional: pendienteProfesional,
-      procedimiento: pendienteProcedimiento
+      procedimiento: pendienteProcedimiento,
+      rolProcedimiento: pendienteRol
     },
     alertas
   };
@@ -694,12 +827,22 @@ function procesarReservo() {
 
     const evalApp = evaluarAplicacionReservo(r);
     const alertas = [...evalApp.alertas];
-
+    
     if (analisisProf?.alerta) alertas.push(analisisProf.alerta);
-
+    
     if (!normalizarRut(r["Rut"])) alertas.push("RUT vacío o inválido");
     if (!normalizarTexto(r["Profesional"])) alertas.push("Profesional vacío");
     if (!normalizarTexto(r["Tratamiento"])) alertas.push("Procedimiento vacío");
+    
+    const alertaRolProcedimiento = construirAlertaRolProcedimiento({
+      profesional: profesionalDetectado,
+      procedimiento: procedimientoDetectado,
+      textoProcedimientoArchivo: r["Tratamiento"]
+    });
+    
+    if (alertaRolProcedimiento) {
+      alertas.push(alertaRolProcedimiento);
+    }
 
     const resolved = {
       profesionalId: profesionalDetectado?.id || null,
@@ -770,9 +913,21 @@ function procesarMK() {
 
     const alertas = [];
     if (analisisProf?.alerta) alertas.push(analisisProf.alerta);
-    if (!normalizarRut(r["Rut"])) alertas.push("RUT vacío o inválido");
-    if (!normalizarTexto(r["D Médico"])) alertas.push("Profesional vacío");
-    if (!normalizarTexto(r["D Artículo"])) alertas.push("Procedimiento vacío");
+    if (!reg.rutNorm) alertas.push("RUT vacío o inválido");
+    if (!normalizarTexto(reg.profesional)) alertas.push("Profesional vacío");
+    if (!normalizarTexto(reg.prestacion)) alertas.push("Procedimiento vacío");
+    
+    if (reg.origen === "Reservo") {
+      const alertaRolProcedimiento = construirAlertaRolProcedimiento({
+        profesional: profesionalDetectado,
+        procedimiento: procedimientoDetectado,
+        textoProcedimientoArchivo: reg.prestacion
+      });
+    
+      if (alertaRolProcedimiento) {
+        alertas.push(alertaRolProcedimiento);
+      }
+    }
 
     const resolved = {
       profesionalId: profesionalDetectado?.id || null,
