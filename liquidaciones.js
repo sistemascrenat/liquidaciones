@@ -262,7 +262,7 @@ async function generarPDFLiquidacionProfesional(agg){
     const tp = String(tpRaw ?? '').toLowerCase().trim();
   
     if(!tp || tp === 'sin_tipo') return 'SIN TIPO';
-    if(tp.includes('fona')) return 'PAD (Manga, Bypass, Cole)';
+    if(tp.includes('fona')) return 'FONASA';
     if(tp === 'mle' || tp.includes('mle') || tp.includes('libre eleccion') || tp.includes('libre elección')) return 'MLE';
     // equivalencias que quieres unificar
     if(tp.includes('isap')) return 'ISAPRE';
