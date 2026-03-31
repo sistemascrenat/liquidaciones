@@ -262,7 +262,7 @@ async function generarPDFLiquidacionProfesional(agg){
     const tp = String(tpRaw ?? '').toLowerCase().trim();
   
     if(!tp || tp === 'sin_tipo') return 'SIN TIPO';
-    if(tp.includes('fona')) return 'PAD (Manga, Bypass, Cole)';
+    if(tp.includes('fona')) return 'FONASA';
     if(tp === 'mle' || tp.includes('mle') || tp.includes('libre eleccion') || tp.includes('libre elección')) return 'MLE';
     // equivalencias que quieres unificar
     if(tp.includes('isap')) return 'ISAPRE';
@@ -643,7 +643,7 @@ async function generarPDFLiquidacionProfesional(agg){
       let tpLabel = '';
       if (tp === 'particular_isapre') tpLabel = 'PARTICULAR O ISAPRE';
       else if (tp === 'mle') tpLabel = 'MLE';
-      else if (tp === 'fonasa') tpLabel = 'PAD (Manga, Bypass, Cole)';
+      else if (tp === 'fonasa') tpLabel = 'FONASA';
       else tpLabel = tipoPacienteHumano(tp);
 
       resumenRows.push({
@@ -1123,8 +1123,6 @@ async function generarPDFLiquidacionProfesional(agg){
   
     if (tipoTxt === 'particular_isapre' || (tipoTxt.includes('particular') && tipoTxt.includes('isap'))) {
       tipoShow = 'PARTICULAR O ISAPRE';
-    } else if (tipoTxt.includes('fona')) {
-      tipoShow = 'PAD (Manga, Bypass, Cole)';
     }
   
     const tipoFontSize = (tipoShow === 'PARTICULAR O ISAPRE') ? 7.6 : 9;
