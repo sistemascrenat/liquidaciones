@@ -643,7 +643,7 @@ async function generarPDFLiquidacionProfesional(agg){
       let tpLabel = '';
       if (tp === 'particular_isapre') tpLabel = 'PARTICULAR O ISAPRE';
       else if (tp === 'mle') tpLabel = 'MLE';
-      else if (tp === 'fonasa') tpLabel = 'FONASA';
+      else if (tp === 'fonasa') tpLabel = 'PAD (Manga, Bypass, Cole)';
       else tpLabel = tipoPacienteHumano(tp);
 
       resumenRows.push({
