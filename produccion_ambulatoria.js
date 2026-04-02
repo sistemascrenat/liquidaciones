@@ -913,21 +913,9 @@ function procesarMK() {
 
     const alertas = [];
     if (analisisProf?.alerta) alertas.push(analisisProf.alerta);
-    if (!reg.rutNorm) alertas.push("RUT vacío o inválido");
-    if (!normalizarTexto(reg.profesional)) alertas.push("Profesional vacío");
-    if (!normalizarTexto(reg.prestacion)) alertas.push("Procedimiento vacío");
-    
-    if (reg.origen === "Reservo") {
-      const alertaRolProcedimiento = construirAlertaRolProcedimiento({
-        profesional: profesionalDetectado,
-        procedimiento: procedimientoDetectado,
-        textoProcedimientoArchivo: reg.prestacion
-      });
-    
-      if (alertaRolProcedimiento) {
-        alertas.push(alertaRolProcedimiento);
-      }
-    }
+    if (!normalizarRut(r["Rut"])) alertas.push("RUT vacío o inválido");
+    if (!normalizarTexto(r["D Médico"])) alertas.push("Profesional vacío");
+    if (!normalizarTexto(r["D Artículo"])) alertas.push("Procedimiento vacío");
 
     const resolved = {
       profesionalId: profesionalDetectado?.id || null,
