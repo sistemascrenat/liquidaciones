@@ -181,6 +181,7 @@ function download(filename, text, mime='text/plain'){
 
 // Ajusta esto si quieres un logo (opcional). Si no existe, simplemente no lo dibuja.
 const PDF_ASSET_LOGO_URL = './logoCRazul.jpeg'; // pon tu ruta real o déjalo así si lo subirás
+const INFORME_PAGOS_LOGO_URL = './logoCR.png';
 
 async function fetchAsArrayBuffer(url){
   try{
@@ -1664,6 +1665,356 @@ function calcularDesglosePagos(agg){
 }
 
 /* =========================
+   INFORME DE PAGOS (modal compartible)
+   - Solo profesionales con monto > 0
+   - Columnas con fecha exacta
+   - Incluye razón social
+   - Exporta PNG / PDF
+========================= */
+
+function getInformePagosRows(){
+  const items = (state.liquidResumen || [])
+    .map(agg=>{
+      const desglose = calcularDesglosePagos(agg);
+      const total = Number(desglose.totalAPagar || 0) || 0;
+
+      return {
+        rut: agg.rut || '—',
+        razonSocial: agg.empresaNombre || '—',
+        profesional: agg.nombre || '—',
+        pago1: Number(desglose.montoPago1 || 0) || 0,
+        pago2: Number(desglose.montoPago2 || 0) || 0,
+        total
+      };
+    })
+    .filter(x => x.total > 0);
+
+  items.sort((a,b)=>{
+    return normalize(a.profesional).localeCompare(normalize(b.profesional));
+  });
+
+  return items;
+}
+
+function getInformePagosTotales(rows){
+  return rows.reduce((acc, row)=>{
+    acc.pago1 += Number(row.pago1 || 0) || 0;
+    acc.pago2 += Number(row.pago2 || 0) || 0;
+    acc.total += Number(row.total || 0) || 0;
+    return acc;
+  }, { pago1:0, pago2:0, total:0 });
+}
+
+function ensureInformePagosButton(){
+  if($('btnInformePagos')) return;
+
+  const refBtn = $('btnCSVResumen');
+  if(!refBtn || !refBtn.parentElement) return;
+
+  const btn = document.createElement('button');
+  btn.id = 'btnInformePagos';
+  btn.type = 'button';
+  btn.className = refBtn.className;
+  btn.textContent = 'Informe pagos';
+
+  refBtn.parentElement.insertBefore(btn, refBtn.nextSibling);
+}
+
+function ensureInformePagosModal(){
+  if($('informePagosBackdrop')) return;
+
+  const wrap = document.createElement('div');
+  wrap.id = 'informePagosBackdrop';
+  wrap.style.cssText = `
+    position:fixed;
+    inset:0;
+    background:rgba(15,23,42,.42);
+    display:none;
+    align-items:center;
+    justify-content:center;
+    z-index:9999;
+    padding:18px;
+  `;
+
+  wrap.innerHTML = `
+    <div id="informePagosModal" style="
+      width:min(1400px, 98vw);
+      max-height:92vh;
+      background:#fff;
+      border-radius:18px;
+      overflow:hidden;
+      display:flex;
+      flex-direction:column;
+      box-shadow:0 24px 70px rgba(15,23,42,.25);
+      border:1px solid #d7dde6;
+    ">
+      <div style="
+        display:flex;
+        align-items:flex-start;
+        justify-content:space-between;
+        gap:16px;
+        padding:16px 18px;
+        border-bottom:1px solid #e5e7eb;
+        background:#f8fafc;
+      ">
+        <div>
+          <div style="font-size:22px; font-weight:800; color:#1f2937;">Informe de pagos por profesional</div>
+          <div id="informePagosSub" style="font-size:13px; color:#6b7280; margin-top:4px;"></div>
+        </div>
+
+        <div style="display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end;">
+          <button id="btnDescargarInformePNG" type="button" class="iconBtn" style="padding:10px 14px; width:auto; height:auto;">PNG</button>
+          <button id="btnDescargarInformePDF" type="button" class="iconBtn" style="padding:10px 14px; width:auto; height:auto;">PDF</button>
+          <button id="btnCerrarInformePagos" type="button" class="iconBtn" style="padding:10px 14px; width:auto; height:auto;">Cerrar</button>
+        </div>
+      </div>
+
+      <div style="padding:18px; overflow:auto; background:#eef2f7;">
+        <div id="informePagosRender"></div>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(wrap);
+
+  $('informePagosBackdrop').addEventListener('click', (e)=>{
+    if(e.target === $('informePagosBackdrop')) closeInformePagos();
+  });
+
+  $('btnCerrarInformePagos').addEventListener('click', closeInformePagos);
+  $('btnDescargarInformePNG').addEventListener('click', exportInformePagosPNG);
+  $('btnDescargarInformePDF').addEventListener('click', exportInformePagosPDF);
+}
+
+function buildInformePagosHTML(){
+  const rows = getInformePagosRows();
+  const tot = getInformePagosTotales(rows);
+
+  const fecha1 = getFechaPago1Texto();
+  const fecha2 = getFechaPago2Texto();
+  const periodo = `${monthNameEs(state.mesNum)} ${state.ano}`;
+
+  const bodyRows = rows.map(r=>`
+    <tr>
+      <td style="padding:10px 12px; border-bottom:1px solid #e5e7eb;" class="mono">${escapeHtml(r.rut)}</td>
+      <td style="padding:10px 12px; border-bottom:1px solid #e5e7eb;">${escapeHtml(r.razonSocial)}</td>
+      <td style="padding:10px 12px; border-bottom:1px solid #e5e7eb; font-weight:700;">${escapeHtml(r.profesional)}</td>
+      <td style="padding:10px 12px; border-bottom:1px solid #e5e7eb; text-align:right;" class="mono"><b>${escapeHtml(clp(r.pago1))}</b></td>
+      <td style="padding:10px 12px; border-bottom:1px solid #e5e7eb; text-align:right;" class="mono"><b>${escapeHtml(clp(r.pago2))}</b></td>
+      <td style="padding:10px 12px; border-bottom:1px solid #e5e7eb; text-align:right;" class="mono"><b>${escapeHtml(clp(r.total))}</b></td>
+    </tr>
+  `).join('');
+
+  const emptyRow = `
+    <tr>
+      <td colspan="6" style="padding:18px 12px; text-align:center; color:#6b7280;">
+        No hay profesionales con monto mayor a 0 para este mes.
+      </td>
+    </tr>
+  `;
+
+  return `
+    <div id="reportePagosProfesionales" style="
+      width:100%;
+      background:#fff;
+      color:#111827;
+      border-radius:16px;
+      overflow:hidden;
+      border:1px solid #d7dde6;
+      box-shadow:0 12px 35px rgba(15,23,42,.08);
+      font-family:Arial, Helvetica, sans-serif;
+    ">
+      <div style="padding:22px 24px 16px; border-bottom:1px solid #e5e7eb;">
+        <div style="display:flex; justify-content:space-between; gap:16px; align-items:flex-start;">
+          <div style="min-width:0;">
+            <div style="font-size:28px; font-weight:800; color:#0f172a; line-height:1.1;">
+              Resumen de pagos por profesional
+            </div>
+            <div style="font-size:14px; color:#6b7280; margin-top:8px;">
+              Período: <b>${escapeHtml(periodo)}</b>
+            </div>
+            <div style="font-size:14px; color:#6b7280; margin-top:4px;">
+              Profesionales incluidos: <b>${rows.length}</b>
+            </div>
+          </div>
+
+          <div style="flex:0 0 auto;">
+            <img
+              src="${INFORME_PAGOS_LOGO_URL}"
+              alt="Clinica Rennat"
+              style="max-width:170px; max-height:74px; object-fit:contain; display:block;"
+            />
+          </div>
+        </div>
+      </div>
+
+      <div style="padding:18px 24px; background:#f8fafc; border-bottom:1px solid #e5e7eb;">
+        <div style="display:grid; grid-template-columns:repeat(3, minmax(220px, 1fr)); gap:12px;">
+          <div style="background:#fff; border:1px solid #d7dde6; border-radius:14px; padding:14px 16px;">
+            <div style="font-size:12px; font-weight:800; color:#64748b; text-transform:uppercase;">${escapeHtml(fecha1)}</div>
+            <div style="margin-top:8px; font-size:24px; font-weight:800; color:#0f172a;">${escapeHtml(clp(tot.pago1))}</div>
+          </div>
+
+          <div style="background:#fff; border:1px solid #d7dde6; border-radius:14px; padding:14px 16px;">
+            <div style="font-size:12px; font-weight:800; color:#64748b; text-transform:uppercase;">${escapeHtml(fecha2)}</div>
+            <div style="margin-top:8px; font-size:24px; font-weight:800; color:#0f172a;">${escapeHtml(clp(tot.pago2))}</div>
+          </div>
+
+          <div style="background:#fff; border:1px solid #d7dde6; border-radius:14px; padding:14px 16px;">
+            <div style="font-size:12px; font-weight:800; color:#64748b; text-transform:uppercase;">Total general</div>
+            <div style="margin-top:8px; font-size:24px; font-weight:800; color:#0f172a;">${escapeHtml(clp(tot.total))}</div>
+          </div>
+        </div>
+      </div>
+
+      <div style="padding:18px 24px 24px;">
+        <div style="overflow:auto;">
+          <table style="width:100%; min-width:980px; border-collapse:collapse; font-size:14px;">
+            <thead>
+              <tr style="background:#0f172a; color:#fff;">
+                <th style="padding:12px; text-align:left;">RUT</th>
+                <th style="padding:12px; text-align:left;">Razón Social</th>
+                <th style="padding:12px; text-align:left;">Profesional</th>
+                <th style="padding:12px; text-align:right;">${escapeHtml(fecha1)}</th>
+                <th style="padding:12px; text-align:right;">${escapeHtml(fecha2)}</th>
+                <th style="padding:12px; text-align:right;">Total</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${bodyRows || emptyRow}
+            </tbody>
+            <tfoot>
+              <tr style="background:#ecfdf5; color:#064e3b;">
+                <td colspan="3" style="padding:12px; font-weight:800; border-top:2px solid #a7f3d0;">
+                  TOTALES
+                </td>
+                <td style="padding:12px; text-align:right; font-weight:800; border-top:2px solid #a7f3d0;" class="mono">
+                  ${escapeHtml(clp(tot.pago1))}
+                </td>
+                <td style="padding:12px; text-align:right; font-weight:800; border-top:2px solid #a7f3d0;" class="mono">
+                  ${escapeHtml(clp(tot.pago2))}
+                </td>
+                <td style="padding:12px; text-align:right; font-weight:800; border-top:2px solid #a7f3d0;" class="mono">
+                  ${escapeHtml(clp(tot.total))}
+                </td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function openInformePagos(){
+  ensureInformePagosModal();
+
+  const periodo = `${monthNameEs(state.mesNum)} ${state.ano}`;
+  $('informePagosSub').textContent = `${periodo} · ${getFechaPago1Texto()} · ${getFechaPago2Texto()}`;
+  $('informePagosRender').innerHTML = buildInformePagosHTML();
+  $('informePagosBackdrop').style.display = 'flex';
+}
+
+function closeInformePagos(){
+  const el = $('informePagosBackdrop');
+  if(el) el.style.display = 'none';
+}
+
+async function loadExternalScriptOnce(src, globalName){
+  if(globalName && window[globalName]) return window[globalName];
+
+  const already = [...document.querySelectorAll('script')].find(s => s.src === src);
+  if(already){
+    await new Promise(resolve => {
+      if(globalName && window[globalName]) return resolve();
+      already.addEventListener('load', resolve, { once:true });
+      already.addEventListener('error', resolve, { once:true });
+      setTimeout(resolve, 1000);
+    });
+    return globalName ? window[globalName] : true;
+  }
+
+  await new Promise((resolve, reject)=>{
+    const s = document.createElement('script');
+    s.src = src;
+    s.async = true;
+    s.onload = resolve;
+    s.onerror = reject;
+    document.head.appendChild(s);
+  });
+
+  return globalName ? window[globalName] : true;
+}
+
+async function getInformeCanvas(){
+  const target = $('reportePagosProfesionales');
+  if(!target) throw new Error('No existe #reportePagosProfesionales');
+
+  await loadExternalScriptOnce('https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js', 'html2canvas');
+
+  return await window.html2canvas(target, {
+    scale: 2,
+    useCORS: true,
+    backgroundColor: '#ffffff'
+  });
+}
+
+async function exportInformePagosPNG(){
+  try{
+    const canvas = await getInformeCanvas();
+    const link = document.createElement('a');
+    link.href = canvas.toDataURL('image/png');
+    link.download = `informe_pagos_${state.ano}_${String(state.mesNum).padStart(2,'0')}.png`;
+    link.click();
+    toast('Imagen descargada');
+  }catch(err){
+    console.error(err);
+    toast('No se pudo descargar la imagen');
+  }
+}
+
+async function exportInformePagosPDF(){
+  try{
+    await loadExternalScriptOnce('https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js', 'jspdf');
+    const canvas = await getInformeCanvas();
+
+    const { jsPDF } = window.jspdf;
+    const pdf = new jsPDF({
+      orientation: 'landscape',
+      unit: 'pt',
+      format: 'a4'
+    });
+
+    const pageW = pdf.internal.pageSize.getWidth();
+    const pageH = pdf.internal.pageSize.getHeight();
+    const margin = 24;
+
+    const imgData = canvas.toDataURL('image/png');
+    const imgW = pageW - margin * 2;
+    const imgH = canvas.height * imgW / canvas.width;
+
+    let heightLeft = imgH;
+    let position = margin;
+
+    pdf.addImage(imgData, 'PNG', margin, position, imgW, imgH);
+    heightLeft -= (pageH - margin * 2);
+
+    while(heightLeft > 0){
+      position = heightLeft - imgH + margin;
+      pdf.addPage();
+      pdf.addImage(imgData, 'PNG', margin, position, imgW, imgH);
+      heightLeft -= (pageH - margin * 2);
+    }
+
+    pdf.save(`informe_pagos_${state.ano}_${String(state.mesNum).padStart(2,'0')}.pdf`);
+    toast('PDF descargado');
+  }catch(err){
+    console.error(err);
+    toast('No se pudo descargar el PDF');
+  }
+}
+
+/* =========================
    Load Producción (collectionGroup items)
 ========================= */
 function monthNameEs(m){
@@ -2993,6 +3344,9 @@ requireAuth({
     $('btnCSVResumen').addEventListener('click', exportResumenCSV);
     $('btnCSVDetalle').addEventListener('click', exportDetalleCSV);
     $('btnFechasPago')?.addEventListener('click', openFechasPago);
+    
+    ensureInformePagosButton();
+    $('btnInformePagos')?.addEventListener('click', openInformePagos);
 
     $('btnUF')?.addEventListener('click', ()=>{
       $('ufBackdrop').style.display = 'grid';
@@ -3036,6 +3390,8 @@ requireAuth({
     $('modalBackdrop').addEventListener('click', (e)=>{
       if(e.target === $('modalBackdrop')) closeDetalle();
     });
+    
+    ensureInformePagosModal();
 
     $('btnFechasPagoClose')?.addEventListener('click', closeFechasPago);
     $('btnFechasPagoCancelar')?.addEventListener('click', closeFechasPago);
