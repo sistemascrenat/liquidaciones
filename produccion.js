@@ -1,4 +1,4 @@
-// produccion.js — COMPLETO (renovado)
+// produccion.js — COMPLETO 
 // ✅ Sidebar mantiene ancho (HTML)
 // ✅ Ignora filas "basura": si Nombre Paciente y RUT vienen vacíos => NO se importa esa línea
 // ✅ Resolución cirugías por contexto: Clínica + Tipo Paciente + Cirugía
@@ -1380,7 +1380,6 @@ async function fillImportSuggestions(){
   const sel = $('importSelect');
   if(!sel) return;
 
-  // reset select SIEMPRE
   sel.innerHTML = `<option value="">(Selecciona una importación del mes)</option>`;
   if($('importId')) $('importId').value = '';
 
@@ -1391,34 +1390,32 @@ async function fillImportSuggestions(){
   if(!ano || !mesNum) return;
 
   try{
-    // ✅ SIN orderBy => no requiere índice compuesto
-    // Traemos hasta 50 y ordenamos localmente por creadoEl desc.
+    // ✅ Leemos SOLO la colección de imports
+    // ✅ Filtramos mes en memoria para evitar índice compuesto
     const qy = query(
-      collectionGroup(db, 'items'),
-      where('ano', '==', Number(ano))
+      colImports,
+      where('ano', '==', ano),
+      limit(100)
     );
-    
-    const snapAll = await getDocs(qy);
-    
-    // Filtramos mesNum en memoria para evitar índice compuesto
-    const docsFiltrados = snapAll.docs.filter(d => {
-      const x = d.data() || {};
-      return Number(x.mesNum || 0) === Number(mesNum);
-    });
+
+    const snap = await getDocs(qy);
 
     const docs = [];
-    snap.forEach(d=>{
+
+    snap.forEach(d => {
       const x = d.data() || {};
+
+      if(Number(x.mesNum || 0) !== Number(mesNum)) return;
+
       const id = clean(x.id || d.id);
       if(!id) return;
 
-      const ts = x.creadoEl;
+      const ts = x.creadoEl || x.confirmadoEl || x.actualizadoEl;
       const ms = ts?.toMillis ? ts.toMillis() : (ts instanceof Date ? ts.getTime() : 0);
 
       docs.push({ id, x, ms });
     });
 
-    // ordenar desc por fecha (más reciente primero)
     docs.sort((a,b)=> (b.ms || 0) - (a.ms || 0));
 
     for(const it of docs){
@@ -1427,7 +1424,7 @@ async function fillImportSuggestions(){
 
       const estado = clean(x.estado || '');
       const filas = Number(x.filas || 0) || 0;
-      const when = formatImportDate(x.creadoEl);
+      const when = formatImportDate(x.creadoEl || x.confirmadoEl || x.actualizadoEl);
 
       const opt = document.createElement('option');
       opt.value = id;
@@ -1435,7 +1432,6 @@ async function fillImportSuggestions(){
       sel.appendChild(opt);
     }
 
-    // auto-selecciona el primero real si existe
     if(sel.options.length > 1){
       sel.selectedIndex = 1;
       if($('importId')) $('importId').value = sel.value;
