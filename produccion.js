@@ -1394,13 +1394,17 @@ async function fillImportSuggestions(){
     // ✅ SIN orderBy => no requiere índice compuesto
     // Traemos hasta 50 y ordenamos localmente por creadoEl desc.
     const qy = query(
-      colImports,
-      where('ano','==', ano),
-      where('mesNum','==', mesNum),
-      limit(50)
+      collectionGroup(db, 'items'),
+      where('ano', '==', Number(ano))
     );
-
-    const snap = await getDocs(qy);
+    
+    const snapAll = await getDocs(qy);
+    
+    // Filtramos mesNum en memoria para evitar índice compuesto
+    const docsFiltrados = snapAll.docs.filter(d => {
+      const x = d.data() || {};
+      return Number(x.mesNum || 0) === Number(mesNum);
+    });
 
     const docs = [];
     snap.forEach(d=>{
