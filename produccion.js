@@ -3774,31 +3774,36 @@ window.corregirIdProfesionalProduccion = async function({
       nameField: 'cirujano',
       idField: 'cirujanoId',
       pendienteField: 'cirujano',
-      resolvedPend: '_pend_cirujano'
+      resolvedPend: '_pend_cirujano',
+      rawField: 'Cirujano'
     },
     anestesista: {
       nameField: 'anestesista',
       idField: 'anestesistaId',
       pendienteField: 'anestesista',
-      resolvedPend: '_pend_anestesista'
+      resolvedPend: '_pend_anestesista',
+      rawField: 'Anestesista'
     },
     ayudante1: {
       nameField: 'ayudante1',
       idField: 'ayudante1Id',
       pendienteField: 'ayudante1',
-      resolvedPend: '_pend_ayudante1'
+      resolvedPend: '_pend_ayudante1',
+      rawField: 'Ayudante 1'
     },
     ayudante2: {
       nameField: 'ayudante2',
       idField: 'ayudante2Id',
       pendienteField: 'ayudante2',
-      resolvedPend: '_pend_ayudante2'
+      resolvedPend: '_pend_ayudante2',
+      rawField: 'Ayudante 2'
     },
     arsenalera: {
       nameField: 'arsenalera',
       idField: 'arsenaleraId',
       pendienteField: 'arsenalera',
-      resolvedPend: '_pend_arsenalera'
+      resolvedPend: '_pend_arsenalera',
+      rawField: 'Arsenalera'
     }
   };
 
@@ -3812,6 +3817,8 @@ window.corregirIdProfesionalProduccion = async function({
     throw new Error('Faltan datos obligatorios: ano, mesNum, rol, nombre');
   }
 
+  const YYYY = String(ano);
+  const MM = pad(Number(mesNum), 2);
   const nombreNorm = normalizeProName(nombre);
 
   if(!newId){
@@ -3840,98 +3847,100 @@ window.corregirIdProfesionalProduccion = async function({
     throw new Error(`oldId y newId son iguales (${oldId}). Revisa el mapping o los parámetros.`);
   }
 
-  const qy = query(
-    collectionGroup(db, 'items'),
-    where('ano', '==', Number(ano)),
-    where('mesNum', '==', Number(mesNum))
+  const pacientesSnap = await getDocs(
+    collection(db, 'produccion', YYYY, 'meses', MM, 'pacientes')
   );
-
-  const snap = await getDocs(qy);
 
   let encontrados = 0;
   let actualizados = 0;
-  let omitidosPorId = 0;
+  let omitidosPorqueYaTenianNewId = 0;
+  let pacientesRevisados = 0;
+  let itemsRevisados = 0;
 
   let batch = writeBatch(db);
   let batchCount = 0;
 
-  for(const d of docsFiltrados){
-    const x = d.data() || {};
+  for(const pacDoc of pacientesSnap.docs){
+    pacientesRevisados++;
 
-    const nombreActual = normalizeProName(
-      x.profesionales?.[cfg.nameField] ||
-      x.normalizado?.profesionales?.[cfg.nameField] ||
-      x.raw?.[
-        rol === 'ayudante1' ? 'Ayudante 1' :
-        rol === 'ayudante2' ? 'Ayudante 2' :
-        rol === 'arsenalera' ? 'Arsenalera' :
-        rol === 'anestesista' ? 'Anestesista' :
-        'Cirujano'
-      ] ||
-      ''
+    const itemsSnap = await getDocs(
+      collection(db, 'produccion', YYYY, 'meses', MM, 'pacientes', pacDoc.id, 'items')
     );
 
-    const idActual = clean(x.profesionalesId?.[cfg.idField] || '');
+    for(const d of itemsSnap.docs){
+      itemsRevisados++;
 
-    const coincideNombre = nombreActual === nombreNorm;
-    const coincideOldId = oldId ? idActual === clean(oldId) : idActual !== clean(newId);
+      const x = d.data() || {};
 
-    if(coincideNombre && coincideOldId){
-      encontrados++;
+      const nombreActual = normalizeProName(
+        x.profesionales?.[cfg.nameField] ||
+        x.normalizado?.profesionales?.[cfg.nameField] ||
+        x.raw?.[cfg.rawField] ||
+        ''
+      );
 
-      console.log('🟡 Ítem a corregir:', {
-        path: d.ref.path,
-        paciente: x.normalizado?.nombrePaciente || x.raw?.['Nombre Paciente'] || '',
-        fechaISO: x.fechaISO,
-        horaHM: x.horaHM,
-        rol,
-        nombreActual,
-        idActual,
-        nuevoId: newId
-      });
+      const idActual = clean(x.profesionalesId?.[cfg.idField] || '');
 
-      if(!dryRun){
-        batch.set(d.ref, {
-          profesionalesId: {
-            ...(x.profesionalesId || {}),
-            [cfg.idField]: newId
-          },
-          normalizado: {
-            ...(x.normalizado || {}),
+      const coincideNombre = nombreActual === nombreNorm;
+      const coincideOldId = oldId ? idActual === clean(oldId) : idActual !== clean(newId);
+
+      if(coincideNombre && coincideOldId){
+        encontrados++;
+
+        console.log('🟡 Ítem a corregir:', {
+          path: d.ref.path,
+          paciente: x.normalizado?.nombrePaciente || x.raw?.['Nombre Paciente'] || '',
+          fechaISO: x.fechaISO,
+          horaHM: x.horaHM,
+          rol,
+          nombreActual,
+          idActual,
+          nuevoId: newId
+        });
+
+        if(!dryRun){
+          batch.set(d.ref, {
             profesionalesId: {
-              ...(x.normalizado?.profesionalesId || {}),
+              ...(x.profesionalesId || {}),
               [cfg.idField]: newId
-            }
-          },
-          resolved: {
-            ...(x.resolved || {}),
-            [cfg.idField]: newId,
-            [`${cfg.nameField}Ok`]: true,
-            [cfg.resolvedPend]: false
-          },
-          pendientes: {
-            ...(x.pendientes || {}),
-            profesionales: {
-              ...(x.pendientes?.profesionales || {}),
-              [cfg.pendienteField]: false
-            }
-          },
-          actualizadoEl: serverTimestamp(),
-          actualizadoPor: state.user?.email || 'script-correccion-id-profesional'
-        }, { merge:true });
+            },
+            normalizado: {
+              ...(x.normalizado || {}),
+              profesionalesId: {
+                ...(x.normalizado?.profesionalesId || {}),
+                [cfg.idField]: newId
+              }
+            },
+            resolved: {
+              ...(x.resolved || {}),
+              [cfg.idField]: newId,
+              [`${cfg.nameField}Ok`]: true,
+              [cfg.resolvedPend]: false
+            },
+            pendientes: {
+              ...(x.pendientes || {}),
+              profesionales: {
+                ...(x.pendientes?.profesionales || {}),
+                [cfg.pendienteField]: false
+              }
+            },
+            actualizadoEl: serverTimestamp(),
+            actualizadoPor: state.user?.email || 'script-correccion-id-profesional'
+          }, { merge:true });
 
-        batchCount++;
-        actualizados++;
+          batchCount++;
+          actualizados++;
 
-        if(batchCount >= 400){
-          await batch.commit();
-          batch = writeBatch(db);
-          batchCount = 0;
+          if(batchCount >= 400){
+            await batch.commit();
+            batch = writeBatch(db);
+            batchCount = 0;
+          }
         }
-      }
 
-    } else if(coincideNombre && idActual === clean(newId)){
-      omitidosPorId++;
+      } else if(coincideNombre && idActual === clean(newId)){
+        omitidosPorqueYaTenianNewId++;
+      }
     }
   }
 
@@ -3947,9 +3956,11 @@ window.corregirIdProfesionalProduccion = async function({
     nombre,
     oldId: oldId || '(sin filtro oldId)',
     newId,
+    pacientesRevisados,
+    itemsRevisados,
     encontrados,
     actualizados,
-    omitidosPorqueYaTenianNewId: omitidosPorId
+    omitidosPorqueYaTenianNewId
   };
 
   console.log('✅ RESUMEN CORRECCIÓN PROFESIONAL:', resumen);
