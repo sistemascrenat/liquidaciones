@@ -3733,7 +3733,224 @@ async function saveAllDirtyEdits(){
   }
 }
 
+/* =========================
+   CORRECCIÓN MASIVA GENÉRICA IDS PROFESIONALES
+   Uso consola:
+   corregirIdProfesionalProduccion({
+     ano: 2026,
+     mesNum: 4,
+     rol: 'arsenalera',
+     nombre: 'Lorena Baltierra',
+     oldId: '172500145',
+     dryRun: true
+   });
 
+   Luego real:
+   corregirIdProfesionalProduccion({
+     ano: 2026,
+     mesNum: 4,
+     rol: 'arsenalera',
+     nombre: 'Lorena Baltierra',
+     oldId: '172500145',
+     dryRun: false
+   });
+========================= */
+window.corregirIdProfesionalProduccion = async function({
+  ano,
+  mesNum,
+  rol,
+  nombre,
+  oldId = '',
+  newId = '',
+  dryRun = true
+} = {}){
+
+  const ROLE_CONFIG = {
+    cirujano: {
+      nameField: 'cirujano',
+      idField: 'cirujanoId',
+      pendienteField: 'cirujano',
+      resolvedPend: '_pend_cirujano'
+    },
+    anestesista: {
+      nameField: 'anestesista',
+      idField: 'anestesistaId',
+      pendienteField: 'anestesista',
+      resolvedPend: '_pend_anestesista'
+    },
+    ayudante1: {
+      nameField: 'ayudante1',
+      idField: 'ayudante1Id',
+      pendienteField: 'ayudante1',
+      resolvedPend: '_pend_ayudante1'
+    },
+    ayudante2: {
+      nameField: 'ayudante2',
+      idField: 'ayudante2Id',
+      pendienteField: 'ayudante2',
+      resolvedPend: '_pend_ayudante2'
+    },
+    arsenalera: {
+      nameField: 'arsenalera',
+      idField: 'arsenaleraId',
+      pendienteField: 'arsenalera',
+      resolvedPend: '_pend_arsenalera'
+    }
+  };
+
+  const cfg = ROLE_CONFIG[rol];
+
+  if(!cfg){
+    throw new Error(`Rol inválido: ${rol}. Usa: cirujano, anestesista, ayudante1, ayudante2, arsenalera`);
+  }
+
+  if(!ano || !mesNum || !nombre){
+    throw new Error('Faltan datos obligatorios: ano, mesNum, rol, nombre');
+  }
+
+  const nombreNorm = normalizeProName(nombre);
+
+  if(!newId){
+    const roleMap = {
+      cirujano: 'r_cirujano',
+      anestesista: 'r_anestesista',
+      ayudante1: 'r_ayudante_1',
+      ayudante2: 'r_ayudante_2',
+      arsenalera: 'r_arsenalera'
+    };
+
+    const mapKey = `${roleMap[rol]}||${nombreNorm}`;
+
+    const mapSnap = await getDoc(doc(db, 'produccion_mappings', 'profesionales'));
+    const mapData = mapSnap.data()?.map || {};
+    newId = clean(mapData[mapKey]?.id || '');
+
+    if(!newId){
+      throw new Error(`No encontré newId y tampoco existe mapping para: ${mapKey}`);
+    }
+
+    console.log('✅ newId obtenido desde mapping:', { mapKey, newId });
+  }
+
+  if(oldId && oldId === newId){
+    throw new Error(`oldId y newId son iguales (${oldId}). Revisa el mapping o los parámetros.`);
+  }
+
+  const qy = query(
+    collectionGroup(db, 'items'),
+    where('ano', '==', Number(ano)),
+    where('mesNum', '==', Number(mesNum))
+  );
+
+  const snap = await getDocs(qy);
+
+  let encontrados = 0;
+  let actualizados = 0;
+  let omitidosPorId = 0;
+
+  let batch = writeBatch(db);
+  let batchCount = 0;
+
+  for(const d of snap.docs){
+    const x = d.data() || {};
+
+    const nombreActual = normalizeProName(
+      x.profesionales?.[cfg.nameField] ||
+      x.normalizado?.profesionales?.[cfg.nameField] ||
+      x.raw?.[
+        rol === 'ayudante1' ? 'Ayudante 1' :
+        rol === 'ayudante2' ? 'Ayudante 2' :
+        rol === 'arsenalera' ? 'Arsenalera' :
+        rol === 'anestesista' ? 'Anestesista' :
+        'Cirujano'
+      ] ||
+      ''
+    );
+
+    const idActual = clean(x.profesionalesId?.[cfg.idField] || '');
+
+    const coincideNombre = nombreActual === nombreNorm;
+    const coincideOldId = oldId ? idActual === clean(oldId) : idActual !== clean(newId);
+
+    if(coincideNombre && coincideOldId){
+      encontrados++;
+
+      console.log('🟡 Ítem a corregir:', {
+        path: d.ref.path,
+        paciente: x.normalizado?.nombrePaciente || x.raw?.['Nombre Paciente'] || '',
+        fechaISO: x.fechaISO,
+        horaHM: x.horaHM,
+        rol,
+        nombreActual,
+        idActual,
+        nuevoId: newId
+      });
+
+      if(!dryRun){
+        batch.set(d.ref, {
+          profesionalesId: {
+            ...(x.profesionalesId || {}),
+            [cfg.idField]: newId
+          },
+          normalizado: {
+            ...(x.normalizado || {}),
+            profesionalesId: {
+              ...(x.normalizado?.profesionalesId || {}),
+              [cfg.idField]: newId
+            }
+          },
+          resolved: {
+            ...(x.resolved || {}),
+            [cfg.idField]: newId,
+            [`${cfg.nameField}Ok`]: true,
+            [cfg.resolvedPend]: false
+          },
+          pendientes: {
+            ...(x.pendientes || {}),
+            profesionales: {
+              ...(x.pendientes?.profesionales || {}),
+              [cfg.pendienteField]: false
+            }
+          },
+          actualizadoEl: serverTimestamp(),
+          actualizadoPor: state.user?.email || 'script-correccion-id-profesional'
+        }, { merge:true });
+
+        batchCount++;
+        actualizados++;
+
+        if(batchCount >= 400){
+          await batch.commit();
+          batch = writeBatch(db);
+          batchCount = 0;
+        }
+      }
+
+    } else if(coincideNombre && idActual === clean(newId)){
+      omitidosPorId++;
+    }
+  }
+
+  if(!dryRun && batchCount > 0){
+    await batch.commit();
+  }
+
+  const resumen = {
+    modo: dryRun ? 'PRUEBA / NO GUARDA' : 'REAL / GUARDADO',
+    ano,
+    mesNum,
+    rol,
+    nombre,
+    oldId: oldId || '(sin filtro oldId)',
+    newId,
+    encontrados,
+    actualizados,
+    omitidosPorqueYaTenianNewId: omitidosPorId
+  };
+
+  console.log('✅ RESUMEN CORRECCIÓN PROFESIONAL:', resumen);
+  return resumen;
+};
 
 /* =========================
    Boot
