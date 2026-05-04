@@ -3855,7 +3855,7 @@ window.corregirIdProfesionalProduccion = async function({
   let batch = writeBatch(db);
   let batchCount = 0;
 
-  for(const d of snap.docs){
+  for(const d of docsFiltrados){
     const x = d.data() || {};
 
     const nombreActual = normalizeProName(
