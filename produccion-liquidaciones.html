@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+  <title>Preparar Liquidaciones</title>
+
+  <link rel="stylesheet" href="estilos.css" />
+</head>
+
+<body>
+  <div id="sidebar"></div>
+
+  <main class="main">
+    <section class="pageHeader">
+      <div>
+        <h1>Preparar liquidaciones</h1>
+        <p class="muted">
+          Completa clínica, procedimiento y equipo médico antes de generar liquidaciones.
+        </p>
+      </div>
+
+      <div class="headerActions">
+        <span id="who" class="pill">Conectando...</span>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="filtersBar">
+        <label>
+          Mes
+          <select id="mes"></select>
+        </label>
+
+        <label>
+          Año
+          <select id="ano"></select>
+        </label>
+
+        <label class="grow">
+          Buscar
+          <input id="q" type="text" placeholder="Paciente, clínica, cirugía, profesional..." />
+        </label>
+
+        <button id="btnCargar" type="button" class="btnPrimary">Cargar</button>
+        <button id="btnGuardarTodo" type="button" class="btnSecondary">Guardar cambios</button>
+        <a href="liquidaciones.html" class="btnSecondary">Ir a liquidaciones</a>
+      </div>
+
+      <div class="statusRow">
+        <span id="pillCount" class="pill">0 casos</span>
+        <span id="pillPendientes" class="pill warn">Pendientes: 0</span>
+        <span id="lastLoad" class="muted"></span>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="tableWrap">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Fecha</th>
+              <th>Paciente</th>
+              <th>Tipo paciente</th>
+              <th>Clínica</th>
+              <th>Procedimiento / cirugía</th>
+              <th>Cirujano</th>
+              <th>Anestesista</th>
+              <th>Ayudante 1</th>
+              <th>Ayudante 2</th>
+              <th>Arsenalera</th>
+              <th>Estado</th>
+              <th>Guardar</th>
+            </tr>
+          </thead>
+
+          <tbody id="tbody"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+
+  <script type="module" src="./produccion-liquidaciones.js"></script>
+</body>
+</html>
