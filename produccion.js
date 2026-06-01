@@ -415,13 +415,11 @@ function setButtons(){
     state.pending.prof.length; // ✅
 
 
-  $('btnResolver').disabled = !(staged && totalPend > 0);
+  const totalSospechosos = (state.stagedItems || []).filter(tieneMappingSospechoso).length;
   
-  // ✅ Confirmar SIEMPRE habilitado mientras haya staging.
-  // (Se confirmará con pendientes marcadas en producción)
-  $('btnConfirmar').disabled = !staged || totalPend > 0;
+  $('btnResolver').disabled = !(staged && (totalPend > 0 || totalSospechosos > 0));
   
-  $('btnAnular').disabled = !(staged || confirmed);
+  $('btnConfirmar').disabled = !staged || totalPend > 0 || totalSospechosos > 0;
 }
 
 function dirtyCount(){
@@ -704,20 +702,58 @@ function paintPager(){
   }
 }
 
+function badgeResolucion(txt){
+  if(txt === 'manual') return `<span class="pill ok">MANUAL</span>`;
+  if(txt === 'mapping') return `<span class="pill warn">MAPPING</span>`;
+  if(txt === 'exacto') return `<span class="pill ok">EXACTO</span>`;
+  if(txt === 'sospechoso') return `<span class="pill warn">REVISAR</span>`;
+  return '';
+}
+
+function tieneMappingSospechoso(it){
+  return it?.resolved?._mappingSospechoso === true;
+}
+
 function estadoCell(it){
   const r = it.resolved || {};
   const flags = [];
+
   if(r.clinicaOk === false || r._pendClin) flags.push('Clínica');
   if(r.cirugiaOk === false || r._pendCir) flags.push('Cirugía');
-  
+
   if(r.cirujanoOk === false || r._pend_cirujano) flags.push('Cirujano');
   if(r.anestesistaOk === false || r._pend_anestesista) flags.push('Anestesista');
   if(r.ayudante1Ok === false || r._pend_ayudante1) flags.push('Ay1');
   if(r.ayudante2Ok === false || r._pend_ayudante2) flags.push('Ay2');
   if(r.arsenaleraOk === false || r._pend_arsenalera) flags.push('Arsenalera');
 
-  if(flags.length === 0) return `<span class="ok">OK</span>`;
-  return `<span class="warn">Pendiente: ${escapeHtml(flags.join(', '))}</span>`;
+  if(r._mappingSospechoso) flags.push('Mapping sospechoso');
+
+  const origen = r.origenResolucion || {};
+  const badges = [
+    origen.clinica ? `Clínica ${badgeResolucion(origen.clinica)}` : '',
+    origen.cirugia ? `Cirugía ${badgeResolucion(origen.cirugia)}` : '',
+    origen.cirujano ? `Cirujano ${badgeResolucion(origen.cirujano)}` : '',
+    origen.anestesista ? `Anest. ${badgeResolucion(origen.anestesista)}` : '',
+    origen.ayudante1 ? `Ay1 ${badgeResolucion(origen.ayudante1)}` : '',
+    origen.ayudante2 ? `Ay2 ${badgeResolucion(origen.ayudante2)}` : '',
+    origen.arsenalera ? `Ars. ${badgeResolucion(origen.arsenalera)}` : ''
+  ].filter(Boolean).join(' ');
+
+  const alertas = (r.alertasResolucion || []).filter(Boolean).join(' · ');
+
+  if(flags.length === 0){
+    return `
+      <span class="ok">OK</span>
+      ${badges ? `<div class="tiny" style="margin-top:4px;">${badges}</div>` : ''}
+    `;
+  }
+
+  return `
+    <span class="warn">Pendiente: ${escapeHtml(flags.join(', '))}</span>
+    ${alertas ? `<div class="tiny warn" style="margin-top:4px;">${escapeHtml(alertas)}</div>` : ''}
+    ${badges ? `<div class="tiny" style="margin-top:4px;">${badges}</div>` : ''}
+  `;
 }
 
 function formatCell(colName, rawVal){
@@ -1084,7 +1120,6 @@ function resolveOneItem(n){
     cirugiaId: null,
     ambulatorioId: null,
 
-    // ✅ Profesionales IDs (RUT)
     cirujanoId: null,
     anestesistaId: null,
     ayudante1Id: null,
@@ -1095,45 +1130,60 @@ function resolveOneItem(n){
     cirugiaOk: true,
     ambOk: true,
 
-    // ✅ flags profesionales
     cirujanoOk: true,
     anestesistaOk: true,
     ayudante1Ok: true,
     ayudante2Ok: true,
     arsenaleraOk: true,
 
+    origenResolucion: {
+      clinica: '',
+      cirugia: '',
+      cirujano: '',
+      anestesista: '',
+      ayudante1: '',
+      ayudante2: '',
+      arsenalera: ''
+    },
+
+    alertasResolucion: [],
+    _mappingSospechoso: false,
     _cirKey: ''
   };
 
-  // Clínica
   const clinTxt = clean(n.clinica || '');
+
   if(clinTxt){
     const normClin = normalizeKey(clinTxt);
     const mapped = state.maps.clinicas.get(normClin);
+
     if(mapped?.id){
       resolved.clinicaId = mapped.id;
+      resolved.origenResolucion.clinica = 'mapping';
     } else {
       const found = state.catalogs.clinicasByNorm.get(normClin);
-      if(found?.id) resolved.clinicaId = found.id;
-      else {
-        // ✅ si el usuario decidió “dejar pendiente” esta clínica, no bloquea
-        if(state.allowPend.clinicas.has(normClin)){
-          resolved.clinicaOk = true; // no bloquea
-          resolved.clinicaId = null; // sigue sin id
-          resolved._pendClin = true; // marca interna
-        } else {
-          resolved.clinicaOk = false;
-        }
-      }
 
+      if(found?.id){
+        resolved.clinicaId = found.id;
+        resolved.origenResolucion.clinica = 'exacto';
+      } else if(state.allowPend.clinicas.has(normClin)){
+        resolved.clinicaOk = true;
+        resolved.clinicaId = null;
+        resolved._pendClin = true;
+        resolved.origenResolucion.clinica = 'pendiente';
+      } else {
+        resolved.clinicaOk = false;
+        resolved.origenResolucion.clinica = 'pendiente';
+      }
     }
   } else {
     resolved.clinicaOk = false;
+    resolved.origenResolucion.clinica = 'pendiente';
   }
 
-  // Cirugía por contexto: clínica + tipo + cirugía
   const cirTxt = clean(n.cirugia || '');
   const tipoTxt = clean(n.tipoPaciente || '');
+
   if(cirTxt){
     const normClin = normalizeKey(clinTxt || '');
     const normTipo = normalizeKey(tipoTxt || '');
@@ -1143,31 +1193,51 @@ function resolveOneItem(n){
     resolved._cirKey = key;
 
     const mapped = state.maps.cirugias.get(key);
+
     if(mapped?.id){
+      const proc = state.catalogs.cirugiasById.get(mapped.id) || null;
+
       resolved.cirugiaId = mapped.id;
+      resolved.origenResolucion.cirugia = 'mapping';
+
+      if(proc){
+        const normProc = normalizeKey(proc.nombre || '');
+
+        if(normProc !== normCir && !normProc.includes(normCir) && !normCir.includes(normProc)){
+          resolved.cirugiaOk = false;
+          resolved._mappingSospechoso = true;
+          resolved.origenResolucion.cirugia = 'sospechoso';
+          resolved.alertasResolucion.push(
+            `Mapping sospechoso de cirugía: archivo "${cirTxt}" → catálogo "${proc.nombre}". Revisar.`
+          );
+        }
+      }
     } else {
       const found = state.catalogs.cirugiasByNorm.get(normCir);
-      if(found?.id) resolved.cirugiaId = found.id; // solo match exacto por nombre
-      else {
-        if(state.allowPend.cirugias.has(key)){
-          resolved.cirugiaOk = true;
-          resolved.cirugiaId = null;
-          resolved._pendCir = true;
-        } else {
-          resolved.cirugiaOk = false;
-        }
+
+      if(found?.id){
+        resolved.cirugiaId = found.id;
+        resolved.origenResolucion.cirugia = 'exacto';
+      } else if(state.allowPend.cirugias.has(key)){
+        resolved.cirugiaOk = true;
+        resolved.cirugiaId = null;
+        resolved._pendCir = true;
+        resolved.origenResolucion.cirugia = 'pendiente';
+      } else {
+        resolved.cirugiaOk = false;
+        resolved.origenResolucion.cirugia = 'pendiente';
       }
     }
   } else {
     resolved.cirugiaOk = false;
+    resolved.origenResolucion.cirugia = 'pendiente';
   }
 
-  // Ambulatorios placeholder
   resolved.ambOk = true;
   resolved.ambulatorioId = null;
 
-    // ✅ Profesionales: resolver por rol + nombre CSV
   const prof = (n.profesionales || {});
+
   const roles = [
     { role:'r_cirujano',     field:'cirujano',    ok:'cirujanoOk',    out:'cirujanoId' },
     { role:'r_anestesista',  field:'anestesista', ok:'anestesistaOk', out:'anestesistaId' },
@@ -1178,51 +1248,62 @@ function resolveOneItem(n){
 
   for(const r of roles){
     const nameCsv = clean(prof[r.field] || '');
+
     if(!nameCsv){
-      // si viene vacío, no lo consideramos pendiente (no bloquea)
       resolved[r.ok] = true;
       resolved[r.out] = null;
+      resolved.origenResolucion[r.field] = '';
       continue;
     }
 
     const key = profKey(r.role, nameCsv);
-
-    // 1) mapping manual guardado
     const mapped = state.maps.prof.get(key);
+
     if(mapped?.id){
+      const profMapeado = state.catalogs.profById.get(mapped.id) || null;
+
       resolved[r.out] = mapped.id;
       resolved[r.ok] = true;
+      resolved.origenResolucion[r.field] = 'mapping';
+
+      if(profMapeado){
+        const normCsv = normalizeProName(nameCsv);
+        const normCat = normalizeProName(profMapeado.nombre || '');
+
+        if(normCsv !== normCat){
+          resolved[r.ok] = false;
+          resolved._mappingSospechoso = true;
+          resolved.origenResolucion[r.field] = 'sospechoso';
+          resolved.alertasResolucion.push(
+            `Mapping sospechoso de profesional (${r.field}): archivo "${nameCsv}" → catálogo "${profMapeado.nombre}". Revisar.`
+          );
+        }
+      }
+
       continue;
     }
 
-    // 2) match inteligente (exacto / apellido / parcial con ranking)
-    const candidates = findProfesionalesCandidates(nameCsv);
-    
-    /*
-      ✅ REGLA NUEVA (ANTI-CRUCE):
-      - Auto-asignar SOLO si el match es EXACTO por nombre completo normalizado
-        y además es ÚNICO.
-      - Cualquier match parcial (apellido / tokens / ranking) => queda pendiente.
-    */
     const norm = normalizeProName(nameCsv);
     const exactList = state.catalogs.profByNorm.get(norm) || [];
-    
+
     if(exactList.length === 1){
       resolved[r.out] = exactList[0].id;
       resolved[r.ok] = true;
+      resolved.origenResolucion[r.field] = 'exacto';
     } else {
       const pendKey = profKey(r.role, nameCsv);
+
       if(state.allowPend.prof.has(pendKey)){
         resolved[r.ok] = true;
         resolved[r.out] = null;
         resolved[`_pend_${r.field}`] = true;
+        resolved.origenResolucion[r.field] = 'pendiente';
       } else {
-        // ✅ si NO hay match exacto único => pendiente para que el usuario elija
         resolved[r.ok] = false;
+        resolved.origenResolucion[r.field] = 'pendiente';
       }
     }
   }
-
 
   return resolved;
 }
@@ -2105,10 +2186,13 @@ async function confirmarImportacion(){
     state.pending.amb.length +
     state.pending.prof.length;
   
-  if(totalPend > 0){
+  const totalSospechosos = (state.stagedItems || []).filter(tieneMappingSospechoso).length;
+  
+  if(totalPend > 0 || totalSospechosos > 0){
     alert(
       `No se puede confirmar todavía.\n\n` +
-      `Hay ${totalPend} pendiente(s).\n\n` +
+      `Pendientes: ${totalPend}\n` +
+      `Mappings sospechosos: ${totalSospechosos}\n\n` +
       `Resuelve esos casos antes de confirmar.`
     );
     return;
@@ -3568,9 +3652,12 @@ async function saveOneItemPatch(it, patch, options = {}){
   // 1) Clínica
   if(sel.clinicaId){
     it.resolved = it.resolved || {};
+    it.resolved.origenResolucion = it.resolved.origenResolucion || {};
     it.resolved.clinicaId = sel.clinicaId;
     it.resolved.clinicaOk = true;
     it.resolved._pendClin = false;
+    it.resolved.origenResolucion.clinica = 'manual';
+    it.resolved._mappingSospechoso = false;
   }
 
   // 2) Cirugía
