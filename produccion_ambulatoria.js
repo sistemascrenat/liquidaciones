@@ -462,6 +462,22 @@ function buscarProfesional(texto) {
   return analizarBusquedaProfesional(texto)?.profesional || null;
 }
 
+function procedimientoForzadoPorTexto(texto) {
+  const t = normalizarTexto(texto);
+
+  if (
+    t.includes("CONSULTA BARIATRICA TELEMEDICINA") &&
+    (t.includes("ISAPRE") || t.includes("PARTICULAR"))
+  ) {
+    return procedimientos.find(p =>
+      p.id === "PA0076" ||
+      clean(p.codigo) === "PA0076"
+    ) || null;
+  }
+
+  return null;
+}
+
 function analizarBusquedaProcedimiento(texto) {
   const textoOriginal = clean(texto);
   const t = normalizarTexto(textoOriginal);
@@ -471,6 +487,15 @@ function analizarBusquedaProcedimiento(texto) {
       procedimiento: null,
       tipoMatch: "vacio",
       alerta: "Procedimiento vacío"
+    };
+  }
+
+  const forzado = procedimientoForzadoPorTexto(textoOriginal);
+  if (forzado) {
+    return {
+      procedimiento: forzado,
+      tipoMatch: "forzado",
+      alerta: null
     };
   }
 
@@ -3212,14 +3237,25 @@ window.sincronizarAmbulatoriosRetroactivo = async function({
       ""
     );
     
+    const procForzado = procedimientoForzadoPorTexto(
+      x.prestacion ||
+      x.dataReservo?.["Tratamiento"] ||
+      x.dataMK?.["D Artículo"] ||
+      x.procedimientoNombre ||
+      resolved.procedimientoNombre ||
+      ""
+    );
+    
     const procedimientoId = clean(
+      procForzado?.id ||
+      procForzado?.codigo ||
       x.procedimientoId ||
       x.ambulatorioId ||
       resolved.procedimientoId ||
       ""
     );
     
-    const procDoc = procedimientos.find(p =>
+    const procDoc = procForzado || procedimientos.find(p =>
       clean(p.id) === procedimientoId ||
       clean(p.codigo) === procedimientoId
     ) || null;
