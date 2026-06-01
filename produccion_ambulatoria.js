@@ -2338,6 +2338,52 @@ async function saveStagingToFirestore() {
 /* ======================
    LOAD STAGING
 ====================== */
+function sincronizarResolvedDesdeEspejos(reg) {
+  const procedimientoId = clean(
+    reg.procedimientoId ||
+    reg.ambulatorioId ||
+    reg.normalizado?.procedimientoId ||
+    reg.normalizado?.ambulatorioId ||
+    reg.resolved?.procedimientoId ||
+    ""
+  );
+
+  const profesionalId = clean(
+    reg.profesionalId ||
+    reg.rutProfesional ||
+    reg.normalizado?.profesionalId ||
+    reg.normalizado?.rutProfesional ||
+    reg.resolved?.profesionalId ||
+    ""
+  );
+
+  const proc = procedimientos.find(p =>
+    clean(p.id) === procedimientoId ||
+    clean(p.codigo) === procedimientoId
+  ) || null;
+
+  const prof = profesionales.find(p =>
+    clean(p.id) === profesionalId ||
+    clean(p.rutId) === profesionalId ||
+    clean(p.rut) === profesionalId
+  ) || null;
+
+  reg.resolved = {
+    ...(reg.resolved || {}),
+    profesionalId: profesionalId || reg.resolved?.profesionalId || null,
+    profesionalNombre: prof
+      ? nombreProfesionalCatalogo(prof)
+      : (reg.resolved?.profesionalNombre || reg.profesionalDetectado || null),
+
+    procedimientoId: procedimientoId || reg.resolved?.procedimientoId || null,
+    procedimientoNombre: proc
+      ? nombreProcedimientoCatalogo(proc)
+      : (reg.resolved?.procedimientoNombre || reg.procedimientoDetectado || null)
+  };
+
+  reg.profesionalDetectado = reg.resolved.profesionalNombre;
+  reg.procedimientoDetectado = reg.resolved.procedimientoNombre;
+}
 
 async function loadStagingFromFirestore(importId) {
   if (!importId) {
@@ -2396,6 +2442,16 @@ async function loadStagingFromFirestore(importId) {
       prestacion: x.prestacion || "",
       procedimientoNorm: x.procedimientoNorm || "",
       procedimientoDetectado: x.procedimientoDetectado || null,
+      
+      // ✅ Campos espejo guardados para que el modal use lo mismo que tabla/liquidación
+      profesionalId: x.profesionalId || null,
+      rutProfesional: x.rutProfesional || null,
+      procedimientoId: x.procedimientoId || null,
+      ambulatorioId: x.ambulatorioId || null,
+      procedimientoNombre: x.procedimientoNombre || null,
+      profesionalNombre: x.profesionalNombre || null,
+      normalizado: x.normalizado || null,
+      
       valor: Number(x.valor || 0) || 0,
       dataReservo: x.dataReservo || null,
       dataMK: x.dataMK || null,
@@ -2440,6 +2496,10 @@ async function loadStagingFromFirestore(importId) {
   console.log("RESUMEN IMPORT CARGADO:", resumenDebug);
 
   for (const it of consolidado) {
+    // ✅ Primero fuerza resolved desde los espejos corregidos
+    sincronizarResolvedDesdeEspejos(it);
+  
+    // ✅ Luego recalcula estado/alertas usando resolved ya correcto
     recomputeItemFromCurrentValues(it);
 
     // ✅ Si el documento padre quedó "staged" pero los items ya tienen confirmados,
