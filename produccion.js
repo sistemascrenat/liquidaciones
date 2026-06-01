@@ -357,7 +357,9 @@ const state = {
   // ✅ Cola de cambios (modo “Guardar todo”):
   // key = `${pacienteId}||${timeId}` o `STAGING||${idx}`
   // value = { it, patch, queuedAt }
-  dirtyEdits: new Map()
+  dirtyEdits: new Map(),
+  
+  recordarMappings: false
 };
 
 /* =========================
@@ -398,7 +400,7 @@ function setPills(){
   $('hintResolver').textContent = (state.status === 'staged')
     ? (total === 0
         ? '✅ Todo resuelto. Puedes confirmar.'
-        : '⚠️ Hay pendientes. Puedes confirmar igual (quedarán marcados como PENDIENTE) o resolver ahora.')
+        : '⚠️ Hay pendientes. Debes resolverlos antes de confirmar.')
     : 'Cargar CSV → resolver faltantes (opcional) → confirmar.';
 }
 
@@ -417,7 +419,7 @@ function setButtons(){
   
   // ✅ Confirmar SIEMPRE habilitado mientras haya staging.
   // (Se confirmará con pendientes marcadas en producción)
-  $('btnConfirmar').disabled = !staged;
+  $('btnConfirmar').disabled = !staged || totalPend > 0;
   
   $('btnAnular').disabled = !(staged || confirmed);
 }
@@ -1839,18 +1841,22 @@ function paintResolverModal(){
 async function learnMappingsFromItemDecision(patch){
   if(!patch || !patch._selectedIds || !patch._originalCsv) return;
 
+  // ✅ Solo aprende mappings si el usuario lo pidió explícitamente.
+  // Si no, la corrección afecta solo este ítem.
+  if(state.recordarMappings !== true){
+    return;
+  }
+
   const sel = patch._selectedIds;
   const orig = patch._originalCsv;
 
   const jobs = [];
 
-  // ---- Clínica ----
   if(sel.clinicaId && clean(orig.clinica)){
     const keyClin = normalizeKey(orig.clinica);
     jobs.push(persistMapping(docMapClinicas, keyClin, sel.clinicaId));
   }
 
-  // ---- Cirugía por contexto (Clínica + Tipo + Cirugía) ----
   if(sel.cirugiaId && clean(orig.cirugia)){
     const keyCir = cirKey(
       normalizeKey(orig.clinica || ''),
@@ -1860,7 +1866,6 @@ async function learnMappingsFromItemDecision(patch){
     jobs.push(persistMapping(docMapCirugias, keyCir, sel.cirugiaId));
   }
 
-  // ---- Profesionales por rol ----
   const roles = [
     { role:'r_cirujano',    name: orig.profesionales?.cirujano,    id: sel.profIds?.cirujanoId },
     { role:'r_anestesista', name: orig.profesionales?.anestesista, id: sel.profIds?.anestesistaId },
@@ -2101,8 +2106,12 @@ async function confirmarImportacion(){
     state.pending.prof.length;
   
   if(totalPend > 0){
-    // ✅ ahora se permite confirmar
-    toast(`Confirmando con ${totalPend} pendientes (quedarán marcados).`);
+    alert(
+      `No se puede confirmar todavía.\n\n` +
+      `Hay ${totalPend} pendiente(s).\n\n` +
+      `Resuelve esos casos antes de confirmar.`
+    );
+    return;
   }
 
   const importId = state.importId;
@@ -3264,7 +3273,19 @@ function openItemModal(it){
       </div>
     </div>
 
-    <!-- ✅ NUEVO: botón para abrir modal avanzado -->
+    <div style="margin-top:12px; padding:10px; border:1px solid #fde68a; background:#fffbeb; border-radius:12px;">
+      <label style="display:flex; gap:8px; align-items:flex-start; font-size:12px; font-weight:800;">
+        <input id="chkRecordarMapping" type="checkbox">
+        <span>
+          Recordar estas asociaciones para futuras cargas.
+          <br>
+          <span class="muted">
+            Úsalo solo si estás seguro. Si no lo marcas, este cambio afecta solo este ítem.
+          </span>
+        </span>
+      </label>
+    </div>
+
     <div style="display:flex; justify-content:flex-end; margin-top:12px;">
       <button id="btnMoreInfo" type="button" class="btn soft">Editar más información</button>
     </div>
@@ -3499,8 +3520,10 @@ function collectItemPatchFromModal(){
 
 
 async function saveOneItemPatch(it, patch, options = {}){
-  // ✅ 0) “Aprender” mapping desde este ítem (para futuras importaciones)
+  // ✅ 0) Aprender mapping SOLO si el usuario marcó el checkbox.
+  state.recordarMappings = $('chkRecordarMapping')?.checked === true;
   await learnMappingsFromItemDecision(patch);
+  state.recordarMappings = false;
 
   // 1) aplica al staging en memoria
   it.normalizado = it.normalizado || {};
