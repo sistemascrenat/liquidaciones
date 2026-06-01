@@ -1631,6 +1631,9 @@ function calcularDesglosePagos(agg){
   const descuentoCLP = Number(agg?.ajustes?.descuentoCLP || 0) || 0;
   const descuentosManualesCLP = Number(agg?.ajustes?.descuentosManualesCLP || 0) || 0;
   const bonoCLP = Number(agg?.ajustes?.bonoCLP || 0) || 0;
+  const descuentosManuales = Array.isArray(agg?.ajustes?.descuentosManuales)
+  ? agg.ajustes.descuentosManuales
+  : [];
 
   const totalAPagar = Number(
     agg?.ajustes?.totalAPagar ??
@@ -2979,6 +2982,17 @@ function openDetalle(agg){
       `);
     }
 
+    for (const d of descuentosManuales) {
+      ajustesHtml.push(`
+        <tr>
+          <td>Descuento manual</td>
+          <td class="mono">1</td>
+          <td class="mono">-${escapeHtml(clp(d.montoCLP || 0))}</td>
+          <td class="mini muted">${escapeHtml(d.asunto || '')}</td>
+        </tr>
+      `);
+    }
+
     if (bonoCLP > 0) {
       const tramoIdx = Number(agg?.ajustes?.bonoTramoIndex || 0) || 0;
       const tramo = agg?.ajustes?.bonoTramo || null;
@@ -3011,8 +3025,8 @@ function openDetalle(agg){
             <div><b>${escapeHtml(clp(totalProcedimientos))}</b></div>
           </div>
           <div class="miniCard">
-            <div class="mini muted">Descuento</div>
-            <div><b>${escapeHtml(clp(descuentoCLP))}</b></div>
+            <div class="mini muted">Descuentos</div>
+            <div><b>${escapeHtml(clp(descuentoCLP + descuentosManualesCLP))}</b></div>
           </div>
           <div class="miniCard">
             <div class="mini muted">Bono</div>
