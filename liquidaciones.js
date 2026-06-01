@@ -2190,7 +2190,8 @@ function getHonorarioFromTarifa(procDoc, clinicaId, tipoPaciente, roleId){
 // Helper local: extrae PC0001/PC0002 etc incluso si viene mezclado en texto
 function extractPC(v=''){
   const s = (v ?? '').toString().toUpperCase();
-  const m = s.match(/PC\d{3,6}/);   // busca PC + 3..6 dígitos dentro del texto
+  // Soporta cirugías PC0001 y ambulatorios PA0001
+  const m = s.match(/P[AC]\d{3,6}/);
   return m ? m[0] : '';
 }
 
@@ -2390,7 +2391,7 @@ function buildLiquidaciones(){
     
     const normPC = extractPC(procIdFromNorm);
     
-    // 4) IDs/códigos desde resolución manual (resolved/selected)
+    // 4) IDs/códigos/nombres desde resolución manual (resolved/selected)
     const resolvedObj = (x.resolved && typeof x.resolved === 'object') ? x.resolved : {};
     const selObj = (x._selectedIds && typeof x._selectedIds === 'object') ? x._selectedIds : {};
     
@@ -2400,10 +2401,8 @@ function buildLiquidaciones(){
       resolvedObj.cirugiaId ||
       resolvedObj.ambulatorioId ||
       resolvedObj.codigoProcedimiento ||
-      resolvedObj.procedimiento ||
       ''
     );
-    const resolvedPC = extractPC(resolvedProcAny);
     
     const selectedProcAny = cleanReminder(
       selObj.procedimientoId ||
@@ -2411,28 +2410,50 @@ function buildLiquidaciones(){
       selObj.cirugiaId ||
       selObj.ambulatorioId ||
       selObj.codigoProcedimiento ||
-      selObj.procedimiento ||
       ''
     );
-    const selectedPC = extractPC(selectedProcAny);
     
-    // 5) Nombre (fallback) desde x / normalizado / raw
+    const resolvedProcName = cleanReminder(
+      resolvedObj.procedimientoNombre ||
+      resolvedObj.cirugiaNombre ||
+      resolvedObj.procedimiento ||
+      resolvedObj.cirugia ||
+      ''
+    );
+    
+    const selectedProcName = cleanReminder(
+      selObj.procedimientoNombre ||
+      selObj.cirugiaNombre ||
+      selObj.procedimiento ||
+      selObj.cirugia ||
+      ''
+    );
+    
+    const resolvedPC = extractPC(resolvedProcAny || resolvedProcName);
+    const selectedPC = extractPC(selectedProcAny || selectedProcName);
+    
+    // 5) Nombre: prioridad absoluta al procedimiento resuelto
     const cirugiaNameRaw = toUpperSafe(cleanReminder(
-      x.cirugia ||
-      x.cirugiaNombre ||
-      x.nombreCirugia ||
+      resolvedProcName ||
+      selectedProcName ||
+      norm.procedimientoNombre ||
+      norm.cirugiaNombre ||
+      norm.procedimiento ||
+      norm.cirugia ||
       x.procedimientoNombre ||
       x.nombreProcedimiento ||
-      norm.cirugia ||
-      norm.cirugiaNombre ||
-      norm.procedimientoNombre ||
-      rawProcField // si venía texto en Procedimiento, úsalo como nombre
+      x.cirugiaNombre ||
+      x.nombreCirugia ||
+      x.procedimiento ||
+      x.cirugia ||
+      rawProcField
     ));
     
-    // ✅ Regla de oro:
-    // - PRIORIDAD 1: código PC
-    // - PRIORIDAD 2: id directo
-    // - PRIORIDAD 3: nombre
+    // Prioridad:
+    // 1. Código resuelto/manual
+    // 2. ID resuelto/manual
+    // 3. Código normalizado/item/raw
+    // 4. Nombre resuelto/manual
     const procCodeCandidate =
       resolvedPC ||
       selectedPC ||
@@ -2448,19 +2469,18 @@ function buildLiquidaciones(){
       procIdFromX ||
       '';
     
-    // ✅ Lookup robusto
     const procDoc =
       (procCodeCandidate && state.procedimientosByCodigo?.get(procCodeCandidate)) ||
       (procIdCandidate && state.procedimientosById.get(String(procIdCandidate).trim())) ||
+      (procIdCandidate && state.procedimientosByCodigo?.get(String(procIdCandidate).trim().toUpperCase())) ||
       (cirugiaNameRaw && state.procedimientosByName.get(normalize(cirugiaNameRaw))) ||
       null;
     
-    // ✅ Para mostrar en UI/export:
     const procLabel = procDoc?.nombre || cirugiaNameRaw || '(Sin procedimiento)';
     const procRealId = (procDoc?.codigo || procDoc?.id || procCodeCandidate || procIdCandidate || '').toString();
     
     const procedimientoExists = !!procDoc;
-    const procedimientoTipo = (procDoc?.tipo || '').toLowerCase().trim(); // "cirugia" | ...
+    const procedimientoTipo = (procDoc?.tipo || '').toLowerCase().trim();
 
 
     // Tipo paciente
