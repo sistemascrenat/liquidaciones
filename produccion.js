@@ -3624,15 +3624,19 @@ async function saveOneItemPatch(it, patch, options = {}){
 
     const refItem = doc(db, 'produccion', YYYY, 'meses', MM, 'pacientes', pacienteId, 'items', timeId);
 
+    // ✅ Normalizado final coherente con lo resuelto.
+    // Esto hace que tabla, modal y liquidaciones lean lo mismo.
+    const nFinal = mergeResolvedIntoNormalizado(n, it.resolved, it.raw);
+    
     await setDoc(refItem, {
       raw: it.raw,
-      normalizado: it.normalizado,
-
-      clinica: n.clinica ?? null,
-      cirugia: n.cirugia ?? null,
-      tipoPaciente: n.tipoPaciente ?? null,
-      profesionales: n.profesionales || {},
-
+      normalizado: nFinal,
+    
+      clinica: nFinal.clinica ?? null,
+      cirugia: nFinal.cirugia ?? null,
+      tipoPaciente: nFinal.tipoPaciente ?? null,
+      profesionales: nFinal.profesionales || {},
+    
       clinicaId: it.resolved?.clinicaId ?? null,
       cirugiaId: it.resolved?.cirugiaId ?? null,
 
