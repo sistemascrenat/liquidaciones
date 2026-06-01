@@ -818,6 +818,155 @@ async function reloadAndPaint() {
   }
 }
 
+window.sincronizarLiquidacionesRetroactivo = async function({
+  ano,
+  mesNum,
+  dryRun = true
+} = {}) {
+  if (!ano || !mesNum) {
+    throw new Error('Debes indicar ano y mesNum. Ej: { ano: 2026, mesNum: 5, dryRun: true }');
+  }
+
+  const qy = query(
+    collectionGroup(db, PROD_ITEMS_GROUP),
+    where('ano', '==', Number(ano)),
+    where('mesNum', '==', Number(mesNum)),
+    where('confirmado', '==', true)
+  );
+
+  const snap = await getDocs(qy);
+
+  let revisados = 0;
+  let paraActualizar = 0;
+  let actualizados = 0;
+
+  for (const d of snap.docs) {
+    revisados++;
+
+    const x = d.data() || {};
+    const estado = normalize(x.estado || '');
+    if (estado === 'anulada' || estado === 'anulado' || estado === 'cancelada') continue;
+
+    const resolved = x.resolved && typeof x.resolved === 'object' ? x.resolved : {};
+    const selected = x._selectedIds && typeof x._selectedIds === 'object' ? x._selectedIds : {};
+
+    const procedimientoId = cleanReminder(
+      resolved.procedimientoId ||
+      resolved.cirugiaId ||
+      selected.procedimientoId ||
+      selected.cirugiaId ||
+      x.procedimientoId ||
+      x.cirugiaId ||
+      ''
+    );
+
+    const clinicaId = cleanReminder(
+      resolved.clinicaId ||
+      selected.clinicaId ||
+      x.clinicaId ||
+      ''
+    );
+
+    const tipoPaciente = cleanReminder(
+      resolved.tipoPaciente ||
+      x.tipoPaciente ||
+      ''
+    );
+
+    const profIds = {
+      ...(x.profesionalesId || {}),
+      ...(selected.profIds || {}),
+      ...(resolved.profIds || {})
+    };
+
+    const necesita =
+      procedimientoId &&
+      (
+        x.procedimientoId !== procedimientoId ||
+        x.cirugiaId !== procedimientoId ||
+        x.normalizado?.procedimientoId !== procedimientoId ||
+        x.normalizado?.cirugiaId !== procedimientoId ||
+        x._selectedIds?.procedimientoId !== procedimientoId ||
+        x._selectedIds?.cirugiaId !== procedimientoId
+      );
+
+    if (!necesita) continue;
+
+    paraActualizar++;
+
+    console.log('🟡 A sincronizar:', {
+      path: d.ref.path,
+      paciente: x.nombrePaciente || x.normalizado?.nombrePaciente || x.raw?.['Nombre Paciente'] || '',
+      antes: {
+        procedimientoId: x.procedimientoId,
+        cirugiaId: x.cirugiaId,
+        normalizadoProcedimientoId: x.normalizado?.procedimientoId,
+        normalizadoCirugiaId: x.normalizado?.cirugiaId
+      },
+      despues: procedimientoId
+    });
+
+    if (!dryRun) {
+      await updateDoc(d.ref, {
+        clinicaId,
+        procedimientoId,
+        cirugiaId: procedimientoId,
+        tipoPaciente,
+
+        normalizado: {
+          ...(x.normalizado || {}),
+          clinicaId,
+          procedimientoId,
+          cirugiaId: procedimientoId,
+          tipoPaciente,
+          profesionalesId: profIds
+        },
+
+        _selectedIds: {
+          ...(x._selectedIds || {}),
+          clinicaId,
+          procedimientoId,
+          cirugiaId: procedimientoId,
+          profIds
+        },
+
+        profesionalesId: profIds,
+
+        resolved: {
+          ...(x.resolved || {}),
+          clinicaId,
+          procedimientoId,
+          cirugiaId: procedimientoId,
+          tipoPaciente,
+          profIds,
+          cirugiaOk: true,
+          clinicaOk: true,
+          revisadoLiquidacion: true,
+          revisadoLiquidacionPor: state.user?.email || '',
+          revisadoLiquidacionEl: serverTimestamp()
+        },
+
+        actualizadoLiquidacionPor: state.user?.email || '',
+        actualizadoLiquidacionEl: serverTimestamp()
+      });
+
+      actualizados++;
+    }
+  }
+
+  const resumen = {
+    modo: dryRun ? 'PRUEBA / NO GUARDA' : 'REAL / GUARDADO',
+    ano,
+    mesNum,
+    revisados,
+    paraActualizar,
+    actualizados
+  };
+
+  console.log('✅ RESUMEN SINCRONIZACIÓN RETROACTIVA:', resumen);
+  return resumen;
+};
+
 /* =========================
    Main
 ========================= */
