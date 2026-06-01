@@ -817,7 +817,7 @@ async function generarPDFLiquidacionProfesional(agg){
   }
   for (const d of descuentosManuales) {
     ajustesRows.push({
-      item: `DESCUENTO MANUAL - ${cleanReminder(d.asunto || '')}`.trim(),
+      item: `DESCUENTO - ${cleanReminder(d.asunto || '')}`.trim(),
       cant: 1,
       sub: -(Number(d.montoCLP || 0) || 0)
     });
