@@ -3128,8 +3128,10 @@ window.sincronizarAmbulatoriosRetroactivo = async function({
 
   let revisados = 0;
   let deAmbulatoria = 0;
-  let paraActualizar = 0;
-  let actualizados = 0;
+  let paraActualizarProduccion = 0;
+  let paraActualizarImport = 0;
+  let actualizadosProduccion = 0;
+  let actualizadosImport = 0;
 
   for (const d of snap.docs) {
     const path = d.ref.path || "";
@@ -3139,12 +3141,12 @@ window.sincronizarAmbulatoriosRetroactivo = async function({
     deAmbulatoria++;
 
     const x = d.data() || {};
-
     const resolved = x.resolved && typeof x.resolved === "object" ? x.resolved : {};
 
     const profesionalId = clean(
       resolved.profesionalId ||
       x.profesionalId ||
+      x.rutProfesional ||
       ""
     );
 
@@ -3157,7 +3159,32 @@ window.sincronizarAmbulatoriosRetroactivo = async function({
 
     if (!profesionalId && !procedimientoId) continue;
 
-    const necesita =
+    const payload = {
+      profesionalId,
+      rutProfesional: profesionalId,
+
+      procedimientoId,
+      ambulatorioId: procedimientoId,
+
+      normalizado: {
+        ...(x.normalizado || {}),
+        profesionalId,
+        rutProfesional: profesionalId,
+        procedimientoId,
+        ambulatorioId: procedimientoId
+      },
+
+      resolved: {
+        ...(x.resolved || {}),
+        profesionalId,
+        procedimientoId
+      },
+
+      actualizadoEl: serverTimestamp(),
+      actualizadoPor: stateImport.user?.email || "script-sincronizar-ambulatorios"
+    };
+
+    const necesitaProduccion =
       x.profesionalId !== profesionalId ||
       x.rutProfesional !== profesionalId ||
       x.procedimientoId !== procedimientoId ||
@@ -3166,84 +3193,49 @@ window.sincronizarAmbulatoriosRetroactivo = async function({
       x.normalizado?.ambulatorioId !== procedimientoId ||
       x.normalizado?.profesionalId !== profesionalId;
 
-    if (!necesita) continue;
+    if (necesitaProduccion) {
+      paraActualizarProduccion++;
 
-    paraActualizar++;
+      console.log("🟡 Producción final a sincronizar:", {
+        path,
+        paciente: x.paciente || x.pacienteNorm || "",
+        profesionalAntes: x.profesionalId || x.rutProfesional || "",
+        profesionalDespues: profesionalId,
+        procedimientoAntes: x.procedimientoId || x.ambulatorioId || "",
+        procedimientoDespues: procedimientoId
+      });
 
-    console.log("🟡 Ambulatorio a sincronizar:", {
-      path,
-      paciente: x.paciente || x.pacienteNorm || "",
-      profesionalAntes: x.profesionalId || x.rutProfesional || "",
-      profesionalDespues: profesionalId,
-      procedimientoAntes: x.procedimientoId || x.ambulatorioId || "",
-      procedimientoDespues: procedimientoId
-    });
-
-    if (!dryRun) {
-      // ✅ 1) Actualiza producción final
-      await setDoc(d.ref, {
-        profesionalId,
-        rutProfesional: profesionalId,
-
-        procedimientoId,
-        ambulatorioId: procedimientoId,
-
-        normalizado: {
-          ...(x.normalizado || {}),
-          profesionalId,
-          rutProfesional: profesionalId,
-          procedimientoId,
-          ambulatorioId: procedimientoId
-        },
-
-        resolved: {
-          ...(x.resolved || {}),
-          profesionalId,
-          procedimientoId
-        },
-
-        actualizadoEl: serverTimestamp(),
-        actualizadoPor: stateImport.user?.email || "script-sincronizar-ambulatorios"
-      }, { merge: true });
-
-      // ✅ 2) Actualiza también el import/staging original
-      // Esto es lo que lee la tabla y el modal de Producción Ambulatoria.
-      if (x.importId && x.itemId) {
-        const refImportItem = doc(
-          db,
-          "produccion_ambulatoria_imports",
-          x.importId,
-          "items",
-          x.itemId
-        );
-
-        await setDoc(refImportItem, {
-          profesionalId,
-          rutProfesional: profesionalId,
-
-          procedimientoId,
-          ambulatorioId: procedimientoId,
-
-          normalizado: {
-            ...(x.normalizado || {}),
-            profesionalId,
-            rutProfesional: profesionalId,
-            procedimientoId,
-            ambulatorioId: procedimientoId
-          },
-
-          resolved: {
-            ...(x.resolved || {}),
-            profesionalId,
-            procedimientoId
-          },
-
-          actualizadoEl: serverTimestamp(),
-          actualizadoPor: stateImport.user?.email || "script-sincronizar-ambulatorios"
-        }, { merge: true });
+      if (!dryRun) {
+        await setDoc(d.ref, payload, { merge: true });
+        actualizadosProduccion++;
       }
+    }
 
-      actualizados++;
+    // ✅ IMPORTANTE:
+    // Esto se ejecuta aunque producción final ya esté OK.
+    // Sirve para corregir tabla/modal de Producción Ambulatoria.
+    if (x.importId && x.itemId) {
+      paraActualizarImport++;
+
+      const refImportItem = doc(
+        db,
+        "produccion_ambulatoria_imports",
+        x.importId,
+        "items",
+        x.itemId
+      );
+
+      console.log("🟢 Import/staging a sincronizar:", {
+        importId: x.importId,
+        itemId: x.itemId,
+        profesionalId,
+        procedimientoId
+      });
+
+      if (!dryRun) {
+        await setDoc(refImportItem, payload, { merge: true });
+        actualizadosImport++;
+      }
     }
   }
 
@@ -3253,8 +3245,10 @@ window.sincronizarAmbulatoriosRetroactivo = async function({
     mesNum,
     revisados,
     deAmbulatoria,
-    paraActualizar,
-    actualizados
+    paraActualizarProduccion,
+    actualizadosProduccion,
+    paraActualizarImport,
+    actualizadosImport
   };
 
   console.log("✅ RESUMEN SINCRONIZACIÓN AMBULATORIA:", resumen);
