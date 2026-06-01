@@ -865,6 +865,9 @@ function aplicarManualOverrides(items) {
       it.resolved.procedimientoId = p?.id || null;
       it.resolved.procedimientoNombre = p ? nombreProcedimientoCatalogo(p) : null;
       it.resolved.confirmadoManualProcedimiento = !!ov.procedimientoId;
+      if (ov.procedimientoId) {
+        it.resolved.autoProcedimientoTipoMatch = "manual";
+      }
     }
 
     it.profesionalDetectado = it.resolved.profesionalNombre;
