@@ -603,18 +603,81 @@ async function saveRow(row, tr) {
     const next = readRowFromDOM(row, tr);
     const resolved = next.data.resolved || {};
 
+    const procedimientoId = resolved.procedimientoId || '';
+    const clinicaId = resolved.clinicaId || '';
+    const tipoPaciente = resolved.tipoPaciente || '';
+
     await updateDoc(row.ref, {
+      // ✅ Fuente principal para liquidaciones
       resolved: {
         ...resolved,
         revisadoLiquidacion: isRowComplete(next),
         revisadoLiquidacionPor: state.user?.email || '',
         revisadoLiquidacionEl: serverTimestamp()
       },
+
+      // ✅ Campos espejo para que modal / producción / liquidaciones lean lo mismo
+      clinicaId,
+      procedimientoId,
+      cirugiaId: procedimientoId,
+      tipoPaciente,
+
+      normalizado: {
+        ...(next.data.normalizado || {}),
+        clinicaId,
+        procedimientoId,
+        cirugiaId: procedimientoId,
+        tipoPaciente
+      },
+
+      _selectedIds: {
+        ...(next.data._selectedIds || {}),
+        clinicaId,
+        procedimientoId,
+        cirugiaId: procedimientoId,
+        profIds: {
+          ...(next.data._selectedIds?.profIds || {}),
+          ...(resolved.profIds || {})
+        }
+      },
+
+      profesionalesId: {
+        ...(next.data.profesionalesId || {}),
+        ...(resolved.profIds || {})
+      },
+
       actualizadoLiquidacionPor: state.user?.email || '',
       actualizadoLiquidacionEl: serverTimestamp()
     });
 
-    row.data = next.data;
+    row.data = {
+      ...next.data,
+      clinicaId,
+      procedimientoId,
+      cirugiaId: procedimientoId,
+      tipoPaciente,
+      normalizado: {
+        ...(next.data.normalizado || {}),
+        clinicaId,
+        procedimientoId,
+        cirugiaId: procedimientoId,
+        tipoPaciente
+      },
+      _selectedIds: {
+        ...(next.data._selectedIds || {}),
+        clinicaId,
+        procedimientoId,
+        cirugiaId: procedimientoId,
+        profIds: {
+          ...(next.data._selectedIds?.profIds || {}),
+          ...(resolved.profIds || {})
+        }
+      },
+      profesionalesId: {
+        ...(next.data.profesionalesId || {}),
+        ...(resolved.profIds || {})
+      }
+    };
 
     state.dirty.delete(row.id);
     tr.classList.remove('rowDirty');
