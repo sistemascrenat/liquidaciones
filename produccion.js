@@ -4090,6 +4090,156 @@ window.corregirArsenaleraPorRuts = async function({
   return resumen;
 };
 
+window.sincronizarCirugiasResueltasProduccion = async function({
+  ano,
+  mesNum,
+  dryRun = true
+} = {}) {
+  if (!ano || !mesNum) {
+    throw new Error('Debes indicar ano y mesNum. Ej: { ano: 2026, mesNum: 5, dryRun: true }');
+  }
+
+  const cg = collectionGroup(db, 'items');
+
+  const qy = query(
+    cg,
+    where('ano', '==', Number(ano)),
+    where('mesNum', '==', Number(mesNum)),
+    where('estado', '==', 'activa')
+  );
+
+  const snap = await getDocs(qy);
+
+  let revisados = 0;
+  let conIdResuelto = 0;
+  let paraActualizar = 0;
+  let actualizados = 0;
+
+  let batch = writeBatch(db);
+  let batchCount = 0;
+
+  for (const d of snap.docs) {
+    revisados++;
+
+    const x = d.data() || {};
+
+    const idResuelto = clean(
+      x.resolved?.cirugiaId ||
+      x._selectedIds?.cirugiaId ||
+      x.normalizado?.cirugiaId ||
+      x.cirugiaId ||
+      ''
+    );
+
+    if (!idResuelto) continue;
+    conIdResuelto++;
+
+    const procSnap = await getDoc(doc(db, 'procedimientos', idResuelto));
+    if (!procSnap.exists()) {
+      console.warn('⚠️ Procedimiento no existe:', {
+        path: d.ref.path,
+        idResuelto
+      });
+      continue;
+    }
+
+    const proc = procSnap.data() || {};
+    const nombreProc = clean(proc.nombre || '');
+    const codigoProc = clean(proc.codigo || idResuelto);
+
+    if (!nombreProc) continue;
+
+    const cirugiaActual = clean(
+      x.cirugia ||
+      x.normalizado?.cirugia ||
+      x.raw?.['Cirugía'] ||
+      ''
+    );
+
+    const yaEstaIgual =
+      clean(x.cirugiaId) === idResuelto &&
+      clean(x.normalizado?.cirugiaId) === idResuelto &&
+      clean(x.normalizado?.procedimientoId) === idResuelto &&
+      normalizeKey(cirugiaActual) === normalizeKey(nombreProc);
+
+    if (yaEstaIgual) continue;
+
+    paraActualizar++;
+
+    console.log('🟡 Item a sincronizar:', {
+      path: d.ref.path,
+      paciente: x.nombrePaciente || x.normalizado?.nombrePaciente || x.raw?.['Nombre Paciente'] || '',
+      antes: cirugiaActual,
+      despues: nombreProc,
+      idResuelto,
+      codigoProc
+    });
+
+    if (!dryRun) {
+      batch.set(d.ref, {
+        cirugia: nombreProc,
+        cirugiaId: idResuelto,
+        procedimientoId: idResuelto,
+        procedimientoCodigo: codigoProc,
+
+        normalizado: {
+          ...(x.normalizado || {}),
+          cirugia: nombreProc,
+          cirugiaId: idResuelto,
+          procedimientoId: idResuelto,
+          procedimientoCodigo: codigoProc
+        },
+
+        resolved: {
+          ...(x.resolved || {}),
+          cirugiaId: idResuelto,
+          cirugiaOk: true,
+          _pendCir: false
+        },
+
+        _selectedIds: {
+          ...(x._selectedIds || {}),
+          cirugiaId: idResuelto
+        },
+
+        raw: {
+          ...(x.raw || {}),
+          'Cirugía': nombreProc
+        },
+
+        actualizadoEl: serverTimestamp(),
+        actualizadoPor: state.user?.email || 'script-sincronizar-cirugias'
+      }, { merge: true });
+
+      batchCount++;
+      actualizados++;
+
+      if (batchCount >= 400) {
+        await batch.commit();
+        batch = writeBatch(db);
+        batchCount = 0;
+      }
+    }
+  }
+
+  if (!dryRun && batchCount > 0) {
+    await batch.commit();
+  }
+
+  const resumen = {
+    modo: dryRun ? 'PRUEBA / NO GUARDA' : 'REAL / GUARDADO',
+    ano,
+    mesNum,
+    revisados,
+    conIdResuelto,
+    paraActualizar,
+    actualizados
+  };
+
+  console.log('✅ RESUMEN SINCRONIZACIÓN CIRUGÍAS:', resumen);
+  return resumen;
+};
+
 /* =========================
    Boot
 ========================= */
