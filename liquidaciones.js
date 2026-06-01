@@ -1629,8 +1629,13 @@ function calcularDesglosePagos(agg){
 
   const totalProcedimientos = Number(agg?.ajustes?.totalProcedimientos ?? agg?.total ?? 0) || 0;
   const descuentoCLP = Number(agg?.ajustes?.descuentoCLP || 0) || 0;
+  const descuentosManualesCLP = Number(agg?.ajustes?.descuentosManualesCLP || 0) || 0;
   const bonoCLP = Number(agg?.ajustes?.bonoCLP || 0) || 0;
-  const totalAPagar = Number(agg?.ajustes?.totalAPagar ?? (totalProcedimientos - descuentoCLP + bonoCLP)) || 0;
+
+  const totalAPagar = Number(
+    agg?.ajustes?.totalAPagar ??
+    (totalProcedimientos - descuentoCLP - descuentosManualesCLP + bonoCLP)
+  ) || 0;
 
   const baseDia2 = lines.reduce((acc, l) => {
     const tp = String(l?.tipoPaciente || '').toLowerCase().trim();
@@ -2947,13 +2952,13 @@ function openDetalle(agg){
   const descuentoCLP = Number(agg?.ajustes?.descuentoCLP || 0) || 0;
   const descuentosManualesCLP = Number(agg?.ajustes?.descuentosManualesCLP || 0) || 0;
   const bonoCLP = Number(agg?.ajustes?.bonoCLP || 0) || 0;
+  const cirugiasComoPrincipal = Number(agg?.ajustes?.cirugiasComoPrincipal || 0) || 0;
+  const ufValorCLP = Number(agg?.ajustes?.ufValorCLP || 0) || 0;
   
   const totalAPagar = Number(
     agg?.ajustes?.totalAPagar ??
     (totalProcedimientos - descuentoCLP - descuentosManualesCLP + bonoCLP)
   ) || 0;
-  const ufValorCLP = Number(agg?.ajustes?.ufValorCLP || 0) || 0;
-  const totalAPagar = Number(agg?.ajustes?.totalAPagar ?? agg?.total ?? 0) || 0;
 
   const desglose = calcularDesglosePagos(agg);
 
