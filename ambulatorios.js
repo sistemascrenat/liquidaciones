@@ -845,6 +845,21 @@ function exportXLSX(){
   toast('XLSX exportado');
 }
 
+function setImporting(isImporting, msg=''){
+  const box = $('importStatus');
+
+  if(box){
+    box.style.display = isImporting ? 'block' : 'none';
+    box.textContent = msg || '⏳ Importando XLSX... no cierres ni actualices esta página.';
+  }
+
+  if($('btnImportar')) $('btnImportar').disabled = isImporting;
+  if($('btnCrear')) $('btnCrear').disabled = isImporting;
+  if($('btnExportar')) $('btnExportar').disabled = isImporting;
+  if($('btnEliminarSeleccionados')) $('btnEliminarSeleccionados').disabled = isImporting;
+  if($('btnArchivarSeleccionados')) $('btnArchivarSeleccionados').disabled = isImporting;
+}
+
 async function importXLSX(file){
   const buffer = await file.arrayBuffer();
   const wb = XLSX.read(buffer, { type:'array' });
@@ -998,7 +1013,16 @@ requireAuth({
       const file = e.target.files?.[0];
       e.target.value = '';
       if(!file) return;
-      await importXLSX(file);
+    
+      try{
+        setImporting(true, '⏳ Importando XLSX... no cierres ni actualices esta página.');
+        await importXLSX(file);
+      }catch(err){
+        console.error('Error importando XLSX:', err);
+        toast('Error importando XLSX. Revisa la consola.');
+      }finally{
+        setImporting(false);
+      }
     });
 
     $('tarModoValor')?.addEventListener('change', toggleModoValorUI);
