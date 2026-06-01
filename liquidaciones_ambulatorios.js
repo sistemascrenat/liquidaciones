@@ -1768,9 +1768,30 @@ function paintOverridesTable(agg){
           `${line.fecha || ''} · ${line.pacienteNombre || ''} · ${line.procedimientoNombre || ''}`;
       }
 
-      $('ovEnabled').checked = !!line.overrideApplied;
-      $('ovValorManual').value = line.overrideApplied ? String(line.overrideValorManual || 0) : String(line.valorLiquidadoFinal || 0);
-      $('ovMotivo').value = line.overrideMotivo || '';
+      if($('ovSelectedInfo')){
+        $('ovSelectedInfo').textContent =
+          `${line.fecha || ''} · ${line.pacienteNombre || ''} · ${line.procedimientoNombre || ''}`;
+      }
+      
+      if($('ovEnabled')){
+        $('ovEnabled').checked = !!line.overrideApplied;
+      }
+      
+      if($('ovValorManual')){
+        $('ovValorManual').value = line.overrideApplied
+          ? String(line.overrideValorManual || 0)
+          : String(line.valorLiquidadoFinal || 0);
+      }
+      
+      if($('ovMotivo')){
+        $('ovMotivo').value = line.overrideMotivo || '';
+      }
+      
+      // ✅ Te lleva visualmente al formulario que se acaba de llenar
+      $('ovSelectedInfo')?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'center'
+      });
     });
   });
 }
