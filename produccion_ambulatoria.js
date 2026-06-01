@@ -1491,6 +1491,9 @@ async function persistirItemEditado(reg) {
 }
 
 function serializeAmbItem(reg) {
+  const profesionalId = reg.resolved?.profesionalId || null;
+  const procedimientoId = reg.resolved?.procedimientoId || null;
+
   return {
     itemId: reg.itemId,
     sourceIndex: reg.sourceIndex ?? 0,
@@ -1519,10 +1522,29 @@ function serializeAmbItem(reg) {
     dataMK: reg.dataMK || null,
 
     resolved: reg.resolved || null,
+
+    // ✅ ESPEJOS PARA QUE TABLA, MODAL Y LIQUIDACIÓN LEAN LO MISMO
+    profesionalId,
+    rutProfesional: profesionalId,
+
+    procedimientoId,
+    ambulatorioId: procedimientoId,
+
+    procedimientoNombre: reg.resolved?.procedimientoNombre || reg.procedimientoDetectado || null,
+    profesionalNombre: reg.resolved?.profesionalNombre || reg.profesionalDetectado || null,
+
+    normalizado: {
+      profesionalId,
+      rutProfesional: profesionalId,
+      procedimientoId,
+      ambulatorioId: procedimientoId,
+      procedimientoNombre: reg.resolved?.procedimientoNombre || reg.procedimientoDetectado || null,
+      profesionalNombre: reg.resolved?.profesionalNombre || reg.profesionalDetectado || null
+    },
+
     aplicacion: reg.aplicacion || null,
     review: reg.review || null,
 
-    // ✅ NUEVO: confirmación acumulada
     confirmadoEnProduccion: !!reg.confirmadoEnProduccion,
     confirmadoEl: reg.confirmadoEl || null,
     confirmadoPor: reg.confirmadoPor || null,
