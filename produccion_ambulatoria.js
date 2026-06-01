@@ -3084,6 +3084,123 @@ if ($("ano")) {
   });
 }
 
+window.sincronizarAmbulatoriosRetroactivo = async function({
+  ano,
+  mesNum,
+  dryRun = true
+} = {}) {
+  if (!ano || !mesNum) {
+    throw new Error("Debes indicar ano y mesNum. Ej: { ano: 2026, mesNum: 5, dryRun: true }");
+  }
+
+  const cg = collectionGroup(db, "items");
+
+  const qy = query(
+    cg,
+    where("ano", "==", Number(ano)),
+    where("mesNum", "==", Number(mesNum)),
+    where("estadoRegistro", "==", "activo")
+  );
+
+  const snap = await getDocs(qy);
+
+  let revisados = 0;
+  let deAmbulatoria = 0;
+  let paraActualizar = 0;
+  let actualizados = 0;
+
+  for (const d of snap.docs) {
+    const path = d.ref.path || "";
+    if (!path.startsWith("produccion_ambulatoria/")) continue;
+
+    revisados++;
+    deAmbulatoria++;
+
+    const x = d.data() || {};
+
+    const resolved = x.resolved && typeof x.resolved === "object" ? x.resolved : {};
+
+    const profesionalId = clean(
+      resolved.profesionalId ||
+      x.profesionalId ||
+      ""
+    );
+
+    const procedimientoId = clean(
+      resolved.procedimientoId ||
+      x.procedimientoId ||
+      x.ambulatorioId ||
+      ""
+    );
+
+    if (!profesionalId && !procedimientoId) continue;
+
+    const necesita =
+      x.profesionalId !== profesionalId ||
+      x.rutProfesional !== profesionalId ||
+      x.procedimientoId !== procedimientoId ||
+      x.ambulatorioId !== procedimientoId ||
+      x.normalizado?.procedimientoId !== procedimientoId ||
+      x.normalizado?.ambulatorioId !== procedimientoId ||
+      x.normalizado?.profesionalId !== profesionalId;
+
+    if (!necesita) continue;
+
+    paraActualizar++;
+
+    console.log("🟡 Ambulatorio a sincronizar:", {
+      path,
+      paciente: x.paciente || x.pacienteNorm || "",
+      profesionalAntes: x.profesionalId || x.rutProfesional || "",
+      profesionalDespues: profesionalId,
+      procedimientoAntes: x.procedimientoId || x.ambulatorioId || "",
+      procedimientoDespues: procedimientoId
+    });
+
+    if (!dryRun) {
+      await setDoc(d.ref, {
+        profesionalId,
+        rutProfesional: profesionalId,
+
+        procedimientoId,
+        ambulatorioId: procedimientoId,
+
+        normalizado: {
+          ...(x.normalizado || {}),
+          profesionalId,
+          rutProfesional: profesionalId,
+          procedimientoId,
+          ambulatorioId: procedimientoId
+        },
+
+        resolved: {
+          ...(x.resolved || {}),
+          profesionalId,
+          procedimientoId
+        },
+
+        actualizadoEl: serverTimestamp(),
+        actualizadoPor: stateImport.user?.email || "script-sincronizar-ambulatorios"
+      }, { merge: true });
+
+      actualizados++;
+    }
+  }
+
+  const resumen = {
+    modo: dryRun ? "PRUEBA / NO GUARDA" : "REAL / GUARDADO",
+    ano,
+    mesNum,
+    revisados,
+    deAmbulatoria,
+    paraActualizar,
+    actualizados
+  };
+
+  console.log("✅ RESUMEN SINCRONIZACIÓN AMBULATORIA:", resumen);
+  return resumen;
+};
+
 /* ======================
    BOOT
 ====================== */
