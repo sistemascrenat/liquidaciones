@@ -1811,8 +1811,8 @@ async function saveOverrideDesdeModal(){
   const valorManual = parseDecimalFlexible($('ovValorManual').value || '');
   const motivo = cleanReminder($('ovMotivo').value || '');
 
-  if(enabled && valorManual <= 0){
-    toast('Ingresa un valor manual mayor a 0');
+  if(enabled && valorManual < 0){
+    toast('Ingresa un valor manual válido');
     return;
   }
 
