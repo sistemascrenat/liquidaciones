@@ -1327,27 +1327,28 @@ const state = {
   ano: null,
   q: '',
 
-  rolesMap: new Map(),            // roleId -> nombre
-  clinicasById: new Map(),        // C001 -> NOMBRE
-  clinicasByName: new Map(),      // normalize(nombre) -> C001
+  rolesMap: new Map(),
+  clinicasById: new Map(),
+  clinicasByName: new Map(),
 
-  // Catálogo profesionales (TU esquema real):
-  profesionalesByName: new Map(), // normalize(nombreProfesional) -> profDoc
-  profesionalesById: new Map(),   // rutId string -> profDoc
+  profesionalesByName: new Map(),
+  profesionalesById: new Map(),
 
-  procedimientosByName: new Map(),   // normalize(nombre) -> procDoc
-  procedimientosById: new Map(),     // docId -> procDoc
-  procedimientosByCodigo: new Map(), // "PC0001" -> procDoc
+  procedimientosByName: new Map(),
+  procedimientosById: new Map(),
+  procedimientosByCodigo: new Map(),
 
-  // ✅ NUEVO: Config UF y bonos
-  ufDocId: '',             // YYYYMM
-  ufValorCLP: 0,           // UF CLP del mes
-  bonosTramosGlobal: [],   // config/bonos.tramos
+  ufDocId: '',
+  ufValorCLP: 0,
+  bonosTramosGlobal: [],
 
   fechaPago1Manual: '',
   fechaPago2Manual: '',
 
-  prodRows: [],              // docs items del mes
+  // ✅ Descuentos manuales del mes seleccionado
+  descuentosManualesByKey: new Map(),
+
+  prodRows: [],
   liquidResumen: [],
   lastDetailExportLines: []
 };
@@ -1647,7 +1648,7 @@ function calcularDesglosePagos(agg){
     return (isFonasa && isCirujano) ? acc : (acc + m);
   }, 0);
 
-  let monto1 = Math.round(baseDia1 - descuentoCLP + bonoCLP);
+  let monto1 = Math.round(baseDia1 - descuentoCLP - descuentosManualesCLP + bonoCLP);
   let monto2 = Math.round(baseDia2);
 
   if (monto1 < 0) {
@@ -2195,6 +2196,90 @@ function pickRaw(raw, key){
 }
 
 /* =========================
+   Descuentos manuales mensuales
+   Ruta:
+   liquidaciones_ajustes/{YYYYMM}/profesionales/{profKeySanitizado}
+========================= */
+
+function ajusteDocIdFromKey(key = '') {
+  return String(key || '')
+    .replaceAll('/', '_')
+    .replaceAll('\\', '_')
+    .replaceAll('#', '_')
+    .trim();
+}
+
+function ajustesProfesionalesColRef() {
+  return collection(
+    db,
+    'liquidaciones_ajustes',
+    yyyymm(state.ano, state.mesNum),
+    'profesionales'
+  );
+}
+
+function ajusteProfesionalDocRef(profKey) {
+  return doc(
+    db,
+    'liquidaciones_ajustes',
+    yyyymm(state.ano, state.mesNum),
+    'profesionales',
+    ajusteDocIdFromKey(profKey)
+  );
+}
+
+async function loadDescuentosManualesMes() {
+  const snap = await getDocs(ajustesProfesionalesColRef());
+  const map = new Map();
+
+  snap.forEach(d => {
+    const x = d.data() || {};
+    const profKey = cleanReminder(x.profKey || '');
+    const descuentos = Array.isArray(x.descuentosManuales) ? x.descuentosManuales : [];
+
+    if (!profKey) return;
+
+    map.set(
+      profKey,
+      descuentos.filter(it =>
+        cleanReminder(it?.asunto) &&
+        Number(it?.montoCLP || 0) > 0
+      )
+    );
+  });
+
+  state.descuentosManualesByKey = map;
+}
+
+async function saveDescuentoManualProfesional(profKey, asunto, montoCLP) {
+  const cleanAsunto = cleanReminder(asunto || '');
+  const monto = asNumberLoose(montoCLP);
+
+  if (!profKey) throw new Error('Profesional inválido');
+  if (!cleanAsunto) throw new Error('Debes ingresar un asunto');
+  if (!monto || monto <= 0) throw new Error('Debes ingresar un monto válido');
+
+  await setDoc(ajusteProfesionalDocRef(profKey), {
+    profKey,
+    monthId: yyyymm(state.ano, state.mesNum),
+    ano: Number(state.ano),
+    mesNum: Number(state.mesNum),
+
+    descuentosManuales: [
+      {
+        asunto: cleanAsunto,
+        montoCLP: monto,
+        creadoPor: state.user?.email || '',
+        creadoEl: new Date().toISOString()
+      }
+    ],
+
+    actualizadoPor: state.user?.email || '',
+    actualizadoEl: serverTimestamp()
+  }, { merge: true });
+}
+
+/* =========================
    Build liquidaciones
 ========================= */
 function buildLiquidaciones(){
@@ -2654,16 +2739,31 @@ function buildLiquidaciones(){
       }
     }
 
-    const totalAPagar = Math.max(0, totalProcedimientos - descuentoCLP + bonoCLP);
-  
+    // ✅ Descuentos manuales mensuales del profesional
+    const descuentosManuales = state.descuentosManualesByKey.get(x.key) || [];
+    
+    const descuentosManualesCLP = descuentosManuales.reduce((acc, it) => {
+      return acc + (Number(it?.montoCLP || 0) || 0);
+    }, 0);
+    
+    const totalAPagar = Math.max(
+      0,
+      totalProcedimientos - descuentoCLP - descuentosManualesCLP + bonoCLP
+    );
+    
     x.ajustes = {
       ufValorCLP: uf,
       descuentoUF,
       descuentoCLP,
+    
+      // ✅ Nuevos descuentos manuales
+      descuentosManuales,
+      descuentosManualesCLP,
+    
       cirugiasComoPrincipal,
       bonoCLP,
       bonoTramo,
-      bonoTramoIndex, // ✅ NUEVO
+      bonoTramoIndex,
       totalProcedimientos,
       totalAPagar
     };
@@ -2782,12 +2882,17 @@ function paint(){
       <td>${statusPill}</td>
       <td>
         <div class="actionsMini">
+          <button class="iconBtn" type="button" title="Descuento manual" aria-label="Descuento">💸</button>
           <button class="iconBtn" type="button" title="Descargar PDF liquidación" aria-label="PDF">📄</button>
           <button class="iconBtn" type="button" title="Ver detalle" aria-label="Detalle">🔎</button>
           <button class="iconBtn" type="button" title="Exportar (profesional)" aria-label="ExportProf">⬇️</button>
         </div>
       </td>
     `;
+
+    tr.querySelector('[aria-label="Descuento"]').addEventListener('click', () => {
+      openDescuentoManual(agg);
+    });
 
     tr.querySelector('[aria-label="PDF"]').addEventListener('click', async ()=>{
       try{
@@ -2840,8 +2945,13 @@ function openDetalle(agg){
   const totalProcedimientos = Number(agg?.ajustes?.totalProcedimientos ?? agg?.total ?? 0) || 0;
   const descuentoUF = Number(agg?.ajustes?.descuentoUF || 0) || 0;
   const descuentoCLP = Number(agg?.ajustes?.descuentoCLP || 0) || 0;
+  const descuentosManualesCLP = Number(agg?.ajustes?.descuentosManualesCLP || 0) || 0;
   const bonoCLP = Number(agg?.ajustes?.bonoCLP || 0) || 0;
-  const cirugiasComoPrincipal = Number(agg?.ajustes?.cirugiasComoPrincipal || 0) || 0;
+  
+  const totalAPagar = Number(
+    agg?.ajustes?.totalAPagar ??
+    (totalProcedimientos - descuentoCLP - descuentosManualesCLP + bonoCLP)
+  ) || 0;
   const ufValorCLP = Number(agg?.ajustes?.ufValorCLP || 0) || 0;
   const totalAPagar = Number(agg?.ajustes?.totalAPagar ?? agg?.total ?? 0) || 0;
 
@@ -3014,6 +3124,45 @@ function openDetalle(agg){
 function closeDetalle(){
   $('modalBackdrop').style.display = 'none';
   if ($('modalResumenLiquidacion')) $('modalResumenLiquidacion').innerHTML = '';
+}
+
+function openDescuentoManual(agg) {
+  $('descuentoBackdrop').style.display = 'grid';
+
+  $('descuentoSub').textContent =
+    `${agg.nombre || 'Profesional'} · ${monthNameEs(state.mesNum)} ${state.ano}`;
+
+  $('descuentoProfKey').value = agg.key || '';
+
+  const descuentos = Array.isArray(agg?.ajustes?.descuentosManuales)
+    ? agg.ajustes.descuentosManuales
+    : [];
+
+  const actual = descuentos[0] || {};
+
+  $('descuentoAsunto').value = actual.asunto || '';
+  $('descuentoMonto').value = actual.montoCLP ? String(actual.montoCLP) : '';
+}
+
+function closeDescuentoManual() {
+  $('descuentoBackdrop').style.display = 'none';
+}
+
+async function saveDescuentoManualDesdeModal() {
+  try {
+    const profKey = $('descuentoProfKey').value || '';
+    const asunto = $('descuentoAsunto').value || '';
+    const monto = $('descuentoMonto').value || '';
+
+    await saveDescuentoManualProfesional(profKey, asunto, monto);
+
+    toast('Descuento manual guardado');
+    closeDescuentoManual();
+    await recalc();
+  } catch (err) {
+    console.error(err);
+    toast(err.message || 'No se pudo guardar el descuento');
+  }
 }
 
 function closeFechasPago(){
@@ -3267,7 +3416,10 @@ async function recalc(){
 
     // ✅ Cargar fechas de pago del mes
     await loadFechasPagoMes();
-
+    
+    // ✅ Carga descuentos manuales solo del mes seleccionado
+    await loadDescuentosManualesMes();
+    
     buildLiquidaciones();
 
     // 🔎 DEBUG: confirmar tramos de bonos cargados
@@ -3399,6 +3551,14 @@ requireAuth({
       if(e.target === $('fechasPagoBackdrop')) closeFechasPago();
     });
     $('btnFechasPagoGuardar')?.addEventListener('click', saveFechasPagoDesdeModal);
+
+    $('btnDescuentoClose')?.addEventListener('click', closeDescuentoManual);
+    $('btnDescuentoCancelar')?.addEventListener('click', closeDescuentoManual);
+    $('btnDescuentoGuardar')?.addEventListener('click', saveDescuentoManualDesdeModal);
+    
+    $('descuentoBackdrop')?.addEventListener('click', (e) => {
+      if (e.target === $('descuentoBackdrop')) closeDescuentoManual();
+    });
 
     $('btnExportDetalleProf').addEventListener('click', ()=>{
       if(!state.lastDetailExportLines.length){
