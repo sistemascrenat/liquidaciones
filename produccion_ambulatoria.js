@@ -1075,6 +1075,16 @@ function recalcularTodo() {
   render();
 }
 
+function limpiarAlertasAutoProcedimiento(alertas = []) {
+  return (alertas || []).filter(a => {
+    const t = normalizarTexto(a);
+    return !(
+      t.includes("ASOCIACION AUTOMATICA PARCIAL") ||
+      t.includes("COINCIDENCIA AUTOMATICA NO EXACTA")
+    );
+  });
+}
+
 /* ======================
    NORMALIZAR ITEM REHIDRATADO
 ====================== */
@@ -1092,8 +1102,14 @@ function recomputeItemFromCurrentValues(reg) {
   const analisisProc = reg.resolved?.procedimientoId
     ? {
         procedimiento: procedimientos.find(p => p.id === reg.resolved.procedimientoId) || null,
-        tipoMatch: reg.resolved?.confirmadoManualProcedimiento ? "manual" : "exacto",
-        alerta: null
+        tipoMatch: reg.resolved?.confirmadoManualProcedimiento
+          ? "manual"
+          : (reg.resolved?.autoProcedimientoTipoMatch || "exacto"),
+        alerta:
+          !reg.resolved?.confirmadoManualProcedimiento &&
+          reg.resolved?.autoProcedimientoTipoMatch === "parcial"
+            ? `Asociación automática parcial de procedimiento: archivo "${reg.prestacion}" → catálogo "${reg.resolved?.procedimientoNombre || reg.procedimientoDetectado || ""}". Revisar antes de confirmar.`
+            : null
       }
     : analizarBusquedaProcedimiento(reg.prestacion);
   
@@ -1127,6 +1143,7 @@ function recomputeItemFromCurrentValues(reg) {
     reg.resolved.procedimientoId = procedimientoDetectado.id;
     reg.resolved.procedimientoNombre = nombreProcedimientoCatalogo(procedimientoDetectado);
     reg.resolved.autoProcedimiento = true;
+    reg.resolved.autoProcedimientoTipoMatch = analisisProc?.tipoMatch || null;
   }
 
   reg.profesionalDetectado = reg.resolved.profesionalNombre || (profesionalDetectado ? nombreProfesionalCatalogo(profesionalDetectado) : null);
@@ -1141,6 +1158,10 @@ function recomputeItemFromCurrentValues(reg) {
   } else if (reg.origen === "MK") {
     if (!reg.aplicacion) reg.aplicacion = construirAplicacion("no_aplica", "Sin evaluar");
     alertas = reg.review?.alertas || [];
+  }
+  
+  if (reg.resolved?.confirmadoManualProcedimiento) {
+    alertas = limpiarAlertasAutoProcedimiento(alertas);
   }
 
   if (analisisProf?.alerta) alertas.push(analisisProf.alerta);
