@@ -3143,19 +3143,30 @@ window.sincronizarAmbulatoriosRetroactivo = async function({
     const x = d.data() || {};
     const resolved = x.resolved && typeof x.resolved === "object" ? x.resolved : {};
 
+    // ✅ Prioriza los campos espejo ya corregidos.
+    // Si usamos primero resolved, podemos volver a copiar el dato viejo al modal.
     const profesionalId = clean(
-      resolved.profesionalId ||
       x.profesionalId ||
       x.rutProfesional ||
+      resolved.profesionalId ||
       ""
     );
-
+    
     const procedimientoId = clean(
-      resolved.procedimientoId ||
       x.procedimientoId ||
       x.ambulatorioId ||
+      resolved.procedimientoId ||
       ""
     );
+    
+    const procDoc = procedimientos.find(p =>
+      clean(p.id) === procedimientoId ||
+      clean(p.codigo) === procedimientoId
+    ) || null;
+    
+    const procedimientoNombre = procDoc
+      ? nombreProcedimientoCatalogo(procDoc)
+      : clean(x.procedimientoNombre || x.procedimientoDetectado || resolved.procedimientoNombre || "");
 
     if (!profesionalId && !procedimientoId) continue;
 
@@ -3165,6 +3176,8 @@ window.sincronizarAmbulatoriosRetroactivo = async function({
 
       procedimientoId,
       ambulatorioId: procedimientoId,
+      procedimientoNombre,
+      procedimientoDetectado: procedimientoNombre,
 
       normalizado: {
         ...(x.normalizado || {}),
@@ -3177,7 +3190,8 @@ window.sincronizarAmbulatoriosRetroactivo = async function({
       resolved: {
         ...(x.resolved || {}),
         profesionalId,
-        procedimientoId
+        procedimientoId,
+        procedimientoNombre
       },
 
       actualizadoEl: serverTimestamp(),
