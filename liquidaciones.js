@@ -2363,6 +2363,10 @@ function buildLiquidaciones(){
     
     // 2) IDs/códigos desde item (x)
     const procIdFromX = cleanReminder(
+      x.procedimientoResueltoId ||
+      x.procedimientoManualId ||
+      x.procedimientoFinalId ||
+      x.procedimientoIdResuelto ||
       x.procedimientoId ||
       x.procId ||
       x.cirugiaId ||
@@ -2370,7 +2374,6 @@ function buildLiquidaciones(){
       x.procedimientoCodigo ||
       x.codigoProcedimiento ||
       x.codigo ||
-      x.procedimiento ||       // a veces guardan el código acá
       ''
     );
     
@@ -2438,12 +2441,19 @@ function buildLiquidaciones(){
       selectedProcName ||
       norm.procedimientoNombre ||
       norm.cirugiaNombre ||
-      norm.procedimiento ||
-      norm.cirugia ||
+      norm.procedimientoResuelto ||
+      norm.procedimientoFinal ||
+      norm.procedimientoManual ||
+      x.procedimientoResuelto ||
+      x.procedimientoFinal ||
+      x.procedimientoManual ||
+      x.procedimientoDetectado ||
       x.procedimientoNombre ||
       x.nombreProcedimiento ||
       x.cirugiaNombre ||
       x.nombreCirugia ||
+      norm.procedimiento ||
+      norm.cirugia ||
       x.procedimiento ||
       x.cirugia ||
       rawProcField
