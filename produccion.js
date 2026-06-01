@@ -420,6 +420,9 @@ function setButtons(){
   $('btnResolver').disabled = !(staged && (totalPend > 0 || totalSospechosos > 0));
   
   $('btnConfirmar').disabled = !staged || totalPend > 0 || totalSospechosos > 0;
+  
+  // ✅ Importante: permite anular imports en staging o confirmados
+  $('btnAnular').disabled = !(staged || confirmed);
 }
 
 function dirtyCount(){
