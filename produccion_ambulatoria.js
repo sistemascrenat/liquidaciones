@@ -462,15 +462,72 @@ function buscarProfesional(texto) {
   return analizarBusquedaProfesional(texto)?.profesional || null;
 }
 
-function buscarProcedimiento(texto) {
-  const t = normalizarTexto(texto);
-  if (!t) return null;
+function analizarBusquedaProcedimiento(texto) {
+  const textoOriginal = clean(texto);
+  const t = normalizarTexto(textoOriginal);
 
-  return procedimientos.find(p => {
+  if (!t) {
+    return {
+      procedimiento: null,
+      tipoMatch: "vacio",
+      alerta: "Procedimiento vacío"
+    };
+  }
+
+  // 1) Coincidencia exacta por ID o nombre
+  for (const p of procedimientos) {
+    const id = normalizarTexto(p?.id || "");
     const nombre = normalizarTexto(nombreProcedimientoCatalogo(p));
-    if (!nombre) return false;
-    return nombre === t || t.includes(nombre) || nombre.includes(t);
-  }) || null;
+
+    if (!nombre && !id) continue;
+
+    if (t === id || t === nombre) {
+      return {
+        procedimiento: p,
+        tipoMatch: "exacto",
+        alerta: null
+      };
+    }
+  }
+
+  // 2) Coincidencia parcial: se sugiere, pero debe revisarse
+  const candidatos = procedimientos
+    .map(p => {
+      const id = normalizarTexto(p?.id || "");
+      const nombre = normalizarTexto(nombreProcedimientoCatalogo(p));
+
+      let score = 0;
+
+      if (id && t.includes(id)) score += 10;
+      if (nombre && t.includes(nombre)) score += 5;
+      if (nombre && nombre.includes(t)) score += 4;
+
+      return { procedimiento: p, id, nombre, score };
+    })
+    .filter(x => x.score > 0)
+    .sort((a, b) => b.score - a.score);
+
+  const mejor = candidatos[0];
+
+  if (!mejor) {
+    return {
+      procedimiento: null,
+      tipoMatch: "sin_match",
+      alerta: `No se encontró procedimiento para "${textoOriginal}"`
+    };
+  }
+
+  return {
+    procedimiento: mejor.procedimiento,
+    tipoMatch: "parcial",
+    alerta:
+      `Asociación automática parcial de procedimiento: archivo "${textoOriginal}" ` +
+      `→ catálogo "${nombreProcedimientoCatalogo(mejor.procedimiento)}". Revisar antes de confirmar.`
+  };
+}
+
+function buscarProcedimiento(texto) {
+  return analizarBusquedaProcedimiento(texto)?.procedimiento || null;
 }
 
 function labelRolCanon(canon) {
@@ -601,7 +658,13 @@ function construirAlertaRolProcedimiento({ profesional, procedimiento, textoProc
 }
 
 function esAlertaBloqueante(alerta = "") {
-  return normalizarTexto(alerta).includes("ROL NO CORRESPONDE AL PROCEDIMIENTO");
+  const t = normalizarTexto(alerta);
+
+  return (
+    t.includes("ROL NO CORRESPONDE AL PROCEDIMIENTO") ||
+    t.includes("ASOCIACION AUTOMATICA PARCIAL") ||
+    t.includes("COINCIDENCIA AUTOMATICA NO EXACTA")
+  );
 }
 
 /* ======================
@@ -823,12 +886,15 @@ function procesarReservo() {
   return dataReservo.map((r, i) => {
     const analisisProf = analizarBusquedaProfesional(r["Profesional"]);
     const profesionalDetectado = analisisProf?.profesional || null;
-    const procedimientoDetectado = buscarProcedimiento(r["Tratamiento"]);
+    const analisisProc = analizarBusquedaProcedimiento(r["Tratamiento"]);
+    const procedimientoDetectado = analisisProc?.procedimiento || null;
 
     const evalApp = evaluarAplicacionReservo(r);
     const alertas = [...evalApp.alertas];
     
     if (analisisProf?.alerta) alertas.push(analisisProf.alerta);
+    if (analisisProc?.alerta) alertas.push(analisisProc.alerta);
+    
     
     if (!normalizarRut(r["Rut"])) alertas.push("RUT vacío o inválido");
     if (!normalizarTexto(r["Profesional"])) alertas.push("Profesional vacío");
@@ -853,6 +919,7 @@ function procesarReservo() {
 
       autoProfesional: !!profesionalDetectado,
       autoProcedimiento: !!procedimientoDetectado,
+      autoProcedimientoTipoMatch: analisisProc?.tipoMatch || null,
       confirmadoManualProfesional: false,
       confirmadoManualProcedimiento: false
     };
@@ -909,10 +976,12 @@ function procesarMK() {
   let items = dataMK.map((r, i) => {
     const analisisProf = analizarBusquedaProfesional(r["D Médico"]);
     const profesionalDetectado = analisisProf?.profesional || null;
-    const procedimientoDetectado = buscarProcedimiento(r["D Artículo"]);
+    const analisisProc = analizarBusquedaProcedimiento(r["D Artículo"]);
+    const procedimientoDetectado = analisisProc?.procedimiento || null;
 
     const alertas = [];
     if (analisisProf?.alerta) alertas.push(analisisProf.alerta);
+    if (analisisProc?.alerta) alertas.push(analisisProc.alerta);
     if (!normalizarRut(r["Rut"])) alertas.push("RUT vacío o inválido");
     if (!normalizarTexto(r["D Médico"])) alertas.push("Profesional vacío");
     if (!normalizarTexto(r["D Artículo"])) alertas.push("Procedimiento vacío");
@@ -926,6 +995,7 @@ function procesarMK() {
 
       autoProfesional: !!profesionalDetectado,
       autoProcedimiento: !!procedimientoDetectado,
+      autoProcedimientoTipoMatch: analisisProc?.tipoMatch || null,
       confirmadoManualProfesional: false,
       confirmadoManualProcedimiento: false
     };
@@ -1019,9 +1089,15 @@ function recomputeItemFromCurrentValues(reg) {
 
   const profesionalDetectado = analisisProf?.profesional || null;
 
-  const procedimientoDetectado = reg.resolved?.procedimientoId
-    ? procedimientos.find(p => p.id === reg.resolved.procedimientoId) || null
-    : buscarProcedimiento(reg.prestacion);
+  const analisisProc = reg.resolved?.procedimientoId
+    ? {
+        procedimiento: procedimientos.find(p => p.id === reg.resolved.procedimientoId) || null,
+        tipoMatch: reg.resolved?.confirmadoManualProcedimiento ? "manual" : "exacto",
+        alerta: null
+      }
+    : analizarBusquedaProcedimiento(reg.prestacion);
+  
+  const procedimientoDetectado = analisisProc?.procedimiento || null;
 
   reg.rutNorm = normalizarRut(reg.rut);
   reg.pacienteNorm = normalizarPaciente(reg.paciente);
@@ -1068,6 +1144,9 @@ function recomputeItemFromCurrentValues(reg) {
   }
 
   if (analisisProf?.alerta) alertas.push(analisisProf.alerta);
+  if (!reg.resolved?.confirmadoManualProcedimiento && analisisProc?.alerta) {
+    alertas.push(analisisProc.alerta);
+  }
   if (!reg.rutNorm) alertas.push("RUT vacío o inválido");
   if (!normalizarTexto(reg.profesional)) alertas.push("Profesional vacío");
   if (!normalizarTexto(reg.prestacion)) alertas.push("Procedimiento vacío");
@@ -1797,6 +1876,64 @@ function matchBusquedaPrincipal(searchText, rawQuery) {
   });
 }
 
+function badgeResolucionHTML(tipo, reg) {
+  const resolved = reg.resolved || {};
+
+  const isProf = tipo === "profesional";
+
+  const id = isProf
+    ? resolved.profesionalId
+    : resolved.procedimientoId;
+
+  const manual = isProf
+    ? resolved.confirmadoManualProfesional
+    : resolved.confirmadoManualProcedimiento;
+
+  const auto = isProf
+    ? resolved.autoProfesional
+    : resolved.autoProcedimiento;
+
+  const tipoMatch = isProf
+    ? null
+    : resolved.autoProcedimientoTipoMatch;
+
+  if (!id) {
+    return `<div class="tiny warn">PENDIENTE</div>`;
+  }
+
+  if (manual) {
+    return `<div class="tiny ok">MANUAL</div>`;
+  }
+
+  if (auto && tipoMatch === "parcial") {
+    return `<div class="tiny warn">AUTO · REVISAR</div>`;
+  }
+
+  if (auto) {
+    return `<div class="tiny ok">AUTO</div>`;
+  }
+
+  return `<div class="tiny muted">RESUELTO</div>`;
+}
+
+function textoProfesionalResueltoHTML(reg) {
+  const nombre = reg.profesionalDetectado || reg.resolved?.profesionalNombre || "—";
+
+  return `
+    <div>${escapeHtml(nombre)}</div>
+    ${badgeResolucionHTML("profesional", reg)}
+  `;
+}
+
+function textoProcedimientoResueltoHTML(reg) {
+  const nombre = reg.procedimientoDetectado || reg.resolved?.procedimientoNombre || "—";
+
+  return `
+    <div>${escapeHtml(nombre)}</div>
+    ${badgeResolucionHTML("procedimiento", reg)}
+  `;
+}
+
 /* ======================
    RENDER TABLA
 ====================== */
@@ -1854,9 +1991,9 @@ function render() {
       <td>${escapeHtml(r.rut || "")}</td>
       <td>${escapeHtml(r.paciente || "")}</td>
       <td>${escapeHtml(r.profesional || "")}</td>
-      <td>${escapeHtml(r.profesionalDetectado || r.resolved?.profesionalNombre || "—")}</td>
+      <td>${textoProfesionalResueltoHTML(r)}</td>
       <td>${escapeHtml(r.prestacion || "")}</td>
-      <td>${escapeHtml(r.procedimientoDetectado || r.resolved?.procedimientoNombre || "—")}</td>
+      <td>${textoProcedimientoResueltoHTML(r)}</td>
       <td>${escapeHtml(r.valor ?? "")}</td>
       <td>${estado === "ok" ? `<span class="ok">OK</span>` : `<span class="warn">Pendiente</span>`}</td>
       <td>${escapeHtml(r.aplicacion?.estado || "—")}</td>
@@ -2014,6 +2151,12 @@ async function procesarArchivos() {
     alert("Debes cargar al menos un archivo");
     return;
   }
+
+  // ✅ Limpia resoluciones manuales anteriores.
+  // Evita que un cambio hecho en otro import se aplique por error
+  // a un nuevo RES_0001, RES_0002, MK_0001, etc.
+  manualOverrides = {};
+  stateEdicion.actual = null;
 
   try {
     await cargarProfesionales();
