@@ -784,11 +784,20 @@ async function generarPDFLiquidacionProfesional(agg){
   const descuentoUF  = Number(agg?.ajustes?.descuentoUF || 0) || 0;
   const descuentoCLP = Number(agg?.ajustes?.descuentoCLP || 0) || 0;
   
+  const descuentosManuales = Array.isArray(agg?.ajustes?.descuentosManuales)
+    ? agg.ajustes.descuentosManuales
+    : [];
+  
+  const descuentosManualesCLP = Number(agg?.ajustes?.descuentosManualesCLP || 0) || 0;
+  
   const cirugiasComoPrincipal = Number(agg?.ajustes?.cirugiasComoPrincipal || 0) || 0;
   const bonoCLP = Number(agg?.ajustes?.bonoCLP || 0) || 0;
   
   const ufValor = Number(agg?.ajustes?.ufValorCLP || 0) || 0;
-  const totalAPagar = Number(agg?.ajustes?.totalAPagar ?? (totalProcedimientos - descuentoCLP + bonoCLP)) || 0;
+  const totalAPagar = Number(
+    agg?.ajustes?.totalAPagar ??
+    (totalProcedimientos - descuentoCLP - descuentosManualesCLP + bonoCLP)
+  ) || 0;
   
   // 1) TOTAL PROCEDIMIENTOS
   const totalBarH = 28;
@@ -804,6 +813,13 @@ async function generarPDFLiquidacionProfesional(agg){
       item: `DESCUENTO (${descuentoUF} UF · UF ${money(ufValor)})`,
       cant: 1,
       sub: -descuentoCLP
+    });
+  }
+  for (const d of descuentosManuales) {
+    ajustesRows.push({
+      item: `DESCUENTO MANUAL - ${cleanReminder(d.asunto || '')}`.trim(),
+      cant: 1,
+      sub: -(Number(d.montoCLP || 0) || 0)
     });
   }
   if(bonoCLP > 0){
