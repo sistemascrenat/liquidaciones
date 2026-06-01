@@ -3963,6 +3963,129 @@ window.corregirIdProfesionalProduccion = async function({
   return resumen;
 };
 
+window.corregirArsenaleraPorRuts = async function({
+  ano = 2026,
+  mesNum = 5,
+  ruts = [],
+  oldId = '180799168',
+  newId = '172500145',
+  dryRun = true
+} = {}) {
+
+  const YYYY = String(ano);
+  const MM = pad(Number(mesNum), 2);
+
+  let revisados = 0;
+  let encontrados = 0;
+  let actualizados = 0;
+
+  let batch = writeBatch(db);
+  let batchCount = 0;
+
+  for (const rut of ruts) {
+    const pacienteId = normalizeRutKey(rut);
+
+    const itemsSnap = await getDocs(
+      collection(db, 'produccion', YYYY, 'meses', MM, 'pacientes', pacienteId, 'items')
+    );
+
+    for (const d of itemsSnap.docs) {
+      revisados++;
+
+      const x = d.data() || {};
+
+      const idsEncontrados = [
+        x.profesionalesId?.arsenaleraId,
+        x.normalizado?.profesionalesId?.arsenaleraId,
+        x.resolved?.arsenaleraId,
+        x._selectedIds?.profIds?.arsenaleraId
+      ].map(v => clean(v)).filter(Boolean);
+
+      const tieneOld = idsEncontrados.includes(oldId);
+      const tieneNew = idsEncontrados.includes(newId);
+
+      if (!tieneOld && tieneNew) {
+        console.log('✅ Ya estaba corregido:', d.ref.path);
+        continue;
+      }
+
+      if (!tieneOld) {
+        console.log('⚪ No coincide con oldId:', d.ref.path, idsEncontrados);
+        continue;
+      }
+
+      encontrados++;
+
+      console.log('🟡 Item a corregir:', {
+        path: d.ref.path,
+        paciente: x.nombrePaciente || x.normalizado?.nombrePaciente || x.raw?.['Nombre Paciente'],
+        idsEncontrados
+      });
+
+      if (!dryRun) {
+        batch.set(d.ref, {
+          profesionalesId: {
+            ...(x.profesionalesId || {}),
+            arsenaleraId: newId
+          },
+          normalizado: {
+            ...(x.normalizado || {}),
+            profesionalesId: {
+              ...(x.normalizado?.profesionalesId || {}),
+              arsenaleraId: newId
+            }
+          },
+          resolved: {
+            ...(x.resolved || {}),
+            arsenaleraId: newId,
+            arsenaleraOk: true,
+            _pend_arsenalera: false
+          },
+          _selectedIds: {
+            ...(x._selectedIds || {}),
+            profIds: {
+              ...(x._selectedIds?.profIds || {}),
+              arsenaleraId: newId
+            }
+          },
+          pendientes: {
+            ...(x.pendientes || {}),
+            profesionales: {
+              ...(x.pendientes?.profesionales || {}),
+              arsenalera: false
+            }
+          },
+          actualizadoEl: serverTimestamp(),
+          actualizadoPor: state.user?.email || 'script-correccion-arsenalera'
+        }, { merge: true });
+
+        batchCount++;
+        actualizados++;
+
+        if (batchCount >= 400) {
+          await batch.commit();
+          batch = writeBatch(db);
+          batchCount = 0;
+        }
+      }
+    }
+  }
+
+  if (!dryRun && batchCount > 0) {
+    await batch.commit();
+  }
+
+  const resumen = {
+    modo: dryRun ? 'PRUEBA / NO GUARDA' : 'REAL / GUARDADO',
+    revisados,
+    encontrados,
+    actualizados
+  };
+
+  console.log('✅ RESUMEN:', resumen);
+  return resumen;
+};
+
 /* =========================
    Boot
 ========================= */
