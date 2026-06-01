@@ -21,7 +21,8 @@ import { loadSidebar } from './layout.js';
 import {
   collection, getDocs, setDoc, deleteDoc,
   doc, serverTimestamp,
-  query, where
+  query, where,
+  getDoc, writeBatch
 } from 'https://www.gstatic.com/firebasejs/11.7.3/firebase-firestore.js';
 
 /* =========================
@@ -31,7 +32,8 @@ const state = {
   user: null,
   q: '',
   all: [],
-  editProcId: null
+  editProcId: null,
+  selectedIds: new Set()
 };
 
 const $ = (id)=> document.getElementById(id);
@@ -175,6 +177,51 @@ function spanProfit(txt){
    Firestore refs
 ========================= */
 const colProcedimientos = collection(db, 'procedimientos');
+
+const colProcedimientosArchivados = collection(db, 'procedimientosArchivados');
+
+function getSelectedIds(){
+  return Array.from(state.selectedIds || []);
+}
+
+function toggleSelected(id, checked){
+  if(!id) return;
+
+  if(checked){
+    state.selectedIds.add(id);
+  }else{
+    state.selectedIds.delete(id);
+  }
+
+  updateBulkButtons();
+}
+
+function updateBulkButtons(){
+  const total = state.selectedIds.size;
+
+  if($('btnEliminarSeleccionados')){
+    $('btnEliminarSeleccionados').disabled = total === 0;
+    $('btnEliminarSeleccionados').textContent =
+      total ? `🗑️ Eliminar seleccionados (${total})` : '🗑️ Eliminar seleccionados';
+  }
+
+  if($('btnArchivarSeleccionados')){
+    $('btnArchivarSeleccionados').disabled = total === 0;
+    $('btnArchivarSeleccionados').textContent =
+      total ? `📦 Archivar seleccionados (${total})` : '📦 Archivar seleccionados';
+  }
+}
+
+function syncSelectAllCheckbox(rows){
+  const chk = $('chkSelectAll');
+  if(!chk) return;
+
+  const visibleIds = rows.map(p => p.id).filter(Boolean);
+  const selectedVisible = visibleIds.filter(id => state.selectedIds.has(id));
+
+  chk.checked = visibleIds.length > 0 && selectedVisible.length === visibleIds.length;
+  chk.indeterminate = selectedVisible.length > 0 && selectedVisible.length < visibleIds.length;
+}
 
 /* =========================
    Search: coma=AND, guión=OR
@@ -366,6 +413,9 @@ function paint(){
   const rows = state.all.filter(p=> rowMatches(p, state.q));
   if($('count')) $('count').textContent = `${rows.length} ambulatorio${rows.length===1?'':'s'}`;
 
+  syncSelectAllCheckbox(rows);
+  updateBulkButtons();
+
   const tb = $('tbody');
   if(!tb) return;
   tb.innerHTML = '';
@@ -373,6 +423,16 @@ function paint(){
   for(const p of rows){
     const tr = document.createElement('tr');
     tr.innerHTML = `
+      <td style="text-align:center;">
+        <input
+          type="checkbox"
+          class="chkRow"
+          data-id="${escapeHtml(p.id)}"
+          ${state.selectedIds.has(p.id) ? 'checked' : ''}
+          title="Seleccionar"
+        />
+      </td>
+
       <td><div class="mono"><b>${escapeHtml(p.codigo || p.id)}</b></div></td>
 
       <td>
@@ -407,6 +467,10 @@ function paint(){
         </div>
       </td>
     `;
+
+    tr.querySelector('.chkRow')?.addEventListener('change', (e)=>{
+      toggleSelected(p.id, e.target.checked);
+    });
 
     tr.querySelector('button[aria-label="Editar"]').addEventListener('click', ()=> openProcModal('edit', p));
     tr.querySelector('button[aria-label="Eliminar"]').addEventListener('click', ()=> removeProc(p.id));
@@ -611,6 +675,70 @@ async function removeProc(id){
 
   await deleteDoc(doc(db,'procedimientos', id));
   toast('Eliminado');
+  await loadAll();
+}
+
+async function eliminarSeleccionados(){
+  const ids = getSelectedIds();
+
+  if(!ids.length){
+    toast('Selecciona al menos un ambulatorio');
+    return;
+  }
+
+  const ok = confirm(`¿Eliminar ${ids.length} procedimiento${ids.length===1?'':'s'} ambulatorio${ids.length===1?'':'s'} seleccionado${ids.length===1?'':'s'}?\n\nEsta acción no se puede deshacer.`);
+  if(!ok) return;
+
+  const batch = writeBatch(db);
+
+  for(const id of ids){
+    batch.delete(doc(db, 'procedimientos', id));
+  }
+
+  await batch.commit();
+
+  state.selectedIds.clear();
+  toast('Procedimientos eliminados');
+  await loadAll();
+}
+
+async function archivarSeleccionados(){
+  const ids = getSelectedIds();
+
+  if(!ids.length){
+    toast('Selecciona al menos un ambulatorio');
+    return;
+  }
+
+  const ok = confirm(`¿Archivar ${ids.length} procedimiento${ids.length===1?'':'s'} ambulatorio${ids.length===1?'':'s'} seleccionado${ids.length===1?'':'s'}?`);
+  if(!ok) return;
+
+  const batch = writeBatch(db);
+
+  for(const id of ids){
+    const refOriginal = doc(db, 'procedimientos', id);
+    const snap = await getDoc(refOriginal);
+
+    if(!snap.exists()) continue;
+
+    const data = snap.data() || {};
+
+    const refArchivado = doc(db, 'procedimientosArchivados', id);
+
+    batch.set(refArchivado, {
+      ...data,
+      archivadoEl: serverTimestamp(),
+      archivadoPor: state.user?.email || '',
+      coleccionOriginal: 'procedimientos'
+    }, { merge:true });
+
+    batch.delete(refOriginal);
+  }
+
+  await batch.commit();
+
+  state.selectedIds.clear();
+  toast('Procedimientos archivados');
   await loadAll();
 }
 
@@ -839,6 +967,24 @@ requireAuth({
 
     $('btnCrear')?.addEventListener('click', ()=> openProcModal('create'));
 
+    $('btnEliminarSeleccionados')?.addEventListener('click', eliminarSeleccionados);
+    $('btnArchivarSeleccionados')?.addEventListener('click', archivarSeleccionados);
+    
+    $('chkSelectAll')?.addEventListener('change', (e)=>{
+      const checked = e.target.checked;
+      const rows = state.all.filter(p=> rowMatches(p, state.q));
+    
+      for(const p of rows){
+        if(checked){
+          state.selectedIds.add(p.id);
+        }else{
+          state.selectedIds.delete(p.id);
+        }
+      }
+    
+      paint();
+    });
+
     $('buscador')?.addEventListener('input', (e)=>{
       state.q = (e.target.value || '').toString();
       paint();
@@ -868,6 +1014,7 @@ requireAuth({
     $('tarValorProfesional')?.addEventListener('input', computeTarPreview);
     $('tarValorProfesional')?.addEventListener('change', computeTarPreview);
 
+    updateBulkButtons();
     await loadAll();
   }
 });
