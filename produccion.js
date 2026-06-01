@@ -3662,47 +3662,67 @@ async function saveOneItemPatch(it, patch, options = {}){
     it.resolved.origenResolucion.clinica = 'manual';
     it.resolved._mappingSospechoso = false;
   }
-
+  
   // 2) Cirugía
   if(sel.cirugiaId){
     it.resolved = it.resolved || {};
+    it.resolved.origenResolucion = it.resolved.origenResolucion || {};
     it.resolved.cirugiaId = sel.cirugiaId;
     it.resolved.cirugiaOk = true;
     it.resolved._pendCir = false;
+    it.resolved.origenResolucion.cirugia = 'manual';
+    it.resolved._mappingSospechoso = false;
   }
-
-  // 3) Profesionales (por rol)
+  
+  // 3) Profesionales
   const profIds = (sel.profIds && typeof sel.profIds === 'object') ? sel.profIds : {};
-
-  if(profIds.cirujanoId){
-    it.resolved = it.resolved || {};
-    it.resolved.cirujanoId = profIds.cirujanoId;
-    it.resolved.cirujanoOk = true;
-    it.resolved._pend_cirujano = false;
-  }
-  if(profIds.anestesistaId){
-    it.resolved = it.resolved || {};
-    it.resolved.anestesistaId = profIds.anestesistaId;
-    it.resolved.anestesistaOk = true;
-    it.resolved._pend_anestesista = false;
-  }
-  if(profIds.ayudante1Id){
-    it.resolved = it.resolved || {};
-    it.resolved.ayudante1Id = profIds.ayudante1Id;
-    it.resolved.ayudante1Ok = true;
-    it.resolved._pend_ayudante1 = false;
-  }
-  if(profIds.ayudante2Id){
-    it.resolved = it.resolved || {};
-    it.resolved.ayudante2Id = profIds.ayudante2Id;
-    it.resolved.ayudante2Ok = true;
-    it.resolved._pend_ayudante2 = false;
-  }
-  if(profIds.arsenaleraId){
-    it.resolved = it.resolved || {};
-    it.resolved.arsenaleraId = profIds.arsenaleraId;
-    it.resolved.arsenaleraOk = true;
-    it.resolved._pend_arsenalera = false;
+  
+  const PROF_MANUALES = [
+    {
+      idKey: 'cirujanoId',
+      okKey: 'cirujanoOk',
+      pendKey: '_pend_cirujano',
+      origenKey: 'cirujano'
+    },
+    {
+      idKey: 'anestesistaId',
+      okKey: 'anestesistaOk',
+      pendKey: '_pend_anestesista',
+      origenKey: 'anestesista'
+    },
+    {
+      idKey: 'ayudante1Id',
+      okKey: 'ayudante1Ok',
+      pendKey: '_pend_ayudante1',
+      origenKey: 'ayudante1'
+    },
+    {
+      idKey: 'ayudante2Id',
+      okKey: 'ayudante2Ok',
+      pendKey: '_pend_ayudante2',
+      origenKey: 'ayudante2'
+    },
+    {
+      idKey: 'arsenaleraId',
+      okKey: 'arsenaleraOk',
+      pendKey: '_pend_arsenalera',
+      origenKey: 'arsenalera'
+    }
+  ];
+  
+  for(const cfg of PROF_MANUALES){
+    const idElegido = clean(profIds[cfg.idKey] || '');
+  
+    if(idElegido){
+      it.resolved = it.resolved || {};
+      it.resolved.origenResolucion = it.resolved.origenResolucion || {};
+  
+      it.resolved[cfg.idKey] = idElegido;
+      it.resolved[cfg.okKey] = true;
+      it.resolved[cfg.pendKey] = false;
+      it.resolved.origenResolucion[cfg.origenKey] = 'manual';
+      it.resolved._mappingSospechoso = false;
+    }
   }
   
   console.log('💾 RESOLVED FINAL QUE SE VA A GUARDAR:', JSON.parse(JSON.stringify(it.resolved)));
