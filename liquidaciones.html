@@ -323,6 +323,43 @@
         </div>
       </div>
     </div>
+
+    <!-- MODAL DESCUENTO MANUAL -->
+    <div class="backdrop" id="descuentoBackdrop">
+      <div class="modal" style="width:min(560px, 96vw);">
+        <div class="modalHead">
+          <div>
+            <div class="modalTitle" style="margin:0;">Descuento manual</div>
+            <div class="modalSub" id="descuentoSub">—</div>
+          </div>
+          <button class="closeX" id="btnDescuentoClose" type="button" aria-label="Cerrar">✕</button>
+        </div>
+    
+        <div class="modalBody">
+          <input id="descuentoProfKey" type="hidden">
+    
+          <div class="field" style="min-width:auto; margin-bottom:12px;">
+            <label>Asunto / motivo</label>
+            <input id="descuentoAsunto" type="text" placeholder="Ej: Anticipo pagado / Ajuste administrativo">
+          </div>
+    
+          <div class="field" style="min-width:auto;">
+            <label>Monto descuento en pesos</label>
+            <input id="descuentoMonto" type="text" placeholder="Ej: 50000">
+          </div>
+    
+          <div class="mini" style="margin-top:10px; color:var(--muted);">
+            Este descuento se aplica solo al mes seleccionado. No afecta otros meses.
+          </div>
+        </div>
+    
+        <div class="modalFoot ufFoot">
+          <button class="btn ufBtnOutline" id="btnDescuentoCancelar" type="button">Cancelar</button>
+          <span style="flex:1"></span>
+          <button class="btn ufBtnPrimary" id="btnDescuentoGuardar" type="button">Guardar descuento</button>
+        </div>
+      </div>
+    </div>
     
     <!-- Sidebar loader -->
     <script type="module" src="layout.js"></script>
