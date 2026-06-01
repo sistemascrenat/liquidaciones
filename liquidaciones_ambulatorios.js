@@ -453,29 +453,38 @@ function resolveProcedimientoCandidate(x, raw){
   const sel = (x?._selectedIds && typeof x._selectedIds === 'object') ? x._selectedIds : {};
   const norm = (x?.normalizado && typeof x.normalizado === 'object') ? x.normalizado : {};
 
+  // ✅ Primero campos espejo corregidos.
+  // resolved queda al final porque puede venir antiguo.
   const fromIds = [
-    resolved.procedimientoId,
-    resolved.ambulatorioId,
-    sel.procedimientoId,
-    sel.ambulatorioId,
     x.procedimientoId,
     x.ambulatorioId,
     x.procedimientoCodigo,
     x.codigoProcedimiento,
+
     norm.procedimientoId,
     norm.ambulatorioId,
-    norm.codigoProcedimiento
+    norm.codigoProcedimiento,
+
+    sel.procedimientoId,
+    sel.ambulatorioId,
+
+    resolved.procedimientoId,
+    resolved.ambulatorioId
   ].map(v=> cleanReminder(v)).filter(Boolean);
 
   const fromNames = [
-    resolved.procedimientoNombre,
     x.procedimientoNombre,
+    x.procedimientoDetectado,
+    norm.procedimientoNombre,
+
+    resolved.procedimientoNombre,
+
     x.prestacion,
     x.tratamiento,
     x.procedimiento,
     x.nombreProcedimiento,
-    norm.procedimientoNombre,
     norm.prestacion,
+
     pickRaw(raw, 'Tratamiento'),
     pickRaw(raw, 'Prestación'),
     pickRaw(raw, 'Prestacion'),
