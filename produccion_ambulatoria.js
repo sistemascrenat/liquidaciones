@@ -3180,6 +3180,7 @@ window.sincronizarAmbulatoriosRetroactivo = async function({
     });
 
     if (!dryRun) {
+      // ✅ 1) Actualiza producción final
       await setDoc(d.ref, {
         profesionalId,
         rutProfesional: profesionalId,
@@ -3204,6 +3205,43 @@ window.sincronizarAmbulatoriosRetroactivo = async function({
         actualizadoEl: serverTimestamp(),
         actualizadoPor: stateImport.user?.email || "script-sincronizar-ambulatorios"
       }, { merge: true });
+
+      // ✅ 2) Actualiza también el import/staging original
+      // Esto es lo que lee la tabla y el modal de Producción Ambulatoria.
+      if (x.importId && x.itemId) {
+        const refImportItem = doc(
+          db,
+          "produccion_ambulatoria_imports",
+          x.importId,
+          "items",
+          x.itemId
+        );
+
+        await setDoc(refImportItem, {
+          profesionalId,
+          rutProfesional: profesionalId,
+
+          procedimientoId,
+          ambulatorioId: procedimientoId,
+
+          normalizado: {
+            ...(x.normalizado || {}),
+            profesionalId,
+            rutProfesional: profesionalId,
+            procedimientoId,
+            ambulatorioId: procedimientoId
+          },
+
+          resolved: {
+            ...(x.resolved || {}),
+            profesionalId,
+            procedimientoId
+          },
+
+          actualizadoEl: serverTimestamp(),
+          actualizadoPor: stateImport.user?.email || "script-sincronizar-ambulatorios"
+        }, { merge: true });
+      }
 
       actualizados++;
     }
