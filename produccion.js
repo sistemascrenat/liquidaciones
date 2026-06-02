@@ -1185,13 +1185,10 @@ function resolveOneItem(n){
 
     const key = profKey(r.role, nameCsv);
 
-    // 1) mapping manual guardado
-    const mapped = state.maps.prof.get(key);
-    if(mapped?.id){
-      resolved[r.out] = mapped.id;
-      resolved[r.ok] = true;
-      continue;
-    }
+    // ✅ Profesionales:
+    // Ya NO usamos produccion_mappings/profesionales.
+    // Motivo: archivos sucios + asociación manual mala = error permanente.
+    // Ahora solo se auto-resuelve si hay match exacto único.
 
     // 2) match inteligente (exacto / apellido / parcial con ranking)
     const candidates = findProfesionalesCandidates(nameCsv);
@@ -1470,6 +1467,71 @@ function closeResolverModal(){
 function suggestClinicaId(){
   const tail = (Date.now() % 1000).toString().padStart(3,'0');
   return `C${tail}`;
+}
+
+async function aplicarProfesionalSoloAEstaCarga(item, id){
+  const roleToField = {
+    r_cirujano:    { field:'cirujano',    idField:'cirujanoId',    okField:'cirujanoOk',    pendField:'_pend_cirujano' },
+    r_anestesista: { field:'anestesista', idField:'anestesistaId', okField:'anestesistaOk', pendField:'_pend_anestesista' },
+    r_ayudante_1:  { field:'ayudante1',   idField:'ayudante1Id',   okField:'ayudante1Ok',   pendField:'_pend_ayudante1' },
+    r_ayudante_2:  { field:'ayudante2',   idField:'ayudante2Id',   okField:'ayudante2Ok',   pendField:'_pend_ayudante2' },
+    r_arsenalera:  { field:'arsenalera',  idField:'arsenaleraId',  okField:'arsenaleraOk',  pendField:'_pend_arsenalera' }
+  };
+
+  const cfg = roleToField[item.roleId];
+  if(!cfg){
+    toast('Rol profesional inválido.');
+    return 0;
+  }
+
+  let afectados = 0;
+  let batch = writeBatch(db);
+  let batchCount = 0;
+
+  for(const it of state.stagedItems || []){
+    const prof = it.normalizado?.profesionales || {};
+    const keyActual = profKey(item.roleId, prof[cfg.field]);
+
+    if(keyActual !== item.key) continue;
+
+    it.resolved = it.resolved || {};
+    it.resolved[cfg.idField] = id;
+    it.resolved[cfg.okField] = true;
+    it.resolved[cfg.pendField] = false;
+
+    it._selectedIds = it._selectedIds || {};
+    it._selectedIds.profIds = it._selectedIds.profIds || {};
+    it._selectedIds.profIds[cfg.idField] = id;
+
+    it.normalizado = mergeResolvedIntoNormalizado(it.normalizado, it.resolved, it.raw);
+    it._search = null;
+
+    if(state.importId && it.itemId){
+      batch.set(doc(db, 'produccion_imports', state.importId, 'items', it.itemId), {
+        resolved: it.resolved,
+        _selectedIds: it._selectedIds,
+        normalizado: it.normalizado,
+        actualizadoEl: serverTimestamp(),
+        actualizadoPor: state.user?.email || ''
+      }, { merge:true });
+
+      batchCount++;
+
+      if(batchCount >= 400){
+        await batch.commit();
+        batch = writeBatch(db);
+        batchCount = 0;
+      }
+    }
+
+    afectados++;
+  }
+
+  if(batchCount > 0){
+    await batch.commit();
+  }
+
+  return afectados;
 }
 
 function paintResolverModal(){
@@ -1808,21 +1870,24 @@ function paintResolverModal(){
             actualizadoPor: state.user?.email || ''
           }, { merge:true });
 
-          await persistMapping(docMapProf, item.key, rut);
-
-          toast('✅ Profesional creado y asociado');
-          await refreshAfterMapping();
+          toast('✅ Profesional creado. Ahora selecciónalo en la lista y aplícalo a esta carga.');
+          await loadCatalogs();
+          recomputePending();
           paintResolverModal();
         });
 
         // guardar asociación
+        // ✅ Ya NO guarda mapping permanente.
+        // Solo aplica el profesional a los ítems actuales de esta carga.
         row.querySelector(`[data-save-prof="${CSS.escape(item.key)}"]`)?.addEventListener('click', async ()=>{
           const sel = row.querySelector(`select[data-assoc-prof="${CSS.escape(item.key)}"]`);
           const id = sel?.value || '';
           if(!id){ toast('Selecciona un profesional'); return; }
-          await persistMapping(docMapProf, item.key, id);
-          toast('Profesional asociado');
-          await refreshAfterMapping();
+
+          const afectados = await aplicarProfesionalSoloAEstaCarga(item, id);
+
+          toast(`Profesional aplicado solo a esta carga (${afectados} ítems). No se guardó mapping permanente.`);
+          recomputePending();
           paintResolverModal();
         });
 
@@ -1850,7 +1915,7 @@ async function learnMappingsFromItemDecision(patch){
     jobs.push(persistMapping(docMapClinicas, keyClin, sel.clinicaId));
   }
 
-  // ---- Cirugía por contexto (Clínica + Tipo + Cirugía) ----
+  // ---- Cirugía por contexto ----
   if(sel.cirugiaId && clean(orig.cirugia)){
     const keyCir = cirKey(
       normalizeKey(orig.clinica || ''),
@@ -1860,21 +1925,9 @@ async function learnMappingsFromItemDecision(patch){
     jobs.push(persistMapping(docMapCirugias, keyCir, sel.cirugiaId));
   }
 
-  // ---- Profesionales por rol ----
-  const roles = [
-    { role:'r_cirujano',    name: orig.profesionales?.cirujano,    id: sel.profIds?.cirujanoId },
-    { role:'r_anestesista', name: orig.profesionales?.anestesista, id: sel.profIds?.anestesistaId },
-    { role:'r_ayudante_1',  name: orig.profesionales?.ayudante1,   id: sel.profIds?.ayudante1Id },
-    { role:'r_ayudante_2',  name: orig.profesionales?.ayudante2,   id: sel.profIds?.ayudante2Id },
-    { role:'r_arsenalera',  name: orig.profesionales?.arsenalera,  id: sel.profIds?.arsenaleraId }
-  ];
-
-  for(const r of roles){
-    if(r.id && clean(r.name)){
-      const keyProf = profKey(r.role, r.name);
-      jobs.push(persistMapping(docMapProf, keyProf, r.id));
-    }
-  }
+  // ✅ IMPORTANTE:
+  // Ya NO aprendemos mappings de profesionales.
+  // Profesionales se guardan solo en el ítem/import actual con resolved/_selectedIds.
 
   if(jobs.length){
     await Promise.all(jobs);
