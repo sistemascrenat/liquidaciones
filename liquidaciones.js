@@ -3001,6 +3001,9 @@ function openDetalle(agg){
   const descuentoCLP = Number(agg?.ajustes?.descuentoCLP || 0) || 0;
   const descuentosManualesCLP = Number(agg?.ajustes?.descuentosManualesCLP || 0) || 0;
   const bonoCLP = Number(agg?.ajustes?.bonoCLP || 0) || 0;
+  const descuentosManuales = Array.isArray(agg?.ajustes?.descuentosManuales)
+    ? agg.ajustes.descuentosManuales
+    : [];
   const cirugiasComoPrincipal = Number(agg?.ajustes?.cirugiasComoPrincipal || 0) || 0;
   const ufValorCLP = Number(agg?.ajustes?.ufValorCLP || 0) || 0;
   
