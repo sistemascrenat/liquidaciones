@@ -405,23 +405,27 @@ function setPills(){
 function setButtons(){
   const staged = state.status === 'staged';
   const confirmed = state.status === 'confirmada';
+  const anulada = state.status === 'anulada';
 
   const totalPend =
     state.pending.clinicas.length +
     state.pending.cirugias.length +
     state.pending.amb.length +
-    state.pending.prof.length; // ✅
-
+    state.pending.prof.length;
 
   $('btnResolver').disabled = !(staged && totalPend > 0);
-  
-  // ✅ Confirmar SIEMPRE habilitado mientras haya staging.
-  // (Se confirmará con pendientes marcadas en producción)
-  $('btnConfirmar').disabled = !staged;
-  
-  $('btnAnular').disabled = !(staged || confirmed);
-}
 
+  // Confirmar solo si está en staging
+  $('btnConfirmar').disabled = !staged;
+
+  // Anular si está staged o confirmada
+  $('btnAnular').disabled = !(staged || confirmed);
+
+  // Reactivar solo si está anulada
+  if ($('btnReactivar')) {
+    $('btnReactivar').disabled = !anulada;
+  }
+}
 function dirtyCount(){
   return state.dirtyEdits?.size || 0;
 }
@@ -2426,6 +2430,41 @@ async function anularImportacion(){
   toast('Importación anulada');
 }
 
+async function reactivarImportacion(){
+  if(!state.importId){
+    toast('No hay importación para reactivar.');
+    return;
+  }
+
+  if(state.status !== 'anulada'){
+    toast('Solo se puede reactivar una importación anulada.');
+    return;
+  }
+
+  const ok = confirm(
+    `¿Reactivar esta importación?\n\n${state.importId}\n\nQuedará nuevamente como staging y luego podrás confirmarla.`
+  );
+
+  if(!ok) return;
+
+  const importId = state.importId;
+
+  await setDoc(doc(db, 'produccion_imports', importId), {
+    estado: 'staged',
+    reactivadaEl: serverTimestamp(),
+    reactivadaPor: state.user?.email || '',
+    actualizadoEl: serverTimestamp(),
+    actualizadoPor: state.user?.email || ''
+  }, { merge:true });
+
+  state.status = 'staged';
+
+  setStatus(`🟡 Importación reactivada como staging: ${importId}`);
+  setButtons();
+
+  toast('✅ Importación reactivada. Ahora puedes confirmar.');
+}
+
 async function guardarColaEnProduccionConfirmada(queueItems){
   // queueItems = items ya “resueltos” o editados desde la cola (aunque antes estaban PENDIENTE)
   // OBJETIVO: escribir SI O SI en la producción confirmada (path final)
@@ -4162,6 +4201,7 @@ requireAuth({
     ------------------------- */
     $('btnConfirmar')?.addEventListener('click', confirmarImportacion);
     $('btnAnular')?.addEventListener('click', anularImportacion);
+    $('btnReactivar')?.addEventListener('click', reactivarImportacion);
 
     /* -------------------------
        Cargar staging manual por ImportID
