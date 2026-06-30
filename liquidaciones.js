@@ -25,6 +25,11 @@ import {
 // En tu esquema real, la producción está en: produccion/{ano}/meses/{mes}/pacientes/{rut}/items/{...}
 const PROD_ITEMS_GROUP = 'items';
 
+// ✅ Excepción bono Rafael Luengas
+const RAFAEL_LUENGAS_RUT_CANON = '762169959';
+const RAFAEL_LUENGAS_BONO_POR_CIRUGIA = 100000;
+const RAFAEL_LUENGAS_BONO_LABEL = 'BONO SEGUIMIENTO PAD';
+
 /* =========================
    Helpers
 ========================= */
@@ -837,11 +842,13 @@ async function generarPDFLiquidacionProfesional(agg){
         ).replace('TRAMO ', 'TRAMO ')
       : (tramoIdx ? `TRAMO ${tramoIdx}` : '');
   
+    const bonoLabel = cleanReminder(agg?.ajustes?.bonoLabel || 'BONO CIRUJANO');
+    
     ajustesRows.push({
-      item: `BONO CIRUJANO ${tramoTxt}`.trim(),
-      // ✅ en CANTIDAD debe ir la cantidad de cirugías (ej 13)
+      item: bonoLabel === 'BONO CIRUJANO'
+        ? `BONO CIRUJANO ${tramoTxt}`.trim()
+        : bonoLabel,
       cant: Number(cirugiasComoPrincipal || 0) || 0,
-      // ✅ subtotal se mantiene como monto del bono
       sub: bonoCLP
     });
   }
@@ -2760,36 +2767,53 @@ function buildLiquidaciones(){
   
     let bonoCLP = 0;
     let bonoTramo = null;
-  
+    let bonoTramoIndex = 0;
+    let bonoLabel = 'BONO CIRUJANO';
+    
     const aplicaBono =
       (x.rolPrincipal === 'r_cirujano') &&
       (cirugiasComoPrincipal > 0) &&
-      (x.tieneBono !== false); 
-
-    let bonoTramoIndex = 0;
+      (x.tieneBono !== false);
+    
+    const esRafaelLuengas =
+      canonRutAny(x.rut) === RAFAEL_LUENGAS_RUT_CANON;
     
     if(aplicaBono){
-      const tramos = Array.isArray(x.bonosTramosOverride) ? x.bonosTramosOverride : state.bonosTramosGlobal;
-      const tramo = pickTramo(tramos, cirugiasComoPrincipal);
     
-      if(tramo && (Number(tramo.montoCLP || 0) > 0)){
-        bonoCLP = Number(tramo.montoCLP || 0) || 0;
-        bonoTramo = tramo;
+      // ✅ Excepción Rafael Luengas:
+      // paga $100.000 por cada cirugía como cirujano principal
+      if(esRafaelLuengas){
+        bonoCLP = cirugiasComoPrincipal * RAFAEL_LUENGAS_BONO_POR_CIRUGIA;
+        bonoTramo = null;
+        bonoTramoIndex = 0;
+        bonoLabel = RAFAEL_LUENGAS_BONO_LABEL;
     
-        // ✅ detectar índice del tramo (1-based) para mostrar "Tramo 1"
-        const idx = tramos.findIndex(t=>{
-          const min = Number(t?.min ?? 0) || 0;
-          const max = (t?.max === null || t?.max === undefined || t?.max === '') ? null : (Number(t.max) || 0);
+      }else{
+        // ✅ Regla normal: override del profesional si existe; si no, global
+        const tramos = Array.isArray(x.bonosTramosOverride) && x.bonosTramosOverride.length
+          ? x.bonosTramosOverride
+          : state.bonosTramosGlobal;
     
-          const montoRaw = (t?.montoCLP ?? t?.monto ?? t?.bonoCLP ?? t?.bono ?? 0);
-          const monto = asNumberLoose(montoRaw);
+        const tramo = pickTramo(tramos, cirugiasComoPrincipal);
     
-          return (min === tramo.min) &&
-                 ((max ?? null) === (tramo.max ?? null)) &&
-                 (monto === (Number(tramo.montoCLP || 0) || 0));
-        });
+        if(tramo && (Number(tramo.montoCLP || 0) > 0)){
+          bonoCLP = Number(tramo.montoCLP || 0) || 0;
+          bonoTramo = tramo;
     
-        bonoTramoIndex = (idx >= 0) ? (idx + 1) : 0;
+          const idx = tramos.findIndex(t=>{
+            const min = Number(t?.min ?? 0) || 0;
+            const max = (t?.max === null || t?.max === undefined || t?.max === '') ? null : (Number(t.max) || 0);
+    
+            const montoRaw = (t?.montoCLP ?? t?.monto ?? t?.bonoCLP ?? t?.bono ?? 0);
+            const monto = asNumberLoose(montoRaw);
+    
+            return (min === tramo.min) &&
+                   ((max ?? null) === (tramo.max ?? null)) &&
+                   (monto === (Number(tramo.montoCLP || 0) || 0));
+          });
+    
+          bonoTramoIndex = (idx >= 0) ? (idx + 1) : 0;
+        }
       }
     }
 
@@ -2818,10 +2842,13 @@ function buildLiquidaciones(){
       bonoCLP,
       bonoTramo,
       bonoTramoIndex,
+    
+      // ✅ Texto especial del bono
+      bonoLabel,
+    
       totalProcedimientos,
       totalAPagar
     };
-
   
     return { ...x, status };
   });
@@ -3054,12 +3081,14 @@ function openDetalle(agg){
           )
         : (tramoIdx ? `Tramo ${tramoIdx}` : '');
 
+      const bonoLabel = cleanReminder(agg?.ajustes?.bonoLabel || 'Bono cirujano');
+      
       ajustesHtml.push(`
         <tr>
-          <td>Bono cirujano</td>
+          <td>${escapeHtml(bonoLabel)}</td>
           <td class="mono">${escapeHtml(String(cirugiasComoPrincipal || 0))}</td>
           <td class="mono">${escapeHtml(clp(bonoCLP))}</td>
-          <td class="mini muted">${escapeHtml(tramoTxt)}</td>
+          <td class="mini muted">${escapeHtml(bonoLabel === 'Bono cirujano' ? tramoTxt : '')}</td>
         </tr>
       `);
     }
