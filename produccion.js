@@ -475,12 +475,9 @@ async function deleteOneItemQueued(it){
     throw new Error('No existe el item para eliminar.');
   }
 
-  // ✅ Si está en staging, se marca eliminado en la importación
-  if(state.status === 'staged'){
-    if(!state.importId || !it.itemId){
-      throw new Error('Falta importId/itemId para eliminar en staging.');
-    }
-
+  // ✅ 1) Siempre marcar eliminado también en la importación/staging
+  // Esto hace que desaparezca de la vista previa, porque la pantalla carga desde produccion_imports.
+  if(state.importId && it.itemId){
     await setDoc(doc(db, 'produccion_imports', state.importId, 'items', it.itemId), {
       estado: 'eliminado',
       eliminadoEl: serverTimestamp(),
@@ -488,12 +485,9 @@ async function deleteOneItemQueued(it){
       actualizadoEl: serverTimestamp(),
       actualizadoPor: state.user?.email || ''
     }, { merge:true });
-
-    state.stagedItems = (state.stagedItems || []).filter(x => x !== it);
-    return;
   }
 
-  // ✅ Si ya está confirmada, se marca eliminado en producción final
+  // ✅ 2) Si ya estaba confirmada, además marcar eliminado en producción final
   if(state.status === 'confirmada'){
     const n = it.normalizado || {};
     const raw = it.raw || {};
@@ -519,12 +513,13 @@ async function deleteOneItemQueued(it){
       actualizadoEl: serverTimestamp(),
       actualizadoPor: state.user?.email || ''
     }, { merge:true });
-
-    state.stagedItems = (state.stagedItems || []).filter(x => x !== it);
-    return;
   }
 
-  throw new Error('Estado no permite eliminar.');
+  // ✅ 3) Sacar inmediatamente de la tabla en memoria
+  state.stagedItems = (state.stagedItems || []).filter(x => x !== it);
+
+  recomputePending();
+  paintPreview();
 }
 
 async function flushDirtyEdits(options = {}){
