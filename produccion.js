@@ -447,13 +447,85 @@ function refreshDirtyUI(){
 }
 
 function enqueueDirtyEdit(key, it, patch){
-  state.dirtyEdits.set(key, { it, patch, queuedAt: Date.now() });
-  refreshDirtyUI();
+  state.dirtyEdits.set(key, {
+    it,
+    action: 'edit',
+    patch,
+    queuedAt: Date.now()
+  });
 
-  // ✅ persistir la cola en Firestore (debounced)
+  refreshDirtyUI();
   schedulePersistDirtyQueue();
 }
 
+function enqueueDirtyDelete(key, it){
+  state.dirtyEdits.set(key, {
+    it,
+    action: 'delete',
+    patch: {},
+    queuedAt: Date.now()
+  });
+
+  refreshDirtyUI();
+  schedulePersistDirtyQueue();
+}
+
+async function deleteOneItemQueued(it){
+  if(!it){
+    throw new Error('No existe el item para eliminar.');
+  }
+
+  // ✅ Si está en staging, se marca eliminado en la importación
+  if(state.status === 'staged'){
+    if(!state.importId || !it.itemId){
+      throw new Error('Falta importId/itemId para eliminar en staging.');
+    }
+
+    await setDoc(doc(db, 'produccion_imports', state.importId, 'items', it.itemId), {
+      estado: 'eliminado',
+      eliminadoEl: serverTimestamp(),
+      eliminadoPor: state.user?.email || '',
+      actualizadoEl: serverTimestamp(),
+      actualizadoPor: state.user?.email || ''
+    }, { merge:true });
+
+    state.stagedItems = (state.stagedItems || []).filter(x => x !== it);
+    return;
+  }
+
+  // ✅ Si ya está confirmada, se marca eliminado en producción final
+  if(state.status === 'confirmada'){
+    const n = it.normalizado || {};
+    const raw = it.raw || {};
+
+    const fechaISO = n.fechaISO || parseDateToISO(raw['Fecha'] || '');
+    const horaHM = n.horaHM || parseHora24(raw['Hora'] || '');
+    const rutKey = normalizeRutKey(n.rut || raw['RUT'] || '');
+
+    if(!fechaISO || !horaHM || !rutKey){
+      throw new Error('Falta Fecha/Hora/RUT para eliminar en producción confirmada.');
+    }
+
+    const YYYY = String(state.year);
+    const MM = pad(state.monthNum, 2);
+    const timeId = `${fechaISO}_${horaHM}`;
+
+    const refItem = doc(db, 'produccion', YYYY, 'meses', MM, 'pacientes', rutKey, 'items', timeId);
+
+    await setDoc(refItem, {
+      estado: 'eliminada',
+      eliminadoEl: serverTimestamp(),
+      eliminadoPor: state.user?.email || '',
+      actualizadoEl: serverTimestamp(),
+      actualizadoPor: state.user?.email || ''
+    }, { merge:true });
+
+    state.stagedItems = (state.stagedItems || []).filter(x => x !== it);
+    return;
+  }
+
+  throw new Error('Estado no permite eliminar.');
+}
 
 async function flushDirtyEdits(options = {}){
   const total = dirtyCount();
@@ -478,7 +550,12 @@ async function flushDirtyEdits(options = {}){
         continue;
       }
   
-      await saveOneItemPatch(v.it, v.patch, options);
+      if(v.action === 'delete'){
+        await deleteOneItemQueued(v.it);
+      } else {
+        await saveOneItemPatch(v.it, v.patch, options);
+      }
+      
       state.dirtyEdits.delete(k);
       okCount++;
       schedulePersistDirtyQueue();
@@ -527,13 +604,13 @@ async function persistDirtyQueueNow(){
   const ref = dirtyQueueDocRef(importId);
   if(!ref) return;
 
-  // serializar Map -> objeto plano
   const entriesObj = {};
+
   for(const [k, v] of state.dirtyEdits.entries()){
     entriesObj[k] = {
-      // guardamos lo mínimo necesario para reintentar
       itemId: clean(v?.it?.itemId || ''),
       idx: Number(v?.it?.idx || 0) || 0,
+      action: clean(v?.action || 'edit'),
       patch: v?.patch || {},
       queuedAt: Number(v?.queuedAt || Date.now()) || Date.now()
     };
@@ -580,7 +657,12 @@ async function loadDirtyQueueFromFirestore(importId){
     const patch = e.patch || {};
     const queuedAt = Number(e.queuedAt || Date.now()) || Date.now();
 
-    state.dirtyEdits.set(k, { it, patch, queuedAt });
+    state.dirtyEdits.set(k, {
+      it,
+      action: clean(e.action || 'edit'),
+      patch,
+      queuedAt
+    });
   }
 
   refreshDirtyUI();
@@ -2027,16 +2109,17 @@ async function loadStagingFromFirestore(importId){
     const staged = [];
     snapItems.forEach(d=>{
       const x = d.data() || {};
+    
+      // ✅ No mostrar en pantalla items eliminados de la carga
+      if(clean(x.estado) === 'eliminado') return;
+    
       staged.push({
         idx: Number(x.idx || 0) || 0,
-        itemId: clean(x.itemId) || d.id, // ✅ clave para editar
+        itemId: clean(x.itemId) || d.id,
         raw: x.raw || {},
         normalizado: x.normalizado || {},
-      
-        // ✅ REHIDRATAR lo que ya editaste/guardaste
         resolved: x.resolved || null,
         _selectedIds: x._selectedIds || null,
-      
         _search: null
       });
     });
@@ -2194,8 +2277,15 @@ async function confirmarImportacion(){
   }, { merge:true });
 
   const docs = [];
-  itemsSnap.forEach(d => docs.push({ itemId: d.id, ...(d.data() || {}) }));
-
+  
+  itemsSnap.forEach(d => {
+    const x = d.data() || {};
+  
+    // ✅ Si fue eliminado desde editar paciente / cola, no entra a producción final
+    if(clean(x.estado) === 'eliminado') return;
+  
+    docs.push({ itemId: d.id, ...x });
+  });
   const batchSize = 320;
   let i = 0;
 
@@ -3356,20 +3446,37 @@ function openItemModal(it){
       </div>
     </div>
 
-    <!-- ✅ NUEVO: botón para abrir modal avanzado -->
-    <div style="display:flex; justify-content:flex-end; margin-top:12px;">
+    <!-- ✅ Botones edición avanzada / eliminación -->
+    <div style="display:flex; justify-content:space-between; margin-top:12px; gap:10px;">
+      <button id="btnEliminarItem" type="button" class="btn danger">Eliminar de la carga</button>
       <button id="btnMoreInfo" type="button" class="btn soft">Editar más información</button>
     </div>
   `;
   $('itemForm').innerHTML = form;
 
+  // key estable para acumular cambios
+  const key = (pacienteId && timeId) ? `${pacienteId}||${timeId}` : `STAGING||${it.idx}`;
+  
   // ✅ click botón "Editar más información"
   $('btnMoreInfo').onclick = ()=>{
     openMoreModalFromItemModal();
   };
-
-  // key estable para acumular cambios
-  const key = (pacienteId && timeId) ? `${pacienteId}||${timeId}` : `STAGING||${it.idx}`;
+  
+  // ✅ click botón "Eliminar de la carga"
+  $('btnEliminarItem').onclick = ()=>{
+    const nombre = clean(it.normalizado?.nombrePaciente || it.raw?.['Nombre Paciente'] || '');
+    const rut = clean(it.normalizado?.rut || it.raw?.['RUT'] || '');
+  
+    const ok = confirm(
+      `¿Eliminar este paciente/ítem de la carga?\n\n${nombre || 'Sin nombre'} ${rut ? '(' + rut + ')' : ''}\n\nQuedará en cola y se aplicará cuando hagas clic en Guardar cola.`
+    );
+  
+    if(!ok) return;
+  
+    enqueueDirtyDelete(key, it);
+    toast(`🟡 Eliminación agregada a cola (total: ${dirtyCount()})`);
+    closeItemModal();
+  };
 
   // 1) Guardar 1 ítem (inmediato)
   $('btnGuardarItem').onclick = async ()=>{
