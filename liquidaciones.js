@@ -2076,9 +2076,19 @@ async function loadProduccionMes(){
   snap.forEach(d=>{
     const x = d.data() || {};
 
-    // Ignorar anuladas
+    // Ignorar anuladas / eliminadas / reemplazadas
     const est = normalize(x.estado || '');
-    if(est === 'anulada' || est === 'anulado' || est === 'cancelada') return;
+    
+    if(
+      est === 'anulada' ||
+      est === 'anulado' ||
+      est === 'cancelada' ||
+      est === 'cancelado' ||
+      est === 'eliminada' ||
+      est === 'eliminado' ||
+      est === 'reemplazada' ||
+      est === 'reemplazado'
+    ) return;
 
     out.push({ id: d.id, data: x });
   });
