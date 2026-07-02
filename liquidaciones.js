@@ -2526,11 +2526,12 @@ function buildLiquidaciones(){
       const profIdsResolved = (resolved.profIds && typeof resolved.profIds === 'object') ? resolved.profIds : {};
       
       const profIdRaw =
-        cleanReminder(profIdsResolved?.[rf.idKey]) ||      // resolved.profIds.cirujanoId, etc
-        cleanReminder(resolved?.[rf.idKey]) ||             // resolved.cirujanoId directo, etc
-        cleanReminder(sel?.profIds?.[rf.idKey]) ||         // _selectedIds.profIds.cirujanoId, etc
-        cleanReminder(sel?.[rf.idKey]) ||                  // _selectedIds.cirujanoId directo, etc
-        cleanReminder(x.profesionalesId?.[rf.idKey]) ||     // legacy
+        cleanReminder(x.profesionalesId?.[rf.idKey]) ||
+        cleanReminder(norm.profesionalesId?.[rf.idKey]) ||
+        cleanReminder(sel?.profIds?.[rf.idKey]) ||
+        cleanReminder(sel?.[rf.idKey]) ||
+        cleanReminder(profIdsResolved?.[rf.idKey]) ||
+        cleanReminder(resolved?.[rf.idKey]) ||
         '';
 
       if(!profNameRaw && !profIdRaw) continue;
