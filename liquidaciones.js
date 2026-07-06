@@ -398,6 +398,9 @@ async function generarPDFLiquidacionProfesional(agg){
   // ✅ Profesional (persona natural)
   const profNombre = (agg?.nombre || '').toString().trim();
   const profRut    = (agg?.rut || '').toString().trim();
+
+  const esRafaelLuengasPDF =
+    canonRutAny(profRut) === RAFAEL_LUENGAS_RUT_CANON;
   
   // ✅ Empresa (solo si jurídica)
   const tipoPersona = (agg?.tipoPersona || '').toString().toLowerCase().trim(); // 'juridica' | 'natural' | ''
@@ -897,17 +900,16 @@ async function generarPDFLiquidacionProfesional(agg){
   y = y - totalBarH - 10;
 
   // =========================
-  // ✅ DESGLOSE FECHAS DE PAGO (post TOTAL A PAGAR)
-  // - 5 del mes cargado: PARTICULAR/ISAPRE (+ BONO si aplica)
-  // - 27 del mes cargado: FONASA
-  // - Monto Particular incluye: Particular/Isapre - Descuento + Bono (para que sume totalAPagar)
+  // ✅ DESGLOSE FECHAS DE PAGO + DATOS CLÍNICA
+  // - Normal: se dibuja en página 1
+  // - Rafael Luengas: se dibuja en página 2 vertical
   // =========================
-  {
+  
+  function drawBloqueFechasPagoYClinica(page, startY){
+    let yy = startY;
+  
     const lines = Array.isArray(agg?.lines) ? agg.lines : [];
   
-    // ✅ Regla pagos:
-    // - Día 27: SOLO Fonasa del Cirujano (roleId === 'r_cirujano')
-    // - Día 5 : Todo lo demás (Particular/Isapre, MLE, y Fonasa de otros roles)
     const baseDia27 = lines.reduce((acc, l) => {
       const tp = String(l?.tipoPaciente || '').toLowerCase().trim();
       const isFonasa = tp.includes('fona');
@@ -915,113 +917,109 @@ async function generarPDFLiquidacionProfesional(agg){
       const m = Number(l?.monto || 0) || 0;
       return (isFonasa && isCirujano) ? (acc + m) : acc;
     }, 0);
-
+  
     const baseDia5 = lines.reduce((acc, l) => {
       const tp = String(l?.tipoPaciente || '').toLowerCase().trim();
       const isFonasa = tp.includes('fona');
       const isCirujano = String(l?.roleId || '') === 'r_cirujano';
       const m = Number(l?.monto || 0) || 0;
-
-      // Todo lo que NO sea "Fonasa Cirujano"
       return (isFonasa && isCirujano) ? acc : (acc + m);
     }, 0);
   
-    // Bono y descuento (ya calculados arriba)
     const bono = Number(bonoCLP || 0) || 0;
     const desc = Number(descuentoCLP || 0) || 0;
   
-    // ✅ Reparto para que el desglose sume EXACTO el totalAPagar:
-    // Particular/Isapre: Particular - Descuento + Bono
-    // Fonasa: Fonasa
-    let montoPart = Math.round(baseDia5 - desc + bono); // día 5 (incluye MLE + Fonasa no-cirujano)
-    let montoFona = Math.round(baseDia27);              // día 27 (Fonasa cirujano)
-  
-    // Si por descuento el montoPart quedara negativo, lo “arrastra” a Fonasa (sin dejar negativos)
-    if (montoPart < 0) {
-      montoFona = Math.max(0, montoFona + montoPart);
-      montoPart = 0;
-    }
-  
-    // Mostrar tabla solo si hay algo que desglosar (o si hay total a pagar)
-    const shouldShow = (Number(totalAPagar || 0) > 0) || (baseDia5 > 0) || (baseDia27 > 0) || (bono > 0) || (desc > 0);
+    const shouldShow =
+      (Number(totalAPagar || 0) > 0) ||
+      (baseDia5 > 0) ||
+      (baseDia27 > 0) ||
+      (bono > 0) ||
+      (desc > 0);
   
     if (shouldShow) {
-  
-      // helper fecha texto
       const fechasPago = calcularDesglosePagos(agg);
-
-      // armado asunto
-      const asuntoPart = 'PAGO DE PROCEDIMIENTOS';
-      const asuntoFona = 'PAGO DE PROCEDIMIENTOS FONASA';
-
-      // medidas tabla
-      const headH3 = 22;
-      const rowH3  = 22;
+  
       const rows3 = [
-        { fecha: fechasPago.fechaPago1, asunto: asuntoPart, monto: fechasPago.montoPago1 },
-        { fecha: fechasPago.fechaPago2, asunto: asuntoFona, monto: fechasPago.montoPago2 }
+        { fecha: fechasPago.fechaPago1, asunto: 'PAGO DE PROCEDIMIENTOS', monto: fechasPago.montoPago1 },
+        { fecha: fechasPago.fechaPago2, asunto: 'PAGO DE PROCEDIMIENTOS FONASA', monto: fechasPago.montoPago2 }
       ];
   
+      const headH3 = 22;
+      const rowH3  = 22;
       const tableH = headH3 + rows3.length * rowH3;
   
-      // caja exterior
-      drawBox(page1, M, y, boxW, tableH, rgb(1,1,1), BORDER_SOFT, 1);
+      drawBox(page, M, yy, boxW, tableH, rgb(1,1,1), BORDER_SOFT, 1);
+      drawBox(page, M, yy, boxW, headH3, RENNAT_BLUE, RENNAT_BLUE, 1);
   
-      // header azul RENNAT
-      drawBox(page1, M, y, boxW, headH3, RENNAT_BLUE, RENNAT_BLUE, 1);
-  
-      // columnas
       const cFecha = 170;
       const cMonto = 160;
       const cAsun  = boxW - cFecha - cMonto;
   
-      // separadores verticales
-      drawVLine(page1, M + cFecha, y, tableH, 1, BORDER_SOFT);
-      drawVLine(page1, M + cFecha + cAsun, y, tableH, 1, BORDER_SOFT);
+      drawVLine(page, M + cFecha, yy, tableH, 1, BORDER_SOFT);
+      drawVLine(page, M + cFecha + cAsun, yy, tableH, 1, BORDER_SOFT);
   
-      // headers (BLANCO / NEGRITA / MAYUS)
-      drawCellText(page1, 'FECHA DE PAGO', M, y, headH3, 9.5, true, rgb(1,1,1), 8);
-      drawCellText(page1, 'ASUNTO DEL PAGO', M + cFecha, y, headH3, 9.5, true, rgb(1,1,1), 8);
-      drawCellTextRight(page1, 'MONTO', M + cFecha + cAsun, y, cMonto, headH3, 9.5, true, rgb(1,1,1), 8);
+      drawCellText(page, 'FECHA DE PAGO', M, yy, headH3, 9.5, true, rgb(1,1,1), 8);
+      drawCellText(page, 'ASUNTO DEL PAGO', M + cFecha, yy, headH3, 9.5, true, rgb(1,1,1), 8);
+      drawCellTextRight(page, 'MONTO', M + cFecha + cAsun, yy, cMonto, headH3, 9.5, true, rgb(1,1,1), 8);
   
-      // filas (GRIS / TEXTO AZUL / NEGRITA / MAYUS)
       for (let i=0; i<rows3.length; i++) {
         const r = rows3[i];
-        const yTop = y - headH3 - i*rowH3;
-      
-        // ✅ Fondo gris "del logo"
-        page1.drawRectangle({
+        const yTop = yy - headH3 - i*rowH3;
+  
+        page.drawRectangle({
           x: M,
           y: (yTop - rowH3),
           width: boxW,
           height: rowH3,
-          color: RENNAT_GRAY // 👈 nuevo color
+          color: RENNAT_GRAY
         });
-      
-        // redibujar separadores encima del fondo
-        drawVLine(page1, M + cFecha, yTop, rowH3, 1, BORDER_SOFT);
-        drawVLine(page1, M + cFecha + cAsun, yTop, rowH3, 1, BORDER_SOFT);
-      
-        // línea horizontal superior
-        drawHLine2(page1, M, yTop, boxW, 1, BORDER_SOFT);
-      
-        // ✅ Textos AZUL RENNAT, negrita, mayúscula
-        drawCellText(page1, String(r.fecha || '').toUpperCase(), M, yTop, rowH3, 10, true, RENNAT_BLUE, 8);
-        drawCellText(page1, String(r.asunto || '').toUpperCase(), M + cFecha, yTop, rowH3, 10, true, RENNAT_BLUE, 8);
-        drawCellTextRight(page1, money(r.monto || 0), M + cFecha + cAsun, yTop, cMonto, rowH3, 10, true, RENNAT_BLUE, 8);
-      }
- 
-      // línea inferior
-      drawHLine2(page1, M, y - tableH, boxW, 1, BORDER_SOFT);
   
-      // avanzar cursor
-      y = y - tableH - 10;
+        drawVLine(page, M + cFecha, yTop, rowH3, 1, BORDER_SOFT);
+        drawVLine(page, M + cFecha + cAsun, yTop, rowH3, 1, BORDER_SOFT);
+        drawHLine2(page, M, yTop, boxW, 1, BORDER_SOFT);
+  
+        drawCellText(page, String(r.fecha || '').toUpperCase(), M, yTop, rowH3, 10, true, RENNAT_BLUE, 8);
+        drawCellText(page, String(r.asunto || '').toUpperCase(), M + cFecha, yTop, rowH3, 10, true, RENNAT_BLUE, 8);
+        drawCellTextRight(page, money(r.monto || 0), M + cFecha + cAsun, yTop, cMonto, rowH3, 10, true, RENNAT_BLUE, 8);
+      }
+  
+      drawHLine2(page, M, yy - tableH, boxW, 1, BORDER_SOFT);
+      yy = yy - tableH - 16;
     }
+  
+    const clinH = drawClinicaBoxPage1(page, yy);
+    yy = yy - clinH - 12;
+  
+    return yy;
   }
-
-  // ✅ Caja DATOS CLÍNICA en Página 1
-  const clinH = drawClinicaBoxPage1(page1, y);
-  y = y - clinH - 12;
+  
+  if (esRafaelLuengasPDF) {
+    const pagePagos = pdfDoc.addPage([W, H]);
+    let yPagos = H - M;
+  
+    drawBox(pagePagos, M, yPagos, boxW, barH, RENNAT_BLUE, RENNAT_BLUE, 1);
+  
+    const tituloPagos = 'Fechas de Pago';
+    drawText(
+      pagePagos,
+      tituloPagos,
+      M + (boxW - measure(tituloPagos, 13, true)) / 2,
+      yPagos - 19,
+      13,
+      true,
+      rgb(1,1,1)
+    );
+  
+    yPagos -= (barH + 18);
+  
+    drawText(pagePagos, `${profNombre || '—'} · ${mesTxt}`, M, yPagos, 10, false, TEXT_MUTED);
+    yPagos -= 18;
+  
+    drawBloqueFechasPagoYClinica(pagePagos, yPagos);
+  
+  } else {
+    y = drawBloqueFechasPagoYClinica(page1, y);
+  }
 
   // =========================
   // PÁGINA 2 — Detalle con la misma lógica (tabla con header azul)
