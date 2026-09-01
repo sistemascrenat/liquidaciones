@@ -204,12 +204,15 @@
           </button>
 
           <button class="btn soft" id="btnResolver" type="button" disabled>Revisar importación</button>
-          <button class="btn soft" id="btnConfirmar" type="button" disabled>Confirmar importación</button>
+          <button
+            class="btn soft"
+            id="btnConfirmar"
+            type="button"
+            disabled
+          >
+            Actualizar liquidaciones
+          </button>
           <button class="btn danger" id="btnAnular" type="button" disabled>Anular importación</button>
-
-          <!-- <span class="pill ok" id="dirtyPill">Cambios en cola: 0</span>
-          <button class="btn soft" id="btnGuardarCola" type="button">Guardar cola</button>
-          <button id="btnLimpiarCola" type="button" class="btn">Limpiar cola</button>-->
 
           <span class="muted tiny" id="statusInfo">—</span>
         </div>
@@ -382,9 +385,23 @@
           </div>
 
           <div class="modalFoot">
-            <button class="btn" id="btnItemCancelar" type="button">Cerrar</button>
+            <button
+              class="btn"
+              id="btnItemCancelar"
+              type="button"
+            >
+              Cerrar
+            </button>
+          
             <span style="flex:1"></span>
-            <button class="btn soft" id="btnGuardarTodo" type="button">Agregar a cola</button>
+          
+            <button
+              class="btn primary"
+              id="btnGuardarItem"
+              type="button"
+            >
+              Guardar cambios
+            </button>
           </div>
         </div>
       </div>
