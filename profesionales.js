@@ -276,13 +276,17 @@ function normalizeProfesionalDoc(id, x){
   const rolPrincipalId = cleanReminder(x.rolPrincipalId) || '';
   const isCir = isCirujanoByRolPrincipalId(rolPrincipalId);
 
-  // ✅ “default si no existe valor explícito”
-  // - si es cirujano y no existe el campo: true
-  // - si NO es cirujano: false (forzado/ignorado aunque exista guardado)
-  const rawTieneBono = (x.tieneBono === undefined || x.tieneBono === null)
-    ? (isCir ? true : false)
-    : !!x.tieneBono;
-
+  // ✅ Bono SOLO si está explícitamente marcado en Firestore
+  //
+  // - Cirujano + tieneBono:true  => recibe bono
+  // - Cirujano sin campo         => NO recibe bono
+  // - Cirujano + false           => NO recibe bono
+  // - No cirujano                => nunca recibe bono
+  const rawTieneBono =
+    x.tieneBono === true ||
+    String(x.tieneBono || '').toLowerCase().trim() === 'true' ||
+    String(x.tieneBono || '').trim() === '1';
+  
   const tieneBono = isCir ? rawTieneBono : false;
 
   return {
@@ -989,10 +993,12 @@ async function importXLSX(file){
       // bono: solo si es cirujano; si viene vacío y es cirujano => true
       tieneBono: (() => {
         if(!isCir) return false;
-        if(!tieneBonoRaw) return true;
-        return boolFromCell(tieneBonoRaw, true);
+      
+        // ✅ Solo true si el XLSX lo indica explícitamente
+        if(!tieneBonoRaw) return false;
+      
+        return boolFromCell(tieneBonoRaw, false);
       })(),
-
       actualizadoEl: serverTimestamp(),
       actualizadoPor: state.user?.email || ''
     };
@@ -1175,18 +1181,85 @@ async function saveBonosOnlyThis(){
 async function saveBonosForAll(){
   const tramos = readBonosTable();
 
-  await setDoc(docBonosConfig, {
-    tramos,
-    actualizadoEl: serverTimestamp(),
-    actualizadoPor: state.user?.email || ''
-  }, { merge:true });
+  try{
+    // =====================================================
+    // 1. Guardar nueva tabla GLOBAL
+    // =====================================================
+    await setDoc(docBonosConfig, {
+      tramos,
+      actualizadoEl: serverTimestamp(),
+      actualizadoPor: state.user?.email || ''
+    }, { merge:true });
 
-  // actualiza cache local
-  state.bonosGlobal = { tramos };
+    // =====================================================
+    // 2. Eliminar overrides individuales antiguos
+    //
+    // Así "Guardar para todos" realmente significa:
+    // todos usan desde ahora la tabla global.
+    //
+    // IMPORTANTE:
+    // Esto NO activa bonos.
+    // El campo tieneBono sigue decidiendo quién recibe bono.
+    // =====================================================
+    const snap = await getDocs(colProfesionales);
 
-  toast('Bonos guardados para TODOS (global)');
-  closeBonosModal();
-  await loadAll();
+    const tareas = [];
+
+    snap.forEach(d=>{
+      const x = d.data() || {};
+
+      const rolPrincipalId = cleanReminder(
+        x.rolPrincipalId || x.rolPrincipal || ''
+      );
+
+      // Solo nos interesa limpiar overrides de cirujanos
+      if(!isCirujanoByRolPrincipalId(rolPrincipalId)){
+        return;
+      }
+
+      const tieneOverride =
+        Array.isArray(x.bonosTramosOverride) &&
+        x.bonosTramosOverride.length > 0;
+
+      if(!tieneOverride){
+        return;
+      }
+
+      tareas.push(
+        setDoc(
+          doc(db, 'profesionales', d.id),
+          {
+            bonosTramosOverride: [],
+            actualizadoEl: serverTimestamp(),
+            actualizadoPor: state.user?.email || ''
+          },
+          { merge:true }
+        )
+      );
+    });
+
+    if(tareas.length){
+      await Promise.all(tareas);
+    }
+
+    // =====================================================
+    // 3. Actualizar cache local
+    // =====================================================
+    state.bonosGlobal = { tramos };
+
+    toast(
+      tareas.length
+        ? `Bonos globales guardados · ${tareas.length} overrides limpiados`
+        : 'Bonos globales guardados para todos'
+    );
+
+    closeBonosModal();
+    await loadAll();
+
+  }catch(error){
+    console.error('Error guardando bonos globales:', error);
+    toast('No se pudieron guardar los bonos para todos');
+  }
 }
 
 
