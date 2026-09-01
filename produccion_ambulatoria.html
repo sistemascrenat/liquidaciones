@@ -217,15 +217,49 @@
         <div class="divider"></div>
 
         <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
-          <button class="pill warn" id="pillAlertas" type="button">Alertas: 0</button>
-          <button class="pill" id="pillProf" type="button">Pend. profesional: 0</button>
-          <button class="pill" id="pillProc" type="button">Pend. procedimiento: 0</button>
-          <button class="pill ok" id="pillReservoValidos" type="button">Reservo válidos: 0</button>
-          <button class="pill ok" id="pillMKValidos" type="button">MK válidos: 0</button>
-          <button class="pill info" id="pillOk" type="button">OK: 0</button>
-          <button class="pill info" id="pillConfirmables" type="button">Nuevos confirmables: 0</button>
-          <button class="pill ok" id="pillFusionados" type="button">No aplica: 0</button>
-          <span class="muted tiny" id="hintResolver">Cargar Reservo + MK → revisar profesionales y procedimientos → confirmar.</span>
+          <button
+            class="pill"
+            id="pillTodos"
+            type="button"
+          >
+            Todos
+          </button>
+        
+          <button
+            class="pill warn"
+            id="pillAlertas"
+            type="button"
+          >
+            Alertas: 0
+          </button>
+        
+          <button
+            class="pill ok"
+            id="pillReservoValidos"
+            type="button"
+          >
+            Aplican: 0
+          </button>
+        
+          <button
+            class="pill"
+            id="pillFusionados"
+            type="button"
+          >
+            No aplican: 0
+          </button>
+        
+          <button
+            class="pill warn"
+            id="pillConfirmables"
+            type="button"
+          >
+            Cambios sin enviar: 0
+          </button>
+        
+          <span class="muted tiny" id="hintResolver">
+            Importar bruto → resolver alertas → guardar → actualizar liquidaciones.
+          </span>
         </div>
       </section>
 
@@ -237,7 +271,6 @@
             <input id="q" placeholder="Ej: rut, paciente, profesional, tratamiento, artículo, previsión, etc." />
           </div>
 
-        <button id="btnToggleNoAplica" type="button" class="btn">Ver no aplica</button>
         <button id="btnToggleKine" type="button" class="btn">Activar prestaciones excluidas</button>
 
           <span class="muted tiny" id="pagerInfo" style="align-self:flex-end;">—</span>
@@ -352,7 +385,6 @@
             <button class="btn" id="btnItemCancelar" type="button">Cerrar</button>
             <span style="flex:1"></span>
             <button class="btn soft" id="btnGuardarTodo" type="button">Agregar a cola</button>
-            <button class="btn primary" id="btnGuardarItem" type="button">Guardar item</button>
           </div>
         </div>
       </div>
