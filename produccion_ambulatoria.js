@@ -353,6 +353,223 @@ function nombreProcedimientoCatalogo(p) {
   return p?.nombre || p?.procedimiento || p?.descripcion || p?.id || "";
 }
 
+function tieneValorCatalogo(valor) {
+  return (
+    valor !== null &&
+    valor !== undefined &&
+    valor !== "" &&
+    Number.isFinite(Number(valor))
+  );
+}
+
+function tarifaProcedimientoCatalogo(procedimiento) {
+  const tarifa =
+    procedimiento?.tarifa &&
+    typeof procedimiento.tarifa === "object"
+      ? procedimiento.tarifa
+      : {};
+
+  return {
+    modoValor:
+      clean(tarifa.modoValor || "fijo"),
+
+    valor:
+      tieneValorCatalogo(tarifa.valor)
+        ? Number(tarifa.valor)
+        : null,
+
+    comisionPct:
+      tieneValorCatalogo(tarifa.comisionPct)
+        ? Number(tarifa.comisionPct)
+        : null,
+
+    valorProfesional:
+      tieneValorCatalogo(tarifa.valorProfesional)
+        ? Number(tarifa.valorProfesional)
+        : null
+  };
+}
+
+function calcularValoresCatalogoReservo(procedimiento) {
+  if (!procedimiento) {
+    return {
+      procedimientoEncontrado: false,
+      tarifaConfigurada: false,
+      valorBaseCatalogo: null,
+      porcentajeCatalogo: null,
+      valorProfesionalCatalogo: null,
+      valorLiquidable: 0
+    };
+  }
+
+  const tarifa =
+    tarifaProcedimientoCatalogo(procedimiento);
+
+  const valorBaseCatalogo =
+    tieneValorCatalogo(tarifa.valor)
+      ? Number(tarifa.valor)
+      : null;
+
+  const porcentajeCatalogo =
+    tieneValorCatalogo(tarifa.comisionPct)
+      ? Number(tarifa.comisionPct)
+      : null;
+
+  let valorProfesionalCatalogo = null;
+
+  /*
+    Primera prioridad:
+    valor profesional fijo configurado en el catálogo.
+  */
+
+  if (
+    tieneValorCatalogo(
+      tarifa.valorProfesional
+    )
+  ) {
+    valorProfesionalCatalogo =
+      Number(tarifa.valorProfesional);
+  }
+
+  /*
+    Segunda prioridad:
+    porcentaje configurado en catálogo aplicado
+    sobre el valor base también configurado en catálogo.
+
+    Nunca se utiliza el valor del Excel.
+  */
+
+  else if (
+    tieneValorCatalogo(porcentajeCatalogo) &&
+    porcentajeCatalogo > 0 &&
+    tieneValorCatalogo(valorBaseCatalogo)
+  ) {
+    valorProfesionalCatalogo = Math.round(
+      valorBaseCatalogo *
+      (porcentajeCatalogo / 100)
+    );
+  }
+
+  const tarifaConfigurada =
+    tieneValorCatalogo(
+      valorProfesionalCatalogo
+    );
+
+  return {
+    procedimientoEncontrado: true,
+    tarifaConfigurada,
+
+    valorBaseCatalogo,
+    porcentajeCatalogo,
+    valorProfesionalCatalogo,
+
+    valorLiquidable:
+      tarifaConfigurada
+        ? Number(valorProfesionalCatalogo)
+        : 0
+  };
+}
+
+function leerValorArchivoReservo(raw = {}) {
+  /*
+    Este dato queda solo para auditoría.
+    Nunca determina cuánto se liquida.
+  */
+
+  const nombresDirectos = [
+    "Valor profesional",
+    "Valor Profesional",
+    "Valor",
+    "$_1",
+    "$1",
+    "$2"
+  ];
+
+  for (const nombre of nombresDirectos) {
+    if (
+      Object.prototype.hasOwnProperty.call(
+        raw,
+        nombre
+      )
+    ) {
+      return normalizarMonto(raw[nombre]);
+    }
+  }
+
+  /*
+    SheetJS puede renombrar encabezados duplicados
+    como $_1, $_2, etc.
+  */
+
+  const columnasDuplicadas = Object.keys(raw)
+    .filter(key => /^\$_\d+$/.test(key))
+    .sort();
+
+  if (columnasDuplicadas.length) {
+    const ultima =
+      columnasDuplicadas[
+        columnasDuplicadas.length - 1
+      ];
+
+    return normalizarMonto(raw[ultima]);
+  }
+
+  /*
+    Último respaldo informativo: primer $.
+  */
+
+  if (
+    Object.prototype.hasOwnProperty.call(
+      raw,
+      "$"
+    )
+  ) {
+    return normalizarMonto(raw["$"]);
+  }
+
+  return 0;
+}
+
+function aplicarValoresCatalogoAlRegistro(
+  reg,
+  procedimiento
+) {
+  if (reg.origen !== "Reservo") {
+    return;
+  }
+
+  const valores =
+    calcularValoresCatalogoReservo(
+      procedimiento
+    );
+
+  reg.valorArchivo =
+    leerValorArchivoReservo(
+      reg.dataReservo || {}
+    );
+
+  reg.valorBaseCatalogo =
+    valores.valorBaseCatalogo;
+
+  reg.porcentajeCatalogo =
+    valores.porcentajeCatalogo;
+
+  reg.valorProfesionalCatalogo =
+    valores.valorProfesionalCatalogo;
+
+  /*
+    “valor” continúa existiendo por compatibilidad
+    con producción final y liquidaciones antiguas,
+    pero ahora siempre representa el valor profesional
+    obtenido del catálogo.
+  */
+
+  reg.valor =
+    valores.valorLiquidable;
+
+  reg.fuenteValor = "catalogo";
+}
+
 function tokensNombreComparacion(texto, { ignorarTitulos = false } = {}) {
   const ignorar = new Set([
     "DR", "DRA", "DOC", "DOCTOR", "DOCTORA",
@@ -792,6 +1009,32 @@ function snapshotEditable(reg) {
     procedimientoArchivo:
       clean(reg.prestacion),
 
+    valorArchivo:
+      Number(reg.valorArchivo || 0),
+    
+    valorBaseCatalogo:
+      tieneValorCatalogo(
+        reg.valorBaseCatalogo
+      )
+        ? Number(reg.valorBaseCatalogo)
+        : null,
+    
+    porcentajeCatalogo:
+      tieneValorCatalogo(
+        reg.porcentajeCatalogo
+      )
+        ? Number(reg.porcentajeCatalogo)
+        : null,
+    
+    valorProfesionalCatalogo:
+      tieneValorCatalogo(
+        reg.valorProfesionalCatalogo
+      )
+        ? Number(
+            reg.valorProfesionalCatalogo
+          )
+        : null,
+    
     valor:
       Number(reg.valor || 0),
     
@@ -855,7 +1098,20 @@ function crearCambiosHistorial(antes = {}, despues = {}) {
     paciente: "Paciente",
     profesionalArchivo: "Profesional del archivo",
     procedimientoArchivo: "Procedimiento del archivo",
-    valor: "Valor",
+    valorArchivo:
+      "Valor informado por el archivo",
+    
+    valorBaseCatalogo:
+      "Valor base del catálogo",
+    
+    porcentajeCatalogo:
+      "Porcentaje del catálogo",
+    
+    valorProfesionalCatalogo:
+      "Valor profesional del catálogo",
+    
+    valor:
+      "Valor liquidable",
     aplicacionEstado: "Aplicación",
     aplicacionMotivo: "Motivo de aplicación",
     decisionManualEstado: "Decisión manual",
@@ -1058,6 +1314,7 @@ function esProfesionalExcluidoReservo(nombre = "") {
 
   return (
     t.includes("ELIZABETH ROMO") ||
+    t.includes("NICOLA SANDOVAL") ||
     t.includes("NICOLAS SANDOVAL")
   );
 }
@@ -1092,23 +1349,41 @@ function esEvaluacionNutricionalPadTelemedicina(tratamiento = "") {
   );
 }
 
-function evaluarAplicacionReservo(raw = {}) {
-  const estadoCita = clasificarEstadoCitaReservo(raw["Estado cita"]);
-  const estadoPago = clasificarEstadoPagoReservo(raw["Estado pago"]);
+function evaluarAplicacionReservo(
+  raw = {},
+  procedimientoCatalogo = null
+) {
+  const estadoCita =
+    clasificarEstadoCitaReservo(
+      raw["Estado cita"]
+    );
 
-  const profesional = clean(raw["Profesional"]);
-  const tratamiento = clean(raw["Tratamiento"]);
-  const valor = normalizarMonto(raw["Valor"]);
+  const estadoPago =
+    clasificarEstadoPagoReservo(
+      raw["Estado pago"]
+    );
+
+  const profesional =
+    clean(raw["Profesional"]);
+
+  const tratamiento =
+    clean(raw["Tratamiento"]);
+
+  const valoresCatalogo =
+    calcularValoresCatalogoReservo(
+      procedimientoCatalogo
+    );
 
   const alertas = [];
 
   /*
     EXCEPCIONES ESPECÍFICAS
-    Tienen prioridad sobre las reglas generales.
   */
 
   if (
-    esProfesionalExcluidoReservo(profesional) &&
+    esProfesionalExcluidoReservo(
+      profesional
+    ) &&
     estadoPago === "pagado"
   ) {
     return {
@@ -1120,7 +1395,11 @@ function evaluarAplicacionReservo(raw = {}) {
     };
   }
 
-  if (esInstalacionBalonAllurion(tratamiento)) {
+  if (
+    esInstalacionBalonAllurion(
+      tratamiento
+    )
+  ) {
     return {
       aplicacion: construirAplicacion(
         "no_aplica",
@@ -1163,7 +1442,10 @@ function evaluarAplicacionReservo(raw = {}) {
 
   if (
     estadoCita === "no_llego" &&
-    (estadoPago === "pagado" || estadoPago === "plan")
+    (
+      estadoPago === "pagado" ||
+      estadoPago === "plan"
+    )
   ) {
     return {
       aplicacion: construirAplicacion(
@@ -1190,12 +1472,15 @@ function evaluarAplicacionReservo(raw = {}) {
   }
 
   /*
-    ATENDIDOS Y PAGADOS/PLAN
+    ATENDIDOS PAGADOS O PLAN
   */
 
   if (
     estadoCita === "atendido" &&
-    (estadoPago === "pagado" || estadoPago === "plan")
+    (
+      estadoPago === "pagado" ||
+      estadoPago === "plan"
+    )
   ) {
     return {
       aplicacion: construirAplicacion(
@@ -1212,8 +1497,12 @@ function evaluarAplicacionReservo(raw = {}) {
     ATENDIDO + DESCARTADO
 
     Por defecto NO APLICA.
-    La única excepción es Evaluación Nutricional PAD
-    Telemedicina con valor exacto de $8.500.
+
+    La excepción se determina utilizando:
+    - procedimiento resuelto;
+    - valor profesional del catálogo.
+
+    El valor del Excel no participa.
   */
 
   if (
@@ -1221,13 +1510,64 @@ function evaluarAplicacionReservo(raw = {}) {
     estadoPago === "descartado"
   ) {
     if (
-      esEvaluacionNutricionalPadTelemedicina(tratamiento) &&
-      Math.abs(valor) === 8500
+      esEvaluacionNutricionalPadTelemedicina(
+        tratamiento
+      )
     ) {
+      if (!procedimientoCatalogo) {
+        alertas.push(
+          "Evaluación Nutricional PAD pendiente de asociar a un procedimiento del catálogo"
+        );
+
+        return {
+          aplicacion: construirAplicacion(
+            "revisar",
+            "Falta resolver el procedimiento para validar la excepción PAD"
+          ),
+          alertas
+        };
+      }
+
+      if (
+        !valoresCatalogo.tarifaConfigurada
+      ) {
+        alertas.push(
+          "El procedimiento PAD no tiene valor profesional configurado en el catálogo"
+        );
+
+        return {
+          aplicacion: construirAplicacion(
+            "revisar",
+            "Procedimiento PAD sin valor de catálogo"
+          ),
+          alertas
+        };
+      }
+
+      if (
+        Number(
+          valoresCatalogo.valorLiquidable
+        ) !== 8500
+      ) {
+        alertas.push(
+          `El procedimiento PAD tiene un valor de catálogo distinto de $8.500: $${Number(
+            valoresCatalogo.valorLiquidable || 0
+          ).toLocaleString("es-CL")}`
+        );
+
+        return {
+          aplicacion: construirAplicacion(
+            "revisar",
+            "Revisar valor de catálogo de la excepción PAD"
+          ),
+          alertas
+        };
+      }
+
       return {
         aplicacion: construirAplicacion(
           "aplica",
-          "Evaluación Nutricional PAD Telemedicina descartada por $8.500"
+          "Evaluación Nutricional PAD Telemedicina: $8.500 según catálogo"
         ),
         alertas
       };
@@ -1261,7 +1601,11 @@ function evaluarAplicacionReservo(raw = {}) {
 
   if (
     estadoCita === "otro" &&
-    ["pagado", "plan", "descartado"].includes(estadoPago)
+    [
+      "pagado",
+      "plan",
+      "descartado"
+    ].includes(estadoPago)
   ) {
     alertas.push(
       "Estado de cita no reconocido: decidir manualmente si aplica"
@@ -1381,79 +1725,239 @@ function aplicarManualOverrides(items) {
 
 function procesarReservo() {
   return dataReservo.map((r, i) => {
-    const analisisProf = analizarBusquedaProfesional(r["Profesional"]);
-    const profesionalDetectado = analisisProf?.profesional || null;
-    const analisisProc = analizarBusquedaProcedimiento(r["Tratamiento"]);
-    const procedimientoDetectado = analisisProc?.procedimiento || null;
+    const analisisProf =
+      analizarBusquedaProfesional(
+        r["Profesional"]
+      );
 
-    const evalApp = evaluarAplicacionReservo(r);
-    const alertas = [...evalApp.alertas];
-    
-    if (analisisProf?.alerta) alertas.push(analisisProf.alerta);
-    if (analisisProc?.alerta) alertas.push(analisisProc.alerta);
-    
-    
-    if (!normalizarRut(r["Rut"])) alertas.push("RUT vacío o inválido");
-    if (!normalizarTexto(r["Profesional"])) alertas.push("Profesional vacío");
-    if (!normalizarTexto(r["Tratamiento"])) alertas.push("Procedimiento vacío");
-    
-    const alertaRolProcedimiento = construirAlertaRolProcedimiento({
-      profesional: profesionalDetectado,
-      procedimiento: procedimientoDetectado,
-      textoProcedimientoArchivo: r["Tratamiento"]
-    });
-    
+    const profesionalDetectado =
+      analisisProf?.profesional || null;
+
+    const analisisProc =
+      analizarBusquedaProcedimiento(
+        r["Tratamiento"]
+      );
+
+    const procedimientoDetectado =
+      analisisProc?.procedimiento || null;
+
+    /*
+      La aplicación ahora se evalúa utilizando
+      el procedimiento real del catálogo.
+    */
+
+    const evalApp =
+      evaluarAplicacionReservo(
+        r,
+        procedimientoDetectado
+      );
+
+    const alertas = [
+      ...(evalApp.alertas || [])
+    ];
+
+    if (analisisProf?.alerta) {
+      alertas.push(
+        analisisProf.alerta
+      );
+    }
+
+    if (analisisProc?.alerta) {
+      alertas.push(
+        analisisProc.alerta
+      );
+    }
+
+    if (!normalizarRut(r["Rut"])) {
+      alertas.push(
+        "RUT vacío o inválido"
+      );
+    }
+
+    if (
+      !normalizarTexto(
+        r["Profesional"]
+      )
+    ) {
+      alertas.push(
+        "Profesional vacío"
+      );
+    }
+
+    if (
+      !normalizarTexto(
+        r["Tratamiento"]
+      )
+    ) {
+      alertas.push(
+        "Procedimiento vacío"
+      );
+    }
+
+    const alertaRolProcedimiento =
+      construirAlertaRolProcedimiento({
+        profesional:
+          profesionalDetectado,
+
+        procedimiento:
+          procedimientoDetectado,
+
+        textoProcedimientoArchivo:
+          r["Tratamiento"]
+      });
+
     if (alertaRolProcedimiento) {
-      alertas.push(alertaRolProcedimiento);
+      alertas.push(
+        alertaRolProcedimiento
+      );
     }
 
     const resolved = {
-      profesionalId: profesionalDetectado?.id || null,
-      profesionalNombre: profesionalDetectado ? nombreProfesionalCatalogo(profesionalDetectado) : null,
+      profesionalId:
+        profesionalDetectado?.id || null,
 
-      procedimientoId: procedimientoDetectado?.id || null,
-      procedimientoNombre: procedimientoDetectado ? nombreProcedimientoCatalogo(procedimientoDetectado) : null,
+      profesionalNombre:
+        profesionalDetectado
+          ? nombreProfesionalCatalogo(
+              profesionalDetectado
+            )
+          : null,
 
-      autoProfesional: !!profesionalDetectado,
-      autoProcedimiento: !!procedimientoDetectado,
-      autoProcedimientoTipoMatch: analisisProc?.tipoMatch || null,
-      confirmadoManualProfesional: false,
-      confirmadoManualProcedimiento: false
+      procedimientoId:
+        procedimientoDetectado?.id || null,
+
+      procedimientoNombre:
+        procedimientoDetectado
+          ? nombreProcedimientoCatalogo(
+              procedimientoDetectado
+            )
+          : null,
+
+      autoProfesional:
+        !!profesionalDetectado,
+
+      autoProcedimiento:
+        !!procedimientoDetectado,
+
+      autoProcedimientoTipoMatch:
+        analisisProc?.tipoMatch || null,
+
+      confirmadoManualProfesional:
+        false,
+
+      confirmadoManualProcedimiento:
+        false
     };
 
+    const valoresCatalogo =
+      calcularValoresCatalogoReservo(
+        procedimientoDetectado
+      );
+
+    /*
+      Si aplica, debe tener tarifa del catálogo.
+    */
+
+    if (
+      evalApp.aplicacion?.estado === "aplica" &&
+      procedimientoDetectado &&
+      !valoresCatalogo.tarifaConfigurada
+    ) {
+      alertas.push(
+        "El procedimiento no tiene valor profesional configurado en el catálogo"
+      );
+    }
+
     return {
-      itemId: `RES_${String(i + 1).padStart(4, "0")}`,
+      itemId:
+        `RES_${String(i + 1).padStart(4, "0")}`,
+
       sourceIndex: i,
       origen: "Reservo",
 
       fecha: r["Fecha"],
-      fechaNorm: normalizarFecha(r["Fecha"]),
+      fechaNorm:
+        normalizarFecha(r["Fecha"]),
 
       rut: r["Rut"],
-      rutNorm: normalizarRut(r["Rut"]),
+      rutNorm:
+        normalizarRut(r["Rut"]),
 
       paciente: r["Paciente"],
-      pacienteNorm: normalizarPaciente(r["Paciente"]),
+      pacienteNorm:
+        normalizarPaciente(
+          r["Paciente"]
+        ),
 
-      profesional: r["Profesional"],
-      profesionalNorm: normalizarTexto(r["Profesional"]),
-      profesionalDetectado: resolved.profesionalNombre,
+      profesional:
+        r["Profesional"],
 
-      prestacion: r["Tratamiento"],
-      procedimientoNorm: normalizarTexto(r["Tratamiento"]),
-      procedimientoDetectado: resolved.procedimientoNombre,
+      profesionalNorm:
+        normalizarTexto(
+          r["Profesional"]
+        ),
 
-      valor: normalizarMonto(r["Valor"]),
+      profesionalDetectado:
+        resolved.profesionalNombre,
+
+      prestacion:
+        r["Tratamiento"],
+
+      procedimientoNorm:
+        normalizarTexto(
+          r["Tratamiento"]
+        ),
+
+      procedimientoDetectado:
+        resolved.procedimientoNombre,
+
+      /*
+        Valor del archivo:
+        solamente informativo.
+      */
+
+      valorArchivo:
+        leerValorArchivoReservo(r),
+
+      /*
+        Valores efectivos del catálogo.
+      */
+
+      valorBaseCatalogo:
+        valoresCatalogo.valorBaseCatalogo,
+
+      porcentajeCatalogo:
+        valoresCatalogo.porcentajeCatalogo,
+
+      valorProfesionalCatalogo:
+        valoresCatalogo.valorProfesionalCatalogo,
+
+      valor:
+        valoresCatalogo.valorLiquidable,
+
+      fuenteValor:
+        "catalogo",
 
       dataReservo: r,
       dataMK: null,
 
       resolved,
-      aplicacion: evalApp.aplicacion,
+
+      aplicacion:
+        evalApp.aplicacion,
+
       review: construirReview({
-        profesionalId: resolved.profesionalId,
-        procedimientoId: resolved.procedimientoId,
-        alertas
+        profesionalId:
+          resolved.profesionalId,
+
+        procedimientoId:
+          resolved.procedimientoId,
+
+        alertas: [
+          ...new Set(
+            alertas.filter(Boolean)
+          )
+        ]
       }),
 
       confirmadoEnProduccion: false,
@@ -1604,7 +2108,22 @@ function recomputeItemFromCurrentValues(reg) {
   reg.profesionalNorm = normalizarTexto(reg.profesional);
   reg.procedimientoNorm = normalizarTexto(reg.prestacion);
   reg.fechaNorm = normalizarFecha(reg.fecha);
-  reg.valor = normalizarMonto(reg.valor);
+  /*
+    MK mantiene el valor dinámico del archivo.
+    Reservo se actualizará después desde el catálogo.
+  */
+  
+  if (reg.origen === "MK") {
+    reg.valor =
+      normalizarMonto(reg.valor);
+  }
+  
+  if (reg.origen === "Reservo") {
+    reg.valorArchivo =
+      leerValorArchivoReservo(
+        reg.dataReservo || {}
+      );
+  }
 
   /*
     PROFESIONAL
@@ -1682,6 +2201,25 @@ function recomputeItemFromCurrentValues(reg) {
     reg.resolved.procedimientoNombre || null;
 
   /*
+    Cada vez que se resuelve o cambia el procedimiento,
+    se vuelven a leer los valores desde el catálogo.
+  */
+  
+  if (reg.origen === "Reservo") {
+    const procedimientoCatalogoValor =
+      procedimientos.find(
+        p =>
+          p.id ===
+          reg.resolved?.procedimientoId
+      ) || procedimientoDetectado || null;
+  
+    aplicarValoresCatalogoAlRegistro(
+      reg,
+      procedimientoCatalogoValor
+    );
+  }
+
+  /*
     APLICACIÓN
 
     Si existe decisión manual, no volvemos a reemplazarla
@@ -1697,9 +2235,18 @@ function recomputeItemFromCurrentValues(reg) {
         "Decisión manual"
     );
   } else if (reg.origen === "Reservo") {
-    const evaluacion = evaluarAplicacionReservo(
-      reg.dataReservo || {}
-    );
+    const procedimientoParaEvaluar =
+      procedimientos.find(
+        p =>
+          p.id ===
+          reg.resolved?.procedimientoId
+      ) || procedimientoDetectado || null;
+    
+    const evaluacion =
+      evaluarAplicacionReservo(
+        reg.dataReservo || {},
+        procedimientoParaEvaluar
+      );
 
     reg.aplicacion = evaluacion.aplicacion;
     alertas.push(...(evaluacion.alertas || []));
@@ -1752,6 +2299,23 @@ function recomputeItemFromCurrentValues(reg) {
     procedimientos.find(
       p => p.id === reg.resolved.procedimientoId
     ) || null;
+
+  if (
+    reg.origen === "Reservo" &&
+    reg.aplicacion?.estado === "aplica" &&
+    procedimientoCatalogo
+  ) {
+    const valores =
+      calcularValoresCatalogoReservo(
+        procedimientoCatalogo
+      );
+  
+    if (!valores.tarifaConfigurada) {
+      alertas.push(
+        "El procedimiento no tiene valor profesional configurado en el catálogo"
+      );
+    }
+  }
 
   const alertaRol = construirAlertaRolProcedimiento({
     profesional: profesionalCatalogo,
@@ -2178,8 +2742,15 @@ async function guardarDetalle() {
       reg.prestacion =
         reg.dataReservo["Tratamiento"] ?? reg.prestacion;
 
-      reg.valor =
-        normalizarMonto(reg.dataReservo["Valor"]);
+      /*
+        El valor del archivo se conserva solo como referencia.
+        reg.valor será recalculado desde el catálogo.
+      */
+      
+      reg.valorArchivo =
+        leerValorArchivoReservo(
+          reg.dataReservo
+        );
     } else if (reg.dataMK) {
       reg.fecha =
         reg.dataMK["Fecha"] ?? reg.fecha;
@@ -2469,7 +3040,47 @@ function serializeAmbItem(reg) {
     procedimientoDetectado:
       reg.procedimientoDetectado || null,
 
-    valor: Number(reg.valor || 0) || 0,
+    /*
+      Valor efectivo utilizado para liquidar.
+      Siempre proviene del catálogo en Reservo.
+    */
+    
+    valor:
+      Number(reg.valor || 0) || 0,
+    
+    valorArchivo:
+      Number(reg.valorArchivo || 0) || 0,
+    
+    valorBaseCatalogo:
+      tieneValorCatalogo(
+        reg.valorBaseCatalogo
+      )
+        ? Number(reg.valorBaseCatalogo)
+        : null,
+    
+    porcentajeCatalogo:
+      tieneValorCatalogo(
+        reg.porcentajeCatalogo
+      )
+        ? Number(reg.porcentajeCatalogo)
+        : null,
+    
+    valorProfesionalCatalogo:
+      tieneValorCatalogo(
+        reg.valorProfesionalCatalogo
+      )
+        ? Number(
+            reg.valorProfesionalCatalogo
+          )
+        : null,
+    
+    fuenteValor:
+      reg.origen === "Reservo"
+        ? "catalogo"
+        : (
+            reg.fuenteValor ||
+            "archivo"
+          ),
 
     /*
       originalImportado nunca se modifica.
@@ -3306,7 +3917,7 @@ function render() {
       <th>Profesional resuelto</th>
       <th>Procedimiento archivo</th>
       <th>Procedimiento resuelto</th>
-      <th>Valor</th>
+      <th>Valor liquidable</th>
       <th>Revisión</th>
       <th>Aplicación</th>
       <th>Motivo</th>
@@ -3832,7 +4443,42 @@ async function loadStagingFromFirestore(importId) {
       profesionalNombre: x.profesionalNombre || null,
       normalizado: x.normalizado || null,
       
-      valor: Number(x.valor || 0) || 0,
+      valor:
+        Number(x.valor || 0) || 0,
+      
+      valorArchivo:
+        Number(x.valorArchivo || 0) || 0,
+      
+      valorBaseCatalogo:
+        tieneValorCatalogo(
+          x.valorBaseCatalogo
+        )
+          ? Number(x.valorBaseCatalogo)
+          : null,
+      
+      porcentajeCatalogo:
+        tieneValorCatalogo(
+          x.porcentajeCatalogo
+        )
+          ? Number(x.porcentajeCatalogo)
+          : null,
+      
+      valorProfesionalCatalogo:
+        tieneValorCatalogo(
+          x.valorProfesionalCatalogo
+        )
+          ? Number(
+              x.valorProfesionalCatalogo
+            )
+          : null,
+      
+      fuenteValor:
+        x.fuenteValor ||
+        (
+          x.origen === "Reservo"
+            ? "catalogo"
+            : "archivo"
+        ),
       originalImportado:
         x.originalImportado ||
         copiarSeguro(x.dataReservo || x.dataMK || {}),
