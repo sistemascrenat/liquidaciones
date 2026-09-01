@@ -30,6 +30,10 @@ const RAFAEL_LUENGAS_RUT_CANON = '762169959';
 const RAFAEL_LUENGAS_BONO_POR_CIRUGIA = 100000;
 const RAFAEL_LUENGAS_BONO_LABEL = 'BONO SEGUIMIENTO PAD';
 
+// ✅ Procedimiento que NO cuenta para el bono general de cirujanos
+// COLE FONASA
+const PROC_COLE_FONASA_EXCLUIDO_BONO = 'PC0011';
+
 /* =========================
    Helpers
 ========================= */
@@ -2771,15 +2775,27 @@ function buildLiquidaciones(){
   
     // =====================================================
     // ✅ BONO CIRUJANO
-    // - Cirujanos normales: PAD/FONASA NO cuenta para el tramo
-    // - Rafael Luengas: mantiene su regla especial y cuenta
-    //   todas sus cirugías como cirujano principal
+    //
+    // REGLA GENERAL:
+    // - Todas las cirugías como cirujano principal cuentan.
+    // - ÚNICA EXCLUSIÓN:
+    //      procedimiento PC0011 (COLE)
+    //      + paciente FONASA
+    //   Ese caso NO aumenta el contador para determinar el tramo.
+    //
+    // RAFAEL LUENGAS:
+    // - Mantiene intacta su regla especial.
+    // - Para Rafael se cuentan todas sus cirugías.
     // =====================================================
     
     const esRafaelLuengas =
       canonRutAny(x.rut) === RAFAEL_LUENGAS_RUT_CANON;
     
-    // 1) Todas las cirugías realizadas como cirujano principal
+    
+    // =====================================================
+    // 1. TOTAL REAL DE CIRUGÍAS COMO CIRUJANO PRINCIPAL
+    // =====================================================
+    
     const cirugiasComoPrincipalTotal = (x.rolPrincipal === 'r_cirujano')
       ? (x.lines || []).filter(l =>
           l.roleId === 'r_cirujano' &&
@@ -2787,33 +2803,88 @@ function buildLiquidaciones(){
         ).length
       : 0;
     
-    // 2) Cirugías que sirven para calcular el bono por TRAMO
-    // ✅ Se excluyen PAD / FONASA
+    
+    // =====================================================
+    // 2. CIRUGÍAS QUE CUENTAN PARA EL BONO GENERAL
+    // =====================================================
+    
     const cirugiasBonificablesTramo = (x.rolPrincipal === 'r_cirujano')
       ? (x.lines || []).filter(l => {
+    
+          // Debe corresponder a actuación como cirujano
           if(l.roleId !== 'r_cirujano') return false;
+    
+          // Debe ser una cirugía
           if(l.procedimientoTipo !== 'cirugia') return false;
     
-          const tipoPaciente = tipoPacienteNorm(l.tipoPaciente || '');
     
-          // ✅ PAD / FONASA no aumenta el contador del bono
-          if(tipoPaciente === 'fonasa') return false;
+          // -------------------------
+          // Identificar procedimiento
+          // -------------------------
     
+          const procedimientoCodigo = String(
+            l.procedimientoId || ''
+          ).trim().toUpperCase();
+    
+    
+          // -------------------------
+          // Identificar tipo paciente
+          // -------------------------
+    
+          const tipoPaciente = tipoPacienteNorm(
+            l.tipoPaciente || ''
+          );
+    
+    
+          // =================================================
+          // ÚNICA EXCLUSIÓN DEL CONTADOR DEL BONO:
+          //
+          // PC0011 = COLE
+          // +
+          // FONASA
+          // =================================================
+    
+          const esColeFonasa =
+            procedimientoCodigo === PROC_COLE_FONASA_EXCLUIDO_BONO &&
+            tipoPaciente === 'fonasa';
+    
+    
+          if(esColeFonasa){
+            return false;
+          }
+    
+    
+          // Todas las demás cirugías sí cuentan
           return true;
+    
         }).length
       : 0;
     
-    // ✅ La cantidad que efectivamente usa el bono:
-    // - Rafael: todas sus cirugías
-    // - Resto: solo cirugías NO PAD
+    
+    // =====================================================
+    // 3. CANTIDAD FINAL UTILIZADA PARA EL BONO
+    // =====================================================
+    //
+    // Rafael:
+    //   usa TODAS sus cirugías.
+    //
+    // Resto de cirujanos:
+    //   usa todas menos PC0011 + FONASA.
+    //
     const cirugiasComoPrincipal = esRafaelLuengas
       ? cirugiasComoPrincipalTotal
       : cirugiasBonificablesTramo;
+    
+    
+    // =====================================================
+    // 4. VARIABLES DEL BONO
+    // =====================================================
     
     let bonoCLP = 0;
     let bonoTramo = null;
     let bonoTramoIndex = 0;
     let bonoLabel = 'BONO CIRUJANO';
+    
     
     const aplicaBono =
       (x.rolPrincipal === 'r_cirujano') &&
