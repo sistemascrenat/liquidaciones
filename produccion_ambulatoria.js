@@ -3433,7 +3433,7 @@ function render() {
 
   if ($("pillNoAplicaObservaciones")) {
     $("pillNoAplicaObservaciones").textContent =
-      `Observaciones no aplica: ${observacionesNoAplica}`;
+      `No aplican con Observaciones: ${observacionesNoAplica}`;
   }
   
   if ($("pillConfirmables")) {
