@@ -2531,77 +2531,214 @@ function abrirMasInformacion(reg) {
   const itemForm = $("itemForm");
   if (!itemForm) return;
 
-  const original = reg.dataReservo || reg.dataMK || {};
+  /*
+    Antes de reemplazar el contenido del modal,
+    conservamos lo que el usuario seleccionó en la
+    pantalla principal de resolución.
+  */
 
-  const filas = Object.keys(original).map(key => {
-    const value = original[key] ?? "";
+  const profesionalSeleccionado =
+    $("detalleProfesionalId")?.value ||
+    reg.resolved?.profesionalId ||
+    "";
 
-    return `
-      <div class="field" style="margin-bottom:10px;">
-        <label>${escapeHtml(key)}</label>
-        <input
-          type="text"
-          data-extra-key="${escapeHtml(key)}"
-          value="${escapeHtml(String(value))}"
+  const procedimientoSeleccionado =
+    $("detalleProcedimientoId")?.value ||
+    reg.resolved?.procedimientoId ||
+    "";
+
+  /*
+    Creamos nuevamente los selectores dentro de
+    “Editar más información”.
+
+    De esa manera guardarDetalle() seguirá encontrando:
+    - detalleProfesionalId
+    - detalleProcedimientoId
+  */
+
+  const opcionesProfesionales = profesionales
+    .map(p => {
+      const nombre =
+        nombreProfesionalCatalogo(p);
+
+      const selected =
+        profesionalSeleccionado === p.id
+          ? "selected"
+          : "";
+
+      return `
+        <option
+          value="${escapeHtml(p.id)}"
+          ${selected}
         >
-      </div>
-    `;
-  }).join("");
+          ${escapeHtml(nombre)}
+        </option>
+      `;
+    })
+    .join("");
 
-  const historial = Array.isArray(reg.historial)
-    ? [...reg.historial].reverse()
-    : [];
+  const opcionesProcedimientos =
+    procedimientosAmbulatorios()
+      .map(p => {
+        const nombre =
+          nombreProcedimientoCatalogo(p);
 
-  const historialHTML = historial.length
-    ? historial.map(h => `
-        <div style="
-          padding:10px;
-          border:1px solid rgba(0,0,0,.08);
-          border-radius:10px;
-          margin-top:8px;
-        ">
-          <div style="font-weight:900;">
-            ${escapeHtml(h.usuario || "Usuario")} ·
-            ${escapeHtml(
-              h.fecha
-                ? new Date(h.fecha).toLocaleString("es-CL")
-                : ""
-            )}
-          </div>
+        const selected =
+          procedimientoSeleccionado === p.id
+            ? "selected"
+            : "";
 
-          ${
-            h.observacion
-              ? `<div class="muted tiny" style="margin-top:4px;">
-                   Motivo: ${escapeHtml(h.observacion)}
-                 </div>`
-              : ""
-          }
+        return `
+          <option
+            value="${escapeHtml(p.id)}"
+            ${selected}
+          >
+            ${escapeHtml(p.id)} · ${escapeHtml(nombre)}
+          </option>
+        `;
+      })
+      .join("");
 
-          ${(h.cambios || []).map(c => `
-            <div class="tiny" style="margin-top:5px;">
-              <b>${escapeHtml(c.etiqueta || c.campo || "Campo")}:</b>
-              ${escapeHtml(c.antes || "—")}
-              →
-              ${escapeHtml(c.despues || "—")}
-            </div>
-          `).join("")}
+  /*
+    Campos originales del registro.
+
+    Se mantienen editables como información operativa,
+    pero modificar “Tratamiento” no reemplaza la selección
+    del procedimiento del catálogo.
+  */
+
+  const original =
+    reg.dataReservo ||
+    reg.dataMK ||
+    {};
+
+  const filas = Object.keys(original)
+    .map(key => {
+      const value =
+        original[key] ?? "";
+
+      return `
+        <div
+          class="field"
+          style="margin-bottom:10px;"
+        >
+          <label>
+            ${escapeHtml(key)}
+          </label>
+
+          <input
+            type="text"
+            data-extra-key="${escapeHtml(key)}"
+            value="${escapeHtml(String(value))}"
+          >
         </div>
-      `).join("")
-    : `<div class="muted tiny">Este registro todavía no tiene modificaciones manuales.</div>`;
+      `;
+    })
+    .join("");
+
+  /*
+    Historial del registro.
+  */
+
+  const historial =
+    Array.isArray(reg.historial)
+      ? [...reg.historial].reverse()
+      : [];
+
+  const historialHTML =
+    historial.length
+      ? historial
+          .map(h => `
+            <div
+              style="
+                padding:10px;
+                border:1px solid rgba(0,0,0,.08);
+                border-radius:10px;
+                margin-top:8px;
+              "
+            >
+              <div style="font-weight:900;">
+                ${escapeHtml(h.usuario || "Usuario")}
+                ·
+                ${escapeHtml(
+                  h.fecha
+                    ? new Date(h.fecha)
+                        .toLocaleString("es-CL")
+                    : ""
+                )}
+              </div>
+
+              ${
+                h.observacion
+                  ? `
+                    <div
+                      class="muted tiny"
+                      style="margin-top:4px;"
+                    >
+                      Motivo:
+                      ${escapeHtml(h.observacion)}
+                    </div>
+                  `
+                  : ""
+              }
+
+              ${(h.cambios || [])
+                .map(c => `
+                  <div
+                    class="tiny"
+                    style="margin-top:5px;"
+                  >
+                    <b>
+                      ${escapeHtml(
+                        c.etiqueta ||
+                        c.campo ||
+                        "Campo"
+                      )}:
+                    </b>
+
+                    ${escapeHtml(c.antes || "—")}
+                    →
+                    ${escapeHtml(c.despues || "—")}
+                  </div>
+                `)
+                .join("")}
+            </div>
+          `)
+          .join("")
+      : `
+        <div class="muted tiny">
+          Este registro todavía no tiene
+          modificaciones manuales.
+        </div>
+      `;
+
+  /*
+    Render completo de “Editar más información”.
+  */
 
   itemForm.innerHTML = `
-    <div class="card" style="padding:12px;">
-      <div style="
-        display:flex;
-        justify-content:space-between;
-        align-items:center;
-        gap:10px;
-        margin-bottom:12px;
-      ">
+    <div
+      class="card"
+      style="padding:12px;"
+    >
+      <div
+        style="
+          display:flex;
+          justify-content:space-between;
+          align-items:center;
+          gap:10px;
+          margin-bottom:12px;
+        "
+      >
         <div>
-          <div class="sectionTitle">Editar información</div>
+          <div class="sectionTitle">
+            Editar información
+          </div>
+
           <div class="help">
-            El dato original importado se conserva. Estos serán los valores operativos utilizados para liquidaciones.
+            El dato original importado se conserva.
+            Estos serán los valores operativos
+            utilizados para liquidaciones.
           </div>
         </div>
 
@@ -2614,6 +2751,8 @@ function abrirMasInformacion(reg) {
         </button>
       </div>
 
+      <!-- PROFESIONAL Y PROCEDIMIENTO -->
+
       <section
         style="
           padding:12px;
@@ -2623,22 +2762,118 @@ function abrirMasInformacion(reg) {
           background:#f8fafc;
         "
       >
-        <div class="sectionTitle">Decisión de aplicación</div>
+        <div class="sectionTitle">
+          Profesional y procedimiento
+        </div>
+
+        <div
+          class="help"
+          style="margin-bottom:10px;"
+        >
+          Para resolver una alerta de procedimiento,
+          debes seleccionar aquí el procedimiento
+          correcto del catálogo.
+        </div>
 
         <div class="grid2">
           <div class="field">
-            <label>¿Corresponde enviar a liquidaciones?</label>
+            <label>
+              Asociar profesional
+            </label>
+
+            <select id="detalleProfesionalId">
+              <option value="">
+                (Selecciona profesional)
+              </option>
+
+              ${opcionesProfesionales}
+            </select>
+          </div>
+
+          <div class="field">
+            <label>
+              Asociar procedimiento ambulatorio
+            </label>
+
+            <input
+              id="detalleProcedimientoBuscar"
+              type="text"
+              placeholder="Buscar por código o nombre"
+              value=""
+              style="margin-bottom:8px;"
+            >
+
+            <select id="detalleProcedimientoId">
+              <option value="">
+                (Selecciona procedimiento ambulatorio)
+              </option>
+
+              ${opcionesProcedimientos}
+            </select>
+          </div>
+        </div>
+
+        <div
+          class="help"
+          style="
+            margin-top:10px;
+            color:#9a5b00;
+            font-weight:700;
+          "
+        >
+          Importante: cambiar solamente el campo
+          “Tratamiento” del archivo no confirma el
+          procedimiento. Debes seleccionarlo en
+          “Asociar procedimiento ambulatorio”.
+        </div>
+      </section>
+
+      <!-- DECISIÓN DE APLICACIÓN -->
+
+      <section
+        style="
+          padding:12px;
+          border:1px solid rgba(0,0,0,.08);
+          border-radius:12px;
+          margin-bottom:14px;
+          background:#f8fafc;
+        "
+      >
+        <div class="sectionTitle">
+          Decisión de aplicación
+        </div>
+
+        <div class="grid2">
+          <div class="field">
+            <label>
+              ¿Corresponde enviar a liquidaciones?
+            </label>
+
             <select id="detalleAplicacionManual">
-              <option value="">Usar clasificación automática</option>
+              <option value="">
+                Usar clasificación automática
+              </option>
+
               <option
                 value="aplica"
-                ${reg.decisionManualAplicacion?.estado === "aplica" ? "selected" : ""}
+                ${
+                  reg.decisionManualAplicacion?.estado ===
+                  "aplica"
+                    ? "selected"
+                    : ""
+                }
               >
                 APLICA
               </option>
+
               <option
                 value="no_aplica"
-                ${reg.decisionManualAplicacion?.estado === "no_aplica" ? "selected" : ""}
+                ${
+                  reg.decisionManualAplicacion?.estado ===
+                  "no_aplica"
+                    ? "selected"
+                    : ""
+                }
               >
                 NO APLICA
               </option>
@@ -2646,7 +2881,10 @@ function abrirMasInformacion(reg) {
           </div>
 
           <div class="field">
-            <label>Motivo u observación del cambio</label>
+            <label>
+              Motivo u observación del cambio
+            </label>
+
             <input
               id="detalleMotivoCambio"
               type="text"
@@ -2657,17 +2895,25 @@ function abrirMasInformacion(reg) {
         </div>
 
         <div class="help">
-          Al guardar, la alerta de aplicación desaparecerá si la decisión ya quedó resuelta. No necesitas una segunda confirmación.
+          Al guardar, la alerta de aplicación
+          desaparecerá si la decisión ya quedó resuelta.
+          No necesitas una segunda confirmación.
         </div>
       </section>
 
-      <div class="sectionTitle">Campos operativos del registro</div>
+      <!-- CAMPOS OPERATIVOS -->
+
+      <div class="sectionTitle">
+        Campos operativos del registro
+      </div>
 
       <div class="grid2">
         ${filas}
       </div>
 
       <div style="height:16px;"></div>
+
+      <!-- HISTORIAL -->
 
       <section
         style="
@@ -2685,8 +2931,149 @@ function abrirMasInformacion(reg) {
     </div>
   `;
 
+  /*
+    Filtro del selector de procedimientos.
+  */
+
+  const inputBuscarProc =
+    $("detalleProcedimientoBuscar");
+
+  const selectProc =
+    $("detalleProcedimientoId");
+
+  function filtrarProcedimientosDetalle() {
+    if (!selectProc) return;
+
+    const seleccionActual =
+      selectProc.value ||
+      procedimientoSeleccionado;
+
+    const busqueda =
+      normalizarTexto(
+        inputBuscarProc?.value || ""
+      );
+
+    const lista =
+      procedimientosAmbulatorios()
+        .filter(p => {
+          if (!busqueda) return true;
+
+          const texto =
+            normalizarTexto([
+              p?.id || "",
+              nombreProcedimientoCatalogo(p),
+              p?.nombre || "",
+              p?.tratamiento || "",
+              p?.descripcion || ""
+            ].join(" | "));
+
+          return texto.includes(busqueda);
+        });
+
+    selectProc.innerHTML = `
+      <option value="">
+        (Selecciona procedimiento ambulatorio)
+      </option>
+
+      ${lista
+        .map(p => {
+          const selected =
+            seleccionActual === p.id
+              ? "selected"
+              : "";
+
+          return `
+            <option
+              value="${escapeHtml(p.id)}"
+              ${selected}
+            >
+              ${escapeHtml(p.id)}
+              ·
+              ${escapeHtml(
+                nombreProcedimientoCatalogo(p)
+              )}
+            </option>
+          `;
+        })
+        .join("")}
+    `;
+  }
+
+  if (inputBuscarProc) {
+    inputBuscarProc.addEventListener(
+      "input",
+      filtrarProcedimientosDetalle
+    );
+  }
+
+  /*
+    Si vuelve a la pantalla anterior, conservamos primero
+    las selecciones realizadas en esta pantalla.
+  */
+
   if ($("btnVolverDetalle")) {
-    $("btnVolverDetalle").onclick = () => abrirDetalle(reg);
+    $("btnVolverDetalle").onclick = () => {
+      const profesionalId =
+        $("detalleProfesionalId")?.value ||
+        null;
+
+      const procedimientoId =
+        $("detalleProcedimientoId")?.value ||
+        null;
+
+      const profesional =
+        profesionales.find(
+          p => p.id === profesionalId
+        ) || null;
+
+      const procedimiento =
+        procedimientos.find(
+          p => p.id === procedimientoId
+        ) || null;
+
+      reg.resolved =
+        reg.resolved || {};
+
+      reg.resolved.profesionalId =
+        profesional?.id || null;
+
+      reg.resolved.profesionalNombre =
+        profesional
+          ? nombreProfesionalCatalogo(profesional)
+          : null;
+
+      reg.resolved.confirmadoManualProfesional =
+        !!profesionalId;
+
+      reg.resolved.autoProfesional =
+        false;
+
+      reg.resolved.procedimientoId =
+        procedimiento?.id || null;
+
+      reg.resolved.procedimientoNombre =
+        procedimiento
+          ? nombreProcedimientoCatalogo(
+              procedimiento
+            )
+          : null;
+
+      reg.resolved.confirmadoManualProcedimiento =
+        !!procedimientoId;
+
+      reg.resolved.autoProcedimiento =
+        false;
+
+      reg.resolved.autoProcedimientoTipoMatch =
+        procedimientoId
+          ? "manual"
+          : null;
+
+      abrirDetalle(reg, {
+        volverAResolver:
+          stateEdicion.volverAResolver === true
+      });
+    };
   }
 }
 
