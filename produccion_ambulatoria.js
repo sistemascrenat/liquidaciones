@@ -785,12 +785,18 @@ function snapshotEditable(reg) {
 
     valor:
       Number(reg.valor || 0),
-
+    
     aplicacionEstado:
       clean(reg.aplicacion?.estado),
-
+    
     aplicacionMotivo:
-      clean(reg.aplicacion?.motivo)
+      clean(reg.aplicacion?.motivo),
+    
+    decisionManualEstado:
+      clean(reg.decisionManualAplicacion?.estado),
+    
+    decisionManualMotivo:
+      clean(reg.decisionManualAplicacion?.motivo)
   };
 }
 
@@ -842,7 +848,9 @@ function crearCambiosHistorial(antes = {}, despues = {}) {
     procedimientoArchivo: "Procedimiento del archivo",
     valor: "Valor",
     aplicacionEstado: "Aplicación",
-    aplicacionMotivo: "Motivo de aplicación"
+    aplicacionMotivo: "Motivo de aplicación",
+    decisionManualEstado: "Decisión manual",
+    decisionManualMotivo: "Motivo de decisión manual"
   };
 
   const cambios = [];
