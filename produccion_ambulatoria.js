@@ -101,7 +101,7 @@ let uiState = {
   mostrarNoAplica: false,
   incluirKinesiologia: false, // ✅ por defecto Kine queda oculta
   resolverFiltro: "base", // base | pendientes | aplica | no_aplica | revisar | todos
-  pillFiltro: "" // "" | alertas | pend_prof | pend_proc | reservo_validos | mk_validos | ok | confirmables | no_aplica
+  pillFiltro: "" // "" | alertas | aplica | no_aplica | no_aplica_observaciones | cambios_pendientes
 };
 
 /* ======================
@@ -900,9 +900,55 @@ function registrarHistorialLocal(reg, {
 }
 
 function tieneAlertaOperativa(reg) {
+  const estadoAplicacion =
+    clean(reg?.aplicacion?.estado);
+
+  /*
+    Un NO APLICA nunca es una alerta operativa.
+
+    Puede tener datos incompletos, pero como no se enviará
+    a liquidaciones, esos datos quedan como observaciones.
+  */
+
+  if (estadoAplicacion === "no_aplica") {
+    return false;
+  }
+
+  /*
+    REVISAR siempre es alerta porque todavía no sabemos
+    si el registro corresponde liquidar.
+  */
+
+  if (estadoAplicacion === "revisar") {
+    return true;
+  }
+
+  /*
+    Si APLICA, cualquier dato pendiente o alerta interna
+    impide enviarlo a liquidaciones.
+  */
+
+  if (estadoAplicacion === "aplica") {
+    return (
+      reg?.review?.estadoRevision === "pendiente" ||
+      (reg?.review?.alertas || []).length > 0
+    );
+  }
+
+  /*
+    Si todavía no tiene clasificación, también requiere revisión.
+  */
+
+  return true;
+}
+
+function tieneObservacionNoAplica(reg) {
+  if (reg?.aplicacion?.estado !== "no_aplica") {
+    return false;
+  }
+
   return (
     reg?.review?.estadoRevision === "pendiente" ||
-    reg?.aplicacion?.estado === "revisar" ||
     (reg?.review?.alertas || []).length > 0
   );
 }
@@ -939,6 +985,17 @@ function estaPendienteLiquidacion(reg) {
 }
 
 function etiquetaGrupoVisual(reg) {
+  /*
+    Primero revisamos NO APLICA.
+
+    Esto evita que un NO APLICA con procedimiento pendiente
+    termine ubicado incorrectamente dentro de Alertas.
+  */
+
+  if (reg?.aplicacion?.estado === "no_aplica") {
+    return "no_aplica";
+  }
+
   if (tieneAlertaOperativa(reg)) {
     return "alerta";
   }
@@ -947,7 +1004,7 @@ function etiquetaGrupoVisual(reg) {
     return "aplica";
   }
 
-  return "no_aplica";
+  return "alerta";
 }
 
 function ordenGrupoVisual(reg) {
@@ -955,8 +1012,9 @@ function ordenGrupoVisual(reg) {
 
   if (grupo === "alerta") return 1;
   if (grupo === "aplica") return 2;
+  if (grupo === "no_aplica") return 3;
 
-  return 3;
+  return 4;
 }
 
 /* ======================
@@ -2728,22 +2786,30 @@ function itemSearchText(it) {
 function aplicarFiltroPill(items) {
   switch (uiState.pillFiltro) {
     case "alertas":
-      return items.filter(tieneAlertaOperativa);
+      return items.filter(
+        tieneAlertaOperativa
+      );
 
     case "aplica":
       return items.filter(it =>
-        !tieneAlertaOperativa(it) &&
-        it.aplicacion?.estado === "aplica"
+        it.aplicacion?.estado === "aplica" &&
+        !tieneAlertaOperativa(it)
       );
 
     case "no_aplica":
       return items.filter(it =>
-        !tieneAlertaOperativa(it) &&
         it.aplicacion?.estado === "no_aplica"
       );
 
+    case "no_aplica_observaciones":
+      return items.filter(it =>
+        tieneObservacionNoAplica(it)
+      );
+
     case "cambios_pendientes":
-      return items.filter(estaPendienteLiquidacion);
+      return items.filter(
+        estaPendienteLiquidacion
+      );
 
     case "":
     default:
@@ -2889,6 +2955,69 @@ function textoProcedimientoResueltoHTML(reg) {
   `;
 }
 
+function estadoRevisionVisibleHTML(reg) {
+  if (reg?.aplicacion?.estado === "no_aplica") {
+    if (tieneObservacionNoAplica(reg)) {
+      return `
+        <span class="muted">
+          No requerida
+        </span>
+        <div class="tiny warn">
+          Con observaciones
+        </div>
+      `;
+    }
+
+    return `
+      <span class="muted">
+        No requerida
+      </span>
+    `;
+  }
+
+  if (reg?.review?.estadoRevision === "ok") {
+    return `<span class="ok">OK</span>`;
+  }
+
+  return `<span class="warn">Pendiente</span>`;
+}
+
+function alertasVisiblesHTML(reg) {
+  const alertas =
+    reg?.review?.alertas || [];
+
+  if (!alertas.length) {
+    if (reg?.aplicacion?.estado === "no_aplica") {
+      return `
+        <span class="muted">
+          Sin observaciones
+        </span>
+      `;
+    }
+
+    return `<span class="muted">—</span>`;
+  }
+
+  const texto =
+    escapeHtml(alertas.join(" · "));
+
+  if (reg?.aplicacion?.estado === "no_aplica") {
+    return `
+      <div class="muted tiny">
+        <b>Observación opcional:</b>
+        ${texto}
+      </div>
+    `;
+  }
+
+  return `
+    <div class="warn tiny">
+      <b>Alerta:</b>
+      ${texto}
+    </div>
+  `;
+}
+
 /* ======================
    RENDER TABLA
 ====================== */
@@ -2935,7 +3064,6 @@ function render() {
     const tr = document.createElement("tr");
 
     const estado = r.review?.estadoRevision || "pendiente";
-    const alertasTexto = (r.review?.alertas || []).join(" · ");
 
     const pendienteLiquidacion =
       estaPendienteLiquidacion(r);
@@ -2962,11 +3090,13 @@ function render() {
       <td>${escapeHtml(r.prestacion || "")}</td>
       <td>${textoProcedimientoResueltoHTML(r)}</td>
       <td>${escapeHtml(r.valor ?? "")}</td>
-      <td>${estado === "ok" ? `<span class="ok">OK</span>` : `<span class="warn">Pendiente</span>`}</td>
+      <td>
+        ${estadoRevisionVisibleHTML(r)}
+      </td>
       <td>${escapeHtml(r.aplicacion?.estado || "—")}</td>
       <td class="wrap">${escapeHtml(r.aplicacion?.motivo || "—")}</td>
       <td class="wrap">
-        ${escapeHtml(alertasTexto || "—")}
+        ${alertasVisiblesHTML(r)}
         <div style="margin-top:6px;">${estadoFinalHtml}</div>
       </td>
       <td>
@@ -2991,14 +3121,18 @@ function render() {
   ).length;
   
   const aplican = operables.filter(it =>
-    !tieneAlertaOperativa(it) &&
-    it.aplicacion?.estado === "aplica"
+    it.aplicacion?.estado === "aplica" &&
+    !tieneAlertaOperativa(it)
   ).length;
   
   const noAplica = operables.filter(it =>
-    !tieneAlertaOperativa(it) &&
     it.aplicacion?.estado === "no_aplica"
   ).length;
+  
+  const observacionesNoAplica =
+    operables.filter(
+      tieneObservacionNoAplica
+    ).length;
   
   const cambiosPendientes =
     operables.filter(
@@ -3028,6 +3162,11 @@ function render() {
   if ($("pillFusionados")) {
     $("pillFusionados").textContent =
       `No aplican: ${noAplica}`;
+  }
+
+  if ($("pillNoAplicaObservaciones")) {
+    $("pillNoAplicaObservaciones").textContent =
+      `Observaciones no aplica: ${observacionesNoAplica}`;
   }
   
   if ($("pillConfirmables")) {
@@ -4410,9 +4549,18 @@ if ($("pillFusionados")) {
     togglePillFiltro("no_aplica");
 }
 
+if ($("pillNoAplicaObservaciones")) {
+  $("pillNoAplicaObservaciones").onclick = () =>
+    togglePillFiltro(
+      "no_aplica_observaciones"
+    );
+}
+
 if ($("pillConfirmables")) {
   $("pillConfirmables").onclick = () =>
-    togglePillFiltro("cambios_pendientes");
+    togglePillFiltro(
+      "cambios_pendientes"
+    );
 }
 
 /* resolver */
