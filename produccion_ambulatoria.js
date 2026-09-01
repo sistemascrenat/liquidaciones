@@ -3147,7 +3147,32 @@ async function guardarDetalle() {
   if (!stateEdicion.actual) return;
 
   const reg = stateEdicion.actual;
-  const antes = snapshotEditable(reg);
+
+  /*
+    Guardamos si el registro tenía una alerta antes
+    de recalcularlo.
+
+    Esto permite persistir una resolución manual aunque
+    el procedimiento seleccionado tenga el mismo ID que
+    la sugerencia automática.
+  */
+
+  const teniaAlertaOperativaAntes =
+    tieneAlertaOperativa(reg);
+
+  const estadoRevisionAntes =
+    clean(
+      reg.review?.estadoRevision ||
+      ""
+    );
+
+  const alertasAntes =
+    Array.isArray(reg.review?.alertas)
+      ? [...reg.review.alertas]
+      : [];
+
+  const antes =
+    snapshotEditable(reg);
 
   /*
     Conserva una fotografía realmente inmutable
@@ -3319,15 +3344,97 @@ async function guardarDetalle() {
     despues
   );
 
-  if (!cambios.length) {
+  /*
+    Confirmar manualmente una sugerencia automática
+    también es una modificación real.
+
+    Puede ocurrir que el procedimiento conserve el mismo
+    ID, pero cambie de:
+
+    AUTO · REVISAR
+    a
+    MANUAL · OK
+
+    En ese caso debemos guardar aunque los demás campos
+    sean iguales.
+  */
+
+  const tieneAlertaOperativaDespues =
+    tieneAlertaOperativa(reg);
+
+  const estadoRevisionDespues =
+    clean(
+      reg.review?.estadoRevision ||
+      ""
+    );
+
+  const alertasDespues =
+    Array.isArray(reg.review?.alertas)
+      ? [...reg.review.alertas]
+      : [];
+
+  const resolvioAlerta =
+    teniaAlertaOperativaAntes &&
+    !tieneAlertaOperativaDespues;
+
+  const cambioEstadoRevision =
+    estadoRevisionAntes !==
+    estadoRevisionDespues;
+
+  const cambioAlertas =
+    JSON.stringify(alertasAntes) !==
+    JSON.stringify(alertasDespues);
+
+  /*
+    Si no cambió ningún campo y tampoco cambió la
+    resolución, entonces realmente no hay nada que guardar.
+  */
+
+  if (
+    !cambios.length &&
+    !resolvioAlerta &&
+    !cambioEstadoRevision &&
+    !cambioAlertas
+  ) {
     toast("No se detectaron cambios");
     return;
+  }
+
+  /*
+    Si lo único que cambió fue la resolución de la alerta,
+    creamos un movimiento explícito para el historial.
+  */
+
+  if (!cambios.length) {
+    cambios.push({
+      campo:
+        "resolucionProcedimiento",
+
+      etiqueta:
+        "Resolución del procedimiento",
+
+      antes:
+        estadoRevisionAntes === "ok"
+          ? "OK"
+          : "Pendiente",
+
+      despues:
+        estadoRevisionDespues === "ok"
+          ? "OK · Confirmado manualmente"
+          : "Pendiente"
+    });
   }
 
   registrarHistorialLocal(reg, {
     tipo: "edicion",
     cambios,
-    observacion: motivoCambio
+    observacion:
+      motivoCambio ||
+      (
+        resolvioAlerta
+          ? "Procedimiento confirmado manualmente"
+          : ""
+      )
   });
 
   /*
