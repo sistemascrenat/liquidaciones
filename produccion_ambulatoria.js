@@ -4831,10 +4831,20 @@ if ($("pillConfirmables")) {
 }
 
 /* resolver */
-if ($("btnResolver")) $("btnResolver").onclick = abrirResolver;
-if ($("btnResolverClose")) $("btnResolverClose").onclick = cerrarResolver;
-if ($("btnResolverCancelar")) $("btnResolverCancelar").onclick = cerrarResolver;
-if ($("btnResolverRevisar")) $("btnResolverRevisar").onclick = renderResolver;
+if ($("btnResolver")) {
+  $("btnResolver").onclick =
+    abrirResolver;
+}
+
+if ($("btnResolverClose")) {
+  $("btnResolverClose").onclick =
+    cerrarResolver;
+}
+
+if ($("btnResolverCancelar")) {
+  $("btnResolverCancelar").onclick =
+    cerrarResolver;
+}
 
 if ($("modalResolverBackdrop")) {
   $("modalResolverBackdrop").addEventListener("click", e => {
