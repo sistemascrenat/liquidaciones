@@ -312,76 +312,94 @@
       </section>
 
       <!-- MODAL Resolver -->
-      <div id="modalResolverBackdrop" class="modalBackdrop">
-        <div class="modalCard" role="dialog" aria-modal="true">
+      <!-- MODAL Resolver -->
+      <div
+        id="modalResolverBackdrop"
+        class="modalBackdrop"
+      >
+        <div
+          class="modalCard"
+          role="dialog"
+          aria-modal="true"
+        >
           <div class="modalHead">
             <div>
-              <div class="h1" style="margin:0;font-size:18px;">Revisar importación</div>
-              <div class="muted" style="font-size:12px;margin-top:2px;" id="resolverSub">
-                Revisa pendientes, casos por revisar, registros que aplican y registros que no aplican.
+              <div
+                class="h1"
+                style="
+                  margin:0;
+                  font-size:18px;
+                "
+              >
+                Resolver alertas
+              </div>
+      
+              <div
+                class="muted"
+                style="
+                  font-size:12px;
+                  margin-top:3px;
+                "
+                id="resolverSub"
+              >
+                Corrige únicamente los registros que necesitan una acción antes de liquidarse.
               </div>
             </div>
-            <button class="iconBtn" id="btnResolverClose" type="button" aria-label="Cerrar" title="Cerrar">✖️</button>
+      
+            <button
+              class="iconBtn"
+              id="btnResolverClose"
+              type="button"
+              aria-label="Cerrar"
+              title="Cerrar"
+            >
+              ✖
+            </button>
           </div>
-
+      
           <div class="modalBody">
-            <div class="card" style="padding:12px;">
-              <div class="mini muted">Resumen</div>
-              <div id="resolverResumen" style="font-weight:900;margin-top:6px;"></div>
-              <div class="help" style="margin-top:8px;">
-                Una coincidencia probable se detecta por <b>RUT normalizado</b> + <b>fecha</b> + similitud de <b>profesional</b> o <b>prestación</b>.
-              </div>
-            </div>
-
+            <section
+              class="card"
+              style="padding:12px;"
+            >
+              <div id="resolverResumen"></div>
+            </section>
+      
             <div style="height:12px;"></div>
-
-            <!-- Coincidencias -->
-            <section class="card" style="padding:12px;">
-              <div class="sectionTitle">Vista de estados del import</div>
-              <div class="muted tiny" style="margin-bottom:8px;">
-                Aquí verás los ítems según la vista seleccionada: pendientes, revisar, aplican, no aplica o todos.
+      
+            <section
+              class="card"
+              style="padding:12px;"
+            >
+              <div class="sectionTitle">
+                Registros que debes resolver
               </div>
+      
+              <div
+                class="muted tiny"
+                style="margin-bottom:10px;"
+              >
+                Cada registro aparece una sola vez, aunque tenga más de un problema.
+              </div>
+      
               <div id="resolverCoincidenciasList"></div>
             </section>
-
-            <div style="height:12px;"></div>
-
-            <div class="grid2">
-              <!-- Profesionales -->
-              <section class="card" style="padding:12px;">
-                <div class="sectionTitle">Pendientes de profesional</div>
-                <div class="muted tiny" style="margin-bottom:8px;">
-                  Se sugieren desde la base de datos de profesionales. Basta una palabra útil en común para sugerir, pero se confirma manualmente.
-                </div>
-                <div id="resolverProfesionalesList"></div>
-              </section>
-
-              <!-- Prestaciones -->
-              <section class="card" style="padding:12px;">
-               <div class="sectionTitle">Pendientes de procedimiento</div>
-                <div class="muted tiny" style="margin-bottom:8px;">
-                  Relación entre <b>Tratamiento</b> (Reservo) y <b>D Artículo</b> (MK).
-                </div>
-                <div id="resolverPrestacionesList"></div>
-              </section>
-            </div>
-
-            <div style="height:12px;"></div>
-
-            <!-- Alertas -->
-            <section class="card" style="padding:12px;">
-              <div class="sectionTitle">Alertas de estado y datos</div>
-              <div class="muted tiny" style="margin-bottom:8px;">
-                Revisa casos como: <b>pagado y no atendido</b>, <b>atendido y no pagado</b>, RUT incompleto o datos dudosos.
-              </div>
-              <div id="resolverAlertasList"></div>
-            </section>
           </div>
-
+      
           <div class="modalFoot">
-            <button class="btn" id="btnResolverCancelar" type="button">Cerrar</button>
+            <button
+              class="btn"
+              id="btnResolverCancelar"
+              type="button"
+            >
+              Cerrar
+            </button>
+      
             <span style="flex:1"></span>
-            <button class="btn primary" id="btnResolverRevisar" type="button">Recalcular pendientes</button>
+      
+            <span class="muted tiny">
+              Guardar cambios recalcula automáticamente.
+            </span>
           </div>
         </div>
       </div>
