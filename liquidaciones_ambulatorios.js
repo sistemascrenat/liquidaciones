@@ -607,45 +607,118 @@ function getValorMKFallback(raw){
   return 0;
 }
 
-function calcularPagoSegunOrigen(x, procDoc){
-  const raw = getRawContainer(x);
-  const tarifa = getTarifaAmbulatoria(procDoc);
+function calcularPagoSegunOrigen(x, procDoc) {
+  const raw =
+    getRawContainer(x);
+
+  const tarifa =
+    getTarifaAmbulatoria(procDoc);
 
   let valorBase = 0;
   let pagoProfesional = 0;
   let utilidad = 0;
-  const origen = normalizeOrigin(x.origen || x.archivo || pickRaw(raw,'Origen') || pickRaw(raw,'Archivo') || '');
 
-  if(origen === 'MK'){
-    // ✅ MK: paga porcentaje del valor indicado por el archivo
+  const origen = normalizeOrigin(
+    x.origen ||
+    x.archivo ||
+    pickRaw(raw, "Origen") ||
+    pickRaw(raw, "Archivo") ||
+    ""
+  );
+
+  if (origen === "MK") {
+    /*
+      MK conserva su lógica dinámica porque el monto
+      de la prestación puede depender del archivo.
+    */
+
     valorBase =
-      tarifa.modoValor === 'archivo'
-        ? getValorDesdeRaw(raw, tarifa.columnaOrigen) || getValorMKFallback(raw)
-        : getValorMKFallback(raw) || Number(tarifa.valor ?? 0) || 0;
+      tarifa.modoValor === "archivo"
+        ? (
+            getValorDesdeRaw(
+              raw,
+              tarifa.columnaOrigen
+            ) ||
+            getValorMKFallback(raw)
+          )
+        : (
+            getValorMKFallback(raw) ||
+            Number(tarifa.valor ?? 0) ||
+            0
+          );
 
-    if(hasRealValue(tarifa.comisionPct) && Number(tarifa.comisionPct) > 0 && valorBase > 0){
-      pagoProfesional = Math.round(valorBase * (Number(tarifa.comisionPct) / 100));
-    }else if(hasRealValue(tarifa.valorProfesional)){
-      // fallback de seguridad
-      pagoProfesional = Number(tarifa.valorProfesional) || 0;
+    if (
+      hasRealValue(
+        tarifa.comisionPct
+      ) &&
+      Number(tarifa.comisionPct) > 0 &&
+      valorBase > 0
+    ) {
+      pagoProfesional = Math.round(
+        valorBase *
+        (
+          Number(
+            tarifa.comisionPct
+          ) / 100
+        )
+      );
+    } else if (
+      hasRealValue(
+        tarifa.valorProfesional
+      )
+    ) {
+      pagoProfesional =
+        Number(
+          tarifa.valorProfesional
+        ) || 0;
     }
 
-    utilidad = valorBase - pagoProfesional;
+    utilidad =
+      valorBase -
+      pagoProfesional;
   } else {
-    // ✅ Reservo: paga valor a pagar al profesional
-    valorBase =
-      tarifa.modoValor === 'archivo'
-        ? getValorDesdeRaw(raw, tarifa.columnaOrigen)
-        : Number(tarifa.valor ?? 0) || 0;
+    /*
+      RESERVO:
+      todos los valores provienen exclusivamente
+      del catálogo.
 
-    if(hasRealValue(tarifa.valorProfesional)){
-      pagoProfesional = Number(tarifa.valorProfesional) || 0;
-    }else if(hasRealValue(tarifa.comisionPct) && Number(tarifa.comisionPct) > 0 && valorBase > 0){
-      // fallback por seguridad
-      pagoProfesional = Math.round(valorBase * (Number(tarifa.comisionPct) / 100));
+      Nunca utilizamos una columna del Excel.
+    */
+
+    valorBase =
+      hasRealValue(tarifa.valor)
+        ? Number(tarifa.valor)
+        : 0;
+
+    if (
+      hasRealValue(
+        tarifa.valorProfesional
+      )
+    ) {
+      pagoProfesional =
+        Number(
+          tarifa.valorProfesional
+        ) || 0;
+    } else if (
+      hasRealValue(
+        tarifa.comisionPct
+      ) &&
+      Number(tarifa.comisionPct) > 0 &&
+      valorBase > 0
+    ) {
+      pagoProfesional = Math.round(
+        valorBase *
+        (
+          Number(
+            tarifa.comisionPct
+          ) / 100
+        )
+      );
     }
 
-    utilidad = valorBase - pagoProfesional;
+    utilidad =
+      valorBase -
+      pagoProfesional;
   }
 
   return {
