@@ -2769,11 +2769,47 @@ function buildLiquidaciones(){
     const descuentoUF = Number(x.descuentoUF || 0) || 0;
     const descuentoCLP = (descuentoUF > 0 && uf > 0) ? Math.round(descuentoUF * uf) : 0;
   
-    // BONO (solo si es cirujano principal + tieneBono)
-    const cirugiasComoPrincipal = (x.rolPrincipal === 'r_cirujano')
-      ? (x.lines || []).filter(l => l.roleId === 'r_cirujano' && (l.procedimientoTipo === 'cirugia')).length
+    // =====================================================
+    // ✅ BONO CIRUJANO
+    // - Cirujanos normales: PAD/FONASA NO cuenta para el tramo
+    // - Rafael Luengas: mantiene su regla especial y cuenta
+    //   todas sus cirugías como cirujano principal
+    // =====================================================
+    
+    const esRafaelLuengas =
+      canonRutAny(x.rut) === RAFAEL_LUENGAS_RUT_CANON;
+    
+    // 1) Todas las cirugías realizadas como cirujano principal
+    const cirugiasComoPrincipalTotal = (x.rolPrincipal === 'r_cirujano')
+      ? (x.lines || []).filter(l =>
+          l.roleId === 'r_cirujano' &&
+          l.procedimientoTipo === 'cirugia'
+        ).length
       : 0;
-  
+    
+    // 2) Cirugías que sirven para calcular el bono por TRAMO
+    // ✅ Se excluyen PAD / FONASA
+    const cirugiasBonificablesTramo = (x.rolPrincipal === 'r_cirujano')
+      ? (x.lines || []).filter(l => {
+          if(l.roleId !== 'r_cirujano') return false;
+          if(l.procedimientoTipo !== 'cirugia') return false;
+    
+          const tipoPaciente = tipoPacienteNorm(l.tipoPaciente || '');
+    
+          // ✅ PAD / FONASA no aumenta el contador del bono
+          if(tipoPaciente === 'fonasa') return false;
+    
+          return true;
+        }).length
+      : 0;
+    
+    // ✅ La cantidad que efectivamente usa el bono:
+    // - Rafael: todas sus cirugías
+    // - Resto: solo cirugías NO PAD
+    const cirugiasComoPrincipal = esRafaelLuengas
+      ? cirugiasComoPrincipalTotal
+      : cirugiasBonificablesTramo;
+    
     let bonoCLP = 0;
     let bonoTramo = null;
     let bonoTramoIndex = 0;
@@ -2783,9 +2819,6 @@ function buildLiquidaciones(){
       (x.rolPrincipal === 'r_cirujano') &&
       (cirugiasComoPrincipal > 0) &&
       (x.tieneBono !== false);
-    
-    const esRafaelLuengas =
-      canonRutAny(x.rut) === RAFAEL_LUENGAS_RUT_CANON;
     
     if(aplicaBono){
     
