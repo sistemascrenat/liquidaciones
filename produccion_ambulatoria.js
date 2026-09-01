@@ -282,7 +282,8 @@ function finalItemId(it) {
 function esItemConfirmable(it) {
   return (
     it?.aplicacion?.estado === "aplica" &&
-    it?.review?.estadoRevision === "ok"
+    it?.review?.estadoRevision === "ok" &&
+    !tieneAlertaOperativa(it)
   );
 }
 
@@ -716,25 +717,260 @@ function construirAplicacion(estado, motivo) {
   return { estado, motivo };
 }
 
+function copiarSeguro(valor) {
+  try {
+    return JSON.parse(JSON.stringify(valor ?? null));
+  } catch {
+    return null;
+  }
+}
+
+function valorHistorial(valor) {
+  if (valor === null || valor === undefined || valor === "") {
+    return "—";
+  }
+
+  if (typeof valor === "object") {
+    try {
+      return JSON.stringify(valor);
+    } catch {
+      return String(valor);
+    }
+  }
+
+  return String(valor);
+}
+
+function snapshotEditable(reg) {
+  const raw = reg.dataReservo || reg.dataMK || {};
+
+  return {
+    profesionalId:
+      clean(reg.resolved?.profesionalId),
+
+    profesionalNombre:
+      clean(
+        reg.resolved?.profesionalNombre ||
+        reg.profesionalDetectado
+      ),
+
+    procedimientoId:
+      clean(reg.resolved?.procedimientoId),
+
+    procedimientoNombre:
+      clean(
+        reg.resolved?.procedimientoNombre ||
+        reg.procedimientoDetectado
+      ),
+
+    estadoCita:
+      reg.origen === "Reservo"
+        ? clean(raw["Estado cita"])
+        : "",
+
+    estadoPago:
+      reg.origen === "Reservo"
+        ? clean(raw["Estado pago"])
+        : "",
+
+    fecha: clean(reg.fecha),
+    rut: clean(reg.rut),
+    paciente: clean(reg.paciente),
+
+    profesionalArchivo:
+      clean(reg.profesional),
+
+    procedimientoArchivo:
+      clean(reg.prestacion),
+
+    valor:
+      Number(reg.valor || 0),
+
+    aplicacionEstado:
+      clean(reg.aplicacion?.estado),
+
+    aplicacionMotivo:
+      clean(reg.aplicacion?.motivo)
+  };
+}
+
+function snapshotLiquidacion(reg) {
+  return {
+    rutNorm:
+      clean(reg.rutNorm),
+
+    fechaNorm:
+      clean(reg.fechaNorm),
+
+    pacienteNorm:
+      clean(reg.pacienteNorm),
+
+    profesionalId:
+      clean(reg.resolved?.profesionalId),
+
+    procedimientoId:
+      clean(reg.resolved?.procedimientoId),
+
+    valor:
+      Number(reg.valor || 0),
+
+    aplicacionEstado:
+      clean(reg.aplicacion?.estado),
+
+    estadoRevision:
+      clean(reg.review?.estadoRevision)
+  };
+}
+
+function snapshotsIguales(a, b) {
+  return JSON.stringify(a || null) ===
+    JSON.stringify(b || null);
+}
+
+function crearCambiosHistorial(antes = {}, despues = {}) {
+  const etiquetas = {
+    profesionalId: "Profesional",
+    profesionalNombre: "Nombre profesional",
+    procedimientoId: "Procedimiento",
+    procedimientoNombre: "Nombre procedimiento",
+    estadoCita: "Estado de cita",
+    estadoPago: "Estado de pago",
+    fecha: "Fecha",
+    rut: "RUT",
+    paciente: "Paciente",
+    profesionalArchivo: "Profesional del archivo",
+    procedimientoArchivo: "Procedimiento del archivo",
+    valor: "Valor",
+    aplicacionEstado: "Aplicación",
+    aplicacionMotivo: "Motivo de aplicación"
+  };
+
+  const cambios = [];
+
+  for (const campo of Object.keys(etiquetas)) {
+    const anterior = valorHistorial(
+      antes?.[campo]
+    );
+
+    const nuevo = valorHistorial(
+      despues?.[campo]
+    );
+
+    if (anterior === nuevo) continue;
+
+    cambios.push({
+      campo,
+      etiqueta: etiquetas[campo],
+      antes: anterior,
+      despues: nuevo
+    });
+  }
+
+  return cambios;
+}
+
+function registrarHistorialLocal(reg, {
+  tipo = "edicion",
+  cambios = [],
+  observacion = ""
+} = {}) {
+  reg.historial = Array.isArray(reg.historial)
+    ? reg.historial
+    : [];
+
+  reg.historial.push({
+    id: `${Date.now()}_${Math.random()
+      .toString(36)
+      .slice(2, 8)}`,
+
+    tipo,
+    fecha: new Date().toISOString(),
+    usuario: stateImport.user?.email || "",
+    observacion: clean(observacion),
+    cambios: copiarSeguro(cambios) || []
+  });
+}
+
+function tieneAlertaOperativa(reg) {
+  return (
+    reg?.review?.estadoRevision === "pendiente" ||
+    reg?.aplicacion?.estado === "revisar" ||
+    (reg?.review?.alertas || []).length > 0
+  );
+}
+
+function publicadoAlgunaVez(reg) {
+  return (
+    reg?.publicadoEnLiquidaciones === true ||
+    reg?.confirmadoEnProduccion === true ||
+    !!reg?.ultimaVersionPublicada ||
+    !!reg?.publicadoPacienteId ||
+    !!reg?.publicadoFinalItemId
+  );
+}
+
+function estaPendienteLiquidacion(reg) {
+  if (reg?.cambiosPendientesLiquidacion === true) {
+    return true;
+  }
+
+  const publicado = publicadoAlgunaVez(reg);
+
+  if (!publicado) {
+    return esItemConfirmable(reg);
+  }
+
+  if (!reg?.ultimaVersionPublicada) {
+    return true;
+  }
+
+  return !snapshotsIguales(
+    snapshotLiquidacion(reg),
+    reg.ultimaVersionPublicada
+  );
+}
+
+function etiquetaGrupoVisual(reg) {
+  if (tieneAlertaOperativa(reg)) {
+    return "alerta";
+  }
+
+  if (reg?.aplicacion?.estado === "aplica") {
+    return "aplica";
+  }
+
+  return "no_aplica";
+}
+
+function ordenGrupoVisual(reg) {
+  const grupo = etiquetaGrupoVisual(reg);
+
+  if (grupo === "alerta") return 1;
+  if (grupo === "aplica") return 2;
+
+  return 3;
+}
+
 /* ======================
    RESERVO: ESTADOS
 ====================== */
 
 function clasificarEstadoCitaReservo(v) {
   const t = normalizarTexto(v);
+
   if (!t) return "otro";
   if (t.includes("ATENDID")) return "atendido";
   if (t.includes("NO LLEGO")) return "no_llego";
+  if (t.includes("SUSPEND")) return "suspendido";
+
   return "otro";
 }
 
 function clasificarEstadoPagoReservo(v) {
   const t = normalizarTexto(v);
+
   if (!t) return "otro";
-
   if (t.includes("NO PAG")) return "no_pagado";
-
-  // ✅ NUEVO: "PLAN" se considera positivo igual que pagado
   if (t.includes("PAGAD")) return "pagado";
   if (t.includes("PLAN")) return "plan";
   if (t.includes("DESCARTAD")) return "descartado";
@@ -742,76 +978,234 @@ function clasificarEstadoPagoReservo(v) {
   return "otro";
 }
 
-function evaluarAplicacionReservo(raw) {
+function esProfesionalExcluidoReservo(nombre = "") {
+  const t = normalizarTexto(nombre);
+
+  return (
+    t.includes("ELIZABETH ROMO") ||
+    t.includes("NICOLAS SANDOVAL")
+  );
+}
+
+function esInstalacionBalonAllurion(tratamiento = "") {
+  const t = normalizarTexto(tratamiento);
+
+  return (
+    t.includes("INSTALACION") &&
+    t.includes("BALON") &&
+    t.includes("ALLURION")
+  );
+}
+
+function esControlPad(tratamiento = "") {
+  const t = normalizarTexto(tratamiento);
+
+  return (
+    t.includes("CONTROL POST CIRUGIA") &&
+    t.includes("PAD")
+  );
+}
+
+function esEvaluacionNutricionalPadTelemedicina(tratamiento = "") {
+  const t = normalizarTexto(tratamiento);
+
+  return (
+    t.includes("EVALUACION NUTRICIONAL") &&
+    t.includes("POST CIRUGIA") &&
+    t.includes("TELEMEDICINA") &&
+    t.includes("PAD")
+  );
+}
+
+function evaluarAplicacionReservo(raw = {}) {
   const estadoCita = clasificarEstadoCitaReservo(raw["Estado cita"]);
   const estadoPago = clasificarEstadoPagoReservo(raw["Estado pago"]);
 
+  const profesional = clean(raw["Profesional"]);
+  const tratamiento = clean(raw["Tratamiento"]);
+  const valor = normalizarMonto(raw["Valor"]);
+
   const alertas = [];
 
-  // ✅ Casos que SÍ aplican
-  if (estadoCita === "atendido" && estadoPago === "pagado") {
+  /*
+    EXCEPCIONES ESPECÍFICAS
+    Tienen prioridad sobre las reglas generales.
+  */
+
+  if (
+    esProfesionalExcluidoReservo(profesional) &&
+    estadoPago === "pagado"
+  ) {
     return {
-      aplicacion: construirAplicacion("aplica", "Atendido y pagado"),
+      aplicacion: construirAplicacion(
+        "no_aplica",
+        "Profesional excluido cuando el pago está pagado"
+      ),
       alertas
     };
   }
 
-  // ✅ NUEVO: PLAN se considera positivo
-  if (estadoCita === "atendido" && estadoPago === "plan") {
+  if (esInstalacionBalonAllurion(tratamiento)) {
     return {
-      aplicacion: construirAplicacion("aplica", "Atendido y plan"),
+      aplicacion: construirAplicacion(
+        "no_aplica",
+        "Instalación Balón Gástrico Allurion"
+      ),
       alertas
     };
   }
 
-  if (estadoCita === "no_llego" && estadoPago === "pagado") {
+  if (
+    esControlPad(tratamiento) &&
+    estadoPago === "descartado"
+  ) {
     return {
-      aplicacion: construirAplicacion("aplica", "No llegó y pagado"),
+      aplicacion: construirAplicacion(
+        "no_aplica",
+        "Control Post Cirugía PAD con pago descartado"
+      ),
       alertas
     };
   }
 
-  // ✅ NUEVO: PLAN se considera positivo
-  if (estadoCita === "no_llego" && estadoPago === "plan") {
+  /*
+    SUSPENDIDOS
+  */
+
+  if (estadoCita === "suspendido") {
     return {
-      aplicacion: construirAplicacion("aplica", "No llegó y plan"),
+      aplicacion: construirAplicacion(
+        "no_aplica",
+        `Cita suspendida con pago ${estadoPago}`
+      ),
       alertas
     };
   }
 
-  if (estadoCita === "atendido" && estadoPago === "descartado") {
+  /*
+    NO LLEGÓ
+  */
+
+  if (
+    estadoCita === "no_llego" &&
+    (estadoPago === "pagado" || estadoPago === "plan")
+  ) {
     return {
-      aplicacion: construirAplicacion("aplica", "Atendido y descartado"),
+      aplicacion: construirAplicacion(
+        "aplica",
+        estadoPago === "pagado"
+          ? "No llegó y pagado"
+          : "No llegó y plan"
+      ),
       alertas
     };
   }
 
-  // Casos para revisar
-  if (estadoCita === "no_llego" && estadoPago === "descartado") {
-    alertas.push("Revisar: no llegó y descartado");
+  if (
+    estadoCita === "no_llego" &&
+    estadoPago === "descartado"
+  ) {
     return {
-      aplicacion: construirAplicacion("revisar", "No llegó y descartado"),
+      aplicacion: construirAplicacion(
+        "no_aplica",
+        "No llegó y pago descartado"
+      ),
       alertas
     };
   }
 
-  if (estadoCita === "otro" && (estadoPago === "pagado" || estadoPago === "plan" || estadoPago === "descartado")) {
-    alertas.push("Inconsistencia: pago/plan/descartado sin estado cita reconocido");
+  /*
+    ATENDIDOS Y PAGADOS/PLAN
+  */
+
+  if (
+    estadoCita === "atendido" &&
+    (estadoPago === "pagado" || estadoPago === "plan")
+  ) {
     return {
-      aplicacion: construirAplicacion("revisar", "Pago/plan/descartado sin estado cita reconocido"),
+      aplicacion: construirAplicacion(
+        "aplica",
+        estadoPago === "pagado"
+          ? "Atendido y pagado"
+          : "Atendido y plan"
+      ),
       alertas
     };
   }
 
-  if (estadoCita === "atendido" && estadoPago === "no_pagado") {
+  /*
+    ATENDIDO + DESCARTADO
+
+    Por defecto NO APLICA.
+    La única excepción es Evaluación Nutricional PAD
+    Telemedicina con valor exacto de $8.500.
+  */
+
+  if (
+    estadoCita === "atendido" &&
+    estadoPago === "descartado"
+  ) {
+    if (
+      esEvaluacionNutricionalPadTelemedicina(tratamiento) &&
+      Math.abs(valor) === 8500
+    ) {
+      return {
+        aplicacion: construirAplicacion(
+          "aplica",
+          "Evaluación Nutricional PAD Telemedicina descartada por $8.500"
+        ),
+        alertas
+      };
+    }
+
     return {
-      aplicacion: construirAplicacion("no_aplica", "Atendido sin pago"),
+      aplicacion: construirAplicacion(
+        "no_aplica",
+        "Atendido con pago descartado"
+      ),
+      alertas
+    };
+  }
+
+  if (
+    estadoCita === "atendido" &&
+    estadoPago === "no_pagado"
+  ) {
+    return {
+      aplicacion: construirAplicacion(
+        "no_aplica",
+        "Atendido sin pago"
+      ),
+      alertas
+    };
+  }
+
+  /*
+    ESTADOS QUE EL SISTEMA NO PUEDE DECIDIR
+  */
+
+  if (
+    estadoCita === "otro" &&
+    ["pagado", "plan", "descartado"].includes(estadoPago)
+  ) {
+    alertas.push(
+      "Estado de cita no reconocido: decidir manualmente si aplica"
+    );
+
+    return {
+      aplicacion: construirAplicacion(
+        "revisar",
+        "Estado de cita no reconocido"
+      ),
       alertas
     };
   }
 
   return {
-    aplicacion: construirAplicacion("no_aplica", "Combinación no válida para liquidar"),
+    aplicacion: construirAplicacion(
+      "no_aplica",
+      "Combinación no válida para liquidar"
+    ),
     alertas
   };
 }
@@ -1118,30 +1512,17 @@ function limpiarAlertasAutoProcedimiento(alertas = []) {
 ====================== */
 
 function recomputeItemFromCurrentValues(reg) {
-  const analisisProf = reg.resolved?.profesionalId
-    ? {
-        profesional: profesionales.find(p => p.id === reg.resolved.profesionalId) || null,
-        alerta: null
-      }
-    : analizarBusquedaProfesional(reg.profesional);
-
-  const profesionalDetectado = analisisProf?.profesional || null;
-
-  const analisisProc = reg.resolved?.procedimientoId
-    ? {
-        procedimiento: procedimientos.find(p => p.id === reg.resolved.procedimientoId) || null,
-        tipoMatch: reg.resolved?.confirmadoManualProcedimiento
-          ? "manual"
-          : (reg.resolved?.autoProcedimientoTipoMatch || "exacto"),
-        alerta:
-          !reg.resolved?.confirmadoManualProcedimiento &&
-          reg.resolved?.autoProcedimientoTipoMatch === "parcial"
-            ? `Asociación automática parcial de procedimiento: archivo "${reg.prestacion}" → catálogo "${reg.resolved?.procedimientoNombre || reg.procedimientoDetectado || ""}". Revisar antes de confirmar.`
-            : null
-      }
-    : analizarBusquedaProcedimiento(reg.prestacion);
-  
-  const procedimientoDetectado = analisisProc?.procedimiento || null;
+  reg.resolved = reg.resolved || {
+    profesionalId: null,
+    profesionalNombre: null,
+    procedimientoId: null,
+    procedimientoNombre: null,
+    autoProfesional: false,
+    autoProcedimiento: false,
+    autoProcedimientoTipoMatch: null,
+    confirmadoManualProfesional: false,
+    confirmadoManualProcedimiento: false
+  };
 
   reg.rutNorm = normalizarRut(reg.rut);
   reg.pacienteNorm = normalizarPaciente(reg.paciente);
@@ -1150,60 +1531,216 @@ function recomputeItemFromCurrentValues(reg) {
   reg.fechaNorm = normalizarFecha(reg.fecha);
   reg.valor = normalizarMonto(reg.valor);
 
-  reg.resolved = reg.resolved || {
-    profesionalId: null,
-    profesionalNombre: null,
-    procedimientoId: null,
-    procedimientoNombre: null,
-    autoProfesional: false,
-    autoProcedimiento: false,
-    confirmadoManualProfesional: false,
-    confirmadoManualProcedimiento: false
-  };
+  /*
+    PROFESIONAL
+  */
 
-  if (!reg.resolved.profesionalId && profesionalDetectado?.id) {
-    reg.resolved.profesionalId = profesionalDetectado.id;
-    reg.resolved.profesionalNombre = nombreProfesionalCatalogo(profesionalDetectado);
-    reg.resolved.autoProfesional = true;
+  let profesionalDetectado = null;
+  let alertaProfesional = null;
+
+  if (reg.resolved.profesionalId) {
+    profesionalDetectado =
+      profesionales.find(p => p.id === reg.resolved.profesionalId) ||
+      null;
+  } else {
+    const analisis = analizarBusquedaProfesional(reg.profesional);
+
+    profesionalDetectado = analisis?.profesional || null;
+    alertaProfesional = analisis?.alerta || null;
+
+    if (profesionalDetectado?.id) {
+      reg.resolved.profesionalId = profesionalDetectado.id;
+      reg.resolved.profesionalNombre =
+        nombreProfesionalCatalogo(profesionalDetectado);
+      reg.resolved.autoProfesional = true;
+    }
   }
 
-  if (!reg.resolved.procedimientoId && procedimientoDetectado?.id) {
-    reg.resolved.procedimientoId = procedimientoDetectado.id;
-    reg.resolved.procedimientoNombre = nombreProcedimientoCatalogo(procedimientoDetectado);
-    reg.resolved.autoProcedimiento = true;
-    reg.resolved.autoProcedimientoTipoMatch = analisisProc?.tipoMatch || null;
+  /*
+    PROCEDIMIENTO
+  */
+
+  let procedimientoDetectado = null;
+  let alertaProcedimiento = null;
+  let tipoMatchProcedimiento = null;
+
+  if (reg.resolved.procedimientoId) {
+    procedimientoDetectado =
+      procedimientos.find(p => p.id === reg.resolved.procedimientoId) ||
+      null;
+
+    tipoMatchProcedimiento =
+      reg.resolved.confirmadoManualProcedimiento
+        ? "manual"
+        : reg.resolved.autoProcedimientoTipoMatch;
+  } else {
+    const analisis = analizarBusquedaProcedimiento(reg.prestacion);
+
+    procedimientoDetectado = analisis?.procedimiento || null;
+    alertaProcedimiento = analisis?.alerta || null;
+    tipoMatchProcedimiento = analisis?.tipoMatch || null;
+
+    if (procedimientoDetectado?.id) {
+      reg.resolved.procedimientoId = procedimientoDetectado.id;
+      reg.resolved.procedimientoNombre =
+        nombreProcedimientoCatalogo(procedimientoDetectado);
+      reg.resolved.autoProcedimiento = true;
+      reg.resolved.autoProcedimientoTipoMatch =
+        tipoMatchProcedimiento;
+    }
   }
 
-  reg.profesionalDetectado = reg.resolved.profesionalNombre || (profesionalDetectado ? nombreProfesionalCatalogo(profesionalDetectado) : null);
-  reg.procedimientoDetectado = reg.resolved.procedimientoNombre || (procedimientoDetectado ? nombreProcedimientoCatalogo(procedimientoDetectado) : null);
+  if (profesionalDetectado) {
+    reg.resolved.profesionalNombre =
+      nombreProfesionalCatalogo(profesionalDetectado);
+  }
+
+  if (procedimientoDetectado) {
+    reg.resolved.procedimientoNombre =
+      nombreProcedimientoCatalogo(procedimientoDetectado);
+  }
+
+  reg.profesionalDetectado =
+    reg.resolved.profesionalNombre || null;
+
+  reg.procedimientoDetectado =
+    reg.resolved.procedimientoNombre || null;
+
+  /*
+    APLICACIÓN
+
+    Si existe decisión manual, no volvemos a reemplazarla
+    con la clasificación automática.
+  */
 
   let alertas = [];
 
-  if (reg.origen === "Reservo") {
-    const evalApp = evaluarAplicacionReservo(reg.dataReservo || {});
-    reg.aplicacion = evalApp.aplicacion;
-    alertas = [...evalApp.alertas];
+  if (reg.decisionManualAplicacion?.estado) {
+    reg.aplicacion = construirAplicacion(
+      reg.decisionManualAplicacion.estado,
+      reg.decisionManualAplicacion.motivo ||
+        "Decisión manual"
+    );
+  } else if (reg.origen === "Reservo") {
+    const evaluacion = evaluarAplicacionReservo(
+      reg.dataReservo || {}
+    );
+
+    reg.aplicacion = evaluacion.aplicacion;
+    alertas.push(...(evaluacion.alertas || []));
   } else if (reg.origen === "MK") {
-    if (!reg.aplicacion) reg.aplicacion = construirAplicacion("no_aplica", "Sin evaluar");
-    alertas = reg.review?.alertas || [];
-  }
-  
-  if (reg.resolved?.confirmadoManualProcedimiento) {
-    alertas = limpiarAlertasAutoProcedimiento(alertas);
+    reg.aplicacion =
+      reg.aplicacion ||
+      construirAplicacion("no_aplica", "Sin evaluar");
   }
 
-  if (analisisProf?.alerta) alertas.push(analisisProf.alerta);
-  if (!reg.resolved?.confirmadoManualProcedimiento && analisisProc?.alerta) {
-    alertas.push(analisisProc.alerta);
+  /*
+    ALERTAS DE DATOS
+  */
+
+  if (!reg.rutNorm) {
+    alertas.push("RUT vacío o inválido");
   }
-  if (!reg.rutNorm) alertas.push("RUT vacío o inválido");
-  if (!normalizarTexto(reg.profesional)) alertas.push("Profesional vacío");
-  if (!normalizarTexto(reg.prestacion)) alertas.push("Procedimiento vacío");
+
+  if (!reg.resolved.profesionalId) {
+    if (alertaProfesional) {
+      alertas.push(alertaProfesional);
+    } else {
+      alertas.push("Profesional pendiente de resolver");
+    }
+  }
+
+  if (!reg.resolved.procedimientoId) {
+    if (alertaProcedimiento) {
+      alertas.push(alertaProcedimiento);
+    } else {
+      alertas.push("Procedimiento pendiente de resolver");
+    }
+  }
+
+  if (
+    reg.resolved.procedimientoId &&
+    !reg.resolved.confirmadoManualProcedimiento &&
+    tipoMatchProcedimiento === "parcial"
+  ) {
+    alertas.push(
+      `Asociación automática parcial de procedimiento: archivo "${reg.prestacion}" → catálogo "${reg.resolved.procedimientoNombre || ""}". Revisar antes de enviar.`
+    );
+  }
+
+  const profesionalCatalogo =
+    profesionales.find(
+      p => p.id === reg.resolved.profesionalId
+    ) || null;
+
+  const procedimientoCatalogo =
+    procedimientos.find(
+      p => p.id === reg.resolved.procedimientoId
+    ) || null;
+
+  const alertaRol = construirAlertaRolProcedimiento({
+    profesional: profesionalCatalogo,
+    procedimiento: procedimientoCatalogo,
+    textoProcedimientoArchivo: reg.prestacion || ""
+  });
+
+  if (alertaRol) {
+    alertas.push(alertaRol);
+  }
+
+  /*
+    Si profesional o procedimiento fueron escogidos
+    manualmente, quitamos alertas automáticas antiguas.
+  */
+
+  if (reg.resolved.confirmadoManualProfesional) {
+    alertas = alertas.filter(a => {
+      const t = normalizarTexto(a);
+
+      return !(
+        t.includes("COINCIDENCIA AMBIGUA EN PROFESIONAL") ||
+        t.includes("NO SE ENCONTRO COINCIDENCIA") ||
+        t.includes("PROFESIONAL PENDIENTE")
+      );
+    });
+  }
+
+  if (reg.resolved.confirmadoManualProcedimiento) {
+    alertas = limpiarAlertasAutoProcedimiento(alertas);
+
+    alertas = alertas.filter(a => {
+      const t = normalizarTexto(a);
+
+      return !(
+        t.includes("PROCEDIMIENTO PENDIENTE") ||
+        t.includes("NO SE ENCONTRO PROCEDIMIENTO")
+      );
+    });
+  }
+
+  /*
+    Una decisión manual APLICA/NO APLICA resuelve
+    únicamente la duda de aplicación.
+    No elimina problemas de profesional/procedimiento/RUT.
+  */
+
+  if (reg.decisionManualAplicacion?.estado) {
+    alertas = alertas.filter(a => {
+      const t = normalizarTexto(a);
+
+      return !(
+        t.includes("DECIDIR MANUALMENTE SI APLICA") ||
+        t.includes("ESTADO DE CITA NO RECONOCIDO")
+      );
+    });
+  }
+
+  alertas = [...new Set(alertas.filter(Boolean))];
 
   reg.review = construirReview({
-    profesionalId: reg.resolved?.profesionalId || null,
-    procedimientoId: reg.resolved?.procedimientoId || null,
-    alertas: [...new Set(alertas)]
+    profesionalId: reg.resolved.profesionalId || null,
+    procedimientoId: reg.resolved.procedimientoId || null,
+    alertas
   });
 }
 
@@ -1352,27 +1889,153 @@ function abrirMasInformacion(reg) {
 
   const filas = Object.keys(original).map(key => {
     const value = original[key] ?? "";
+
     return `
       <div class="field" style="margin-bottom:10px;">
         <label>${escapeHtml(key)}</label>
-        <input type="text" data-extra-key="${escapeHtml(key)}" value="${escapeHtml(String(value))}">
+        <input
+          type="text"
+          data-extra-key="${escapeHtml(key)}"
+          value="${escapeHtml(String(value))}"
+        >
       </div>
     `;
   }).join("");
 
+  const historial = Array.isArray(reg.historial)
+    ? [...reg.historial].reverse()
+    : [];
+
+  const historialHTML = historial.length
+    ? historial.map(h => `
+        <div style="
+          padding:10px;
+          border:1px solid rgba(0,0,0,.08);
+          border-radius:10px;
+          margin-top:8px;
+        ">
+          <div style="font-weight:900;">
+            ${escapeHtml(h.usuario || "Usuario")} ·
+            ${escapeHtml(
+              h.fecha
+                ? new Date(h.fecha).toLocaleString("es-CL")
+                : ""
+            )}
+          </div>
+
+          ${
+            h.observacion
+              ? `<div class="muted tiny" style="margin-top:4px;">
+                   Motivo: ${escapeHtml(h.observacion)}
+                 </div>`
+              : ""
+          }
+
+          ${(h.cambios || []).map(c => `
+            <div class="tiny" style="margin-top:5px;">
+              <b>${escapeHtml(c.etiqueta || c.campo || "Campo")}:</b>
+              ${escapeHtml(c.antes || "—")}
+              →
+              ${escapeHtml(c.despues || "—")}
+            </div>
+          `).join("")}
+        </div>
+      `).join("")
+    : `<div class="muted tiny">Este registro todavía no tiene modificaciones manuales.</div>`;
+
   itemForm.innerHTML = `
     <div class="card" style="padding:12px;">
-      <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; margin-bottom:10px;">
+      <div style="
+        display:flex;
+        justify-content:space-between;
+        align-items:center;
+        gap:10px;
+        margin-bottom:12px;
+      ">
         <div>
-          <div class="sectionTitle">Editar más información</div>
-          <div class="help">Aquí puedes editar los campos originales del registro. Luego presiona “Guardar item”.</div>
+          <div class="sectionTitle">Editar información</div>
+          <div class="help">
+            El dato original importado se conserva. Estos serán los valores operativos utilizados para liquidaciones.
+          </div>
         </div>
-        <button id="btnVolverDetalle" type="button" class="btn">← Volver a resolución</button>
+
+        <button
+          id="btnVolverDetalle"
+          type="button"
+          class="btn"
+        >
+          ← Volver a resolución
+        </button>
       </div>
+
+      <section
+        style="
+          padding:12px;
+          border:1px solid rgba(0,0,0,.08);
+          border-radius:12px;
+          margin-bottom:14px;
+          background:#f8fafc;
+        "
+      >
+        <div class="sectionTitle">Decisión de aplicación</div>
+
+        <div class="grid2">
+          <div class="field">
+            <label>¿Corresponde enviar a liquidaciones?</label>
+            <select id="detalleAplicacionManual">
+              <option value="">Usar clasificación automática</option>
+              <option
+                value="aplica"
+                ${reg.decisionManualAplicacion?.estado === "aplica" ? "selected" : ""}
+              >
+                APLICA
+              </option>
+              <option
+                value="no_aplica"
+                ${reg.decisionManualAplicacion?.estado === "no_aplica" ? "selected" : ""}
+              >
+                NO APLICA
+              </option>
+            </select>
+          </div>
+
+          <div class="field">
+            <label>Motivo u observación del cambio</label>
+            <input
+              id="detalleMotivoCambio"
+              type="text"
+              placeholder="Ej: prestación sí correspondía liquidar"
+              value=""
+            >
+          </div>
+        </div>
+
+        <div class="help">
+          Al guardar, la alerta de aplicación desaparecerá si la decisión ya quedó resuelta. No necesitas una segunda confirmación.
+        </div>
+      </section>
+
+      <div class="sectionTitle">Campos operativos del registro</div>
 
       <div class="grid2">
         ${filas}
       </div>
+
+      <div style="height:16px;"></div>
+
+      <section
+        style="
+          padding:12px;
+          border:1px solid rgba(0,0,0,.08);
+          border-radius:12px;
+        "
+      >
+        <div class="sectionTitle">
+          Historial (${historial.length})
+        </div>
+
+        ${historialHTML}
+      </section>
     </div>
   `;
 
@@ -1385,54 +2048,201 @@ async function guardarDetalle() {
   if (!stateEdicion.actual) return;
 
   const reg = stateEdicion.actual;
+  const antes = snapshotEditable(reg);
 
-  const extraInputs = document.querySelectorAll("[data-extra-key]");
+  /*
+    Conserva una fotografía realmente inmutable
+    del archivo antes de la primera modificación.
+  */
+
+  if (!reg.originalImportado) {
+    reg.originalImportado = copiarSeguro(
+      reg.dataReservo || reg.dataMK || {}
+    );
+  }
+
+  /*
+    EDICIÓN DE CAMPOS DEL ARCHIVO OPERATIVO
+  */
+
+  const extraInputs =
+    document.querySelectorAll("[data-extra-key]");
+
   if (extraInputs.length) {
-    const target = reg.dataReservo ? reg.dataReservo : reg.dataMK;
+    const target = reg.dataReservo
+      ? reg.dataReservo
+      : reg.dataMK;
 
     extraInputs.forEach(inp => {
       const key = inp.getAttribute("data-extra-key");
+
       if (!key || !target) return;
       target[key] = inp.value;
     });
 
     if (reg.dataReservo) {
-      reg.fecha = reg.dataReservo["Fecha"] ?? reg.fecha;
-      reg.rut = reg.dataReservo["Rut"] ?? reg.rut;
-      reg.paciente = reg.dataReservo["Paciente"] ?? reg.paciente;
-      reg.profesional = reg.dataReservo["Profesional"] ?? reg.profesional;
-      reg.prestacion = reg.dataReservo["Tratamiento"] ?? reg.prestacion;
-      reg.valor = normalizarMonto(reg.dataReservo["Valor"]);
+      reg.fecha =
+        reg.dataReservo["Fecha"] ?? reg.fecha;
+
+      reg.rut =
+        reg.dataReservo["Rut"] ?? reg.rut;
+
+      reg.paciente =
+        reg.dataReservo["Paciente"] ?? reg.paciente;
+
+      reg.profesional =
+        reg.dataReservo["Profesional"] ?? reg.profesional;
+
+      reg.prestacion =
+        reg.dataReservo["Tratamiento"] ?? reg.prestacion;
+
+      reg.valor =
+        normalizarMonto(reg.dataReservo["Valor"]);
     } else if (reg.dataMK) {
-      reg.fecha = reg.dataMK["Fecha"] ?? reg.fecha;
-      reg.rut = reg.dataMK["Rut"] ?? reg.rut;
-      reg.paciente = reg.dataMK["Paciente"] ?? reg.paciente;
-      reg.profesional = reg.dataMK["D Médico"] ?? reg.profesional;
-      reg.prestacion = reg.dataMK["D Artículo"] ?? reg.prestacion;
-      reg.valor = normalizarMonto(reg.dataMK["Total"]);
+      reg.fecha =
+        reg.dataMK["Fecha"] ?? reg.fecha;
+
+      reg.rut =
+        reg.dataMK["Rut"] ?? reg.rut;
+
+      reg.paciente =
+        reg.dataMK["Paciente"] ?? reg.paciente;
+
+      reg.profesional =
+        reg.dataMK["D Médico"] ?? reg.profesional;
+
+      reg.prestacion =
+        reg.dataMK["D Artículo"] ?? reg.prestacion;
+
+      reg.valor =
+        normalizarMonto(reg.dataMK["Total"]);
     }
   }
+
+  /*
+    PROFESIONAL Y PROCEDIMIENTO
+  */
 
   const profSel = $("detalleProfesionalId");
   const procSel = $("detalleProcedimientoId");
 
-  if (profSel || procSel) {
-    manualOverrides[reg.itemId] = {
-      ...(manualOverrides[reg.itemId] || {}),
-      ...(profSel ? { profesionalId: profSel.value || null } : {}),
-      ...(procSel ? { procedimientoId: procSel.value || null } : {})
-    };
+  if (profSel) {
+    const profesionalId = profSel.value || null;
+    const profesional = profesionales.find(
+      p => p.id === profesionalId
+    ) || null;
+
+    reg.resolved = reg.resolved || {};
+
+    reg.resolved.profesionalId =
+      profesional?.id || null;
+
+    reg.resolved.profesionalNombre =
+      profesional
+        ? nombreProfesionalCatalogo(profesional)
+        : null;
+
+    reg.resolved.confirmadoManualProfesional =
+      !!profesionalId;
+
+    reg.resolved.autoProfesional = false;
   }
 
-  aplicarManualOverrides([reg]);
+  if (procSel) {
+    const procedimientoId = procSel.value || null;
+    const procedimiento = procedimientos.find(
+      p => p.id === procedimientoId
+    ) || null;
+
+    reg.resolved = reg.resolved || {};
+
+    reg.resolved.procedimientoId =
+      procedimiento?.id || null;
+
+    reg.resolved.procedimientoNombre =
+      procedimiento
+        ? nombreProcedimientoCatalogo(procedimiento)
+        : null;
+
+    reg.resolved.confirmadoManualProcedimiento =
+      !!procedimientoId;
+
+    reg.resolved.autoProcedimiento = false;
+
+    reg.resolved.autoProcedimientoTipoMatch =
+      procedimientoId ? "manual" : null;
+  }
+
+  /*
+    APLICA / NO APLICA
+  */
+
+  const aplicacionManual =
+    clean($("detalleAplicacionManual")?.value || "");
+
+  const motivoCambio =
+    clean($("detalleMotivoCambio")?.value || "");
+
+  if (aplicacionManual) {
+    if (!motivoCambio) {
+      toast(
+        "Debes indicar el motivo de la decisión manual"
+      );
+      return;
+    }
+
+    reg.decisionManualAplicacion = {
+      estado: aplicacionManual,
+      motivo: motivoCambio,
+      fecha: new Date().toISOString(),
+      usuario: stateImport.user?.email || ""
+    };
+  } else if ($("detalleAplicacionManual")) {
+    reg.decisionManualAplicacion = null;
+  }
+
+  /*
+    RECALCULAR Y CREAR HISTORIAL
+  */
+
   recomputeItemFromCurrentValues(reg);
+
+  const despues = snapshotEditable(reg);
+  const cambios = crearCambiosHistorial(
+    antes,
+    despues
+  );
+
+  if (!cambios.length) {
+    toast("No se detectaron cambios");
+    return;
+  }
+
+  registrarHistorialLocal(reg, {
+    tipo: "edicion",
+    cambios,
+    observacion: motivoCambio
+  });
+
+  /*
+    Guardar no actualiza liquidaciones.
+    Solo marca que existe una diferencia pendiente.
+  */
+
+  reg.cambiosPendientesLiquidacion = true;
 
   await persistirItemEditado(reg);
 
   cerrarDetalle();
   render();
-}
 
+  toast(
+    tieneAlertaOperativa(reg)
+      ? "Cambio guardado. El registro todavía mantiene alertas pendientes."
+      : "Cambio guardado. La alerta quedó resuelta."
+  );
+}
+      
 function cerrarDetalle() {
   const modal = $("modalItemBackdrop");
   const itemForm = $("itemForm");
@@ -1449,75 +2259,63 @@ function cerrarDetalle() {
 
 async function persistirItemEditado(reg) {
   if (!stateImport.importId) {
-    render();
+    toast("No hay una importación cargada");
     return;
   }
 
-  if (stateImport.status === "staged") {
-    const ref = doc(db, "produccion_ambulatoria_imports", stateImport.importId, "items", reg.itemId);
-
-    await setDoc(ref, {
-      ...serializeAmbItem(reg),
-      actualizadoEl: serverTimestamp(),
-      actualizadoPor: stateImport.user?.email || ""
-    }, { merge: true });
-
-    toast("Item guardado en staging");
+  if (
+    stateImport.status === "anulada" ||
+    stateImport.status === "confirmada_error"
+  ) {
+    toast("Esta importación no está disponible para editar");
     return;
   }
 
-  if (stateImport.status === "confirmada") {
-    const refStaging = doc(db, "produccion_ambulatoria_imports", stateImport.importId, "items", reg.itemId);
+  const refStaging = doc(
+    db,
+    "produccion_ambulatoria_imports",
+    stateImport.importId,
+    "items",
+    reg.itemId
+  );
 
-    // ✅ Siempre guarda el item editado dentro del import
-    await setDoc(refStaging, {
-      ...serializeAmbItem(reg),
+  await setDoc(refStaging, {
+    ...serializeAmbItem(reg),
+    estado: reg.confirmadoEnProduccion
+      ? "confirmada"
+      : "staged",
+    actualizadoEl: serverTimestamp(),
+    actualizadoPor: stateImport.user?.email || ""
+  }, { merge: true });
+
+  /*
+    Guardar solamente actualiza el import bruto/editable.
+    Producción final se modifica después mediante
+    “Actualizar liquidaciones”.
+  */
+
+  await setDoc(
+    doc(
+      db,
+      "produccion_ambulatoria_imports",
+      stateImport.importId
+    ),
+    {
+      tieneCambiosPendientesLiquidacion:
+        consolidado.some(estaPendienteLiquidacion),
       actualizadoEl: serverTimestamp(),
       actualizadoPor: stateImport.user?.email || ""
-    }, { merge: true });
-
-    // ✅ Solo si YA estaba confirmado, reescribe también producción final
-    if (reg.confirmadoEnProduccion === true) {
-      const YYYY = String(stateImport.year);
-      const MM = pad(stateImport.monthNum, 2);
-      const rutKey = normalizarRutKey(reg.rut || "");
-      const pacienteId = rutKey || `SINRUT_${stateImport.importId}`;
-      const itemDocId = reg.finalItemId || finalItemId(reg);
-
-      reg.finalItemId = itemDocId;
-      reg.pacienteId = pacienteId;
-
-      const refPaciente = doc(db, "produccion_ambulatoria", YYYY, "meses", MM, "pacientes", pacienteId);
-      const refItem = doc(db, "produccion_ambulatoria", YYYY, "meses", MM, "pacientes", pacienteId, "items", itemDocId);
-
-      await setDoc(refPaciente, {
-        rut: reg.rut || null,
-        rutNorm: reg.rutNorm || null,
-        paciente: reg.paciente || null,
-        pacienteNorm: reg.pacienteNorm || null,
-        actualizadoEl: serverTimestamp(),
-        actualizadoPor: stateImport.user?.email || ""
-      }, { merge: true });
-
-      await setDoc(refItem, {
-        ...serializeAmbItem(reg),
-        finalItemId: itemDocId,
-        pacienteId,
-        estadoRegistro: "activo",
-        actualizadoEl: serverTimestamp(),
-        actualizadoPor: stateImport.user?.email || ""
-      }, { merge: true });
-
-      toast("Item confirmado actualizado en producción final");
-    } else {
-      toast("Item pendiente guardado en el import; aún no pasa a producción final");
-    }
-  }
+    },
+    { merge: true }
+  );
 }
 
 function serializeAmbItem(reg) {
-  const profesionalId = reg.resolved?.profesionalId || null;
-  const procedimientoId = reg.resolved?.procedimientoId || null;
+  const profesionalId =
+    reg.resolved?.profesionalId || null;
+
+  const procedimientoId =
+    reg.resolved?.procedimientoId || null;
 
   return {
     itemId: reg.itemId,
@@ -1535,46 +2333,108 @@ function serializeAmbItem(reg) {
 
     profesional: reg.profesional || null,
     profesionalNorm: reg.profesionalNorm || null,
-    profesionalDetectado: reg.profesionalDetectado || null,
+    profesionalDetectado:
+      reg.profesionalDetectado || null,
 
     prestacion: reg.prestacion || null,
-    procedimientoNorm: reg.procedimientoNorm || null,
-    procedimientoDetectado: reg.procedimientoDetectado || null,
+    procedimientoNorm:
+      reg.procedimientoNorm || null,
+    procedimientoDetectado:
+      reg.procedimientoDetectado || null,
 
     valor: Number(reg.valor || 0) || 0,
+
+    /*
+      originalImportado nunca se modifica.
+      dataReservo/dataMK contienen el estado operativo actual.
+    */
+
+    originalImportado:
+      reg.originalImportado ||
+      copiarSeguro(reg.dataReservo || reg.dataMK || {}),
 
     dataReservo: reg.dataReservo || null,
     dataMK: reg.dataMK || null,
 
     resolved: reg.resolved || null,
 
-    // ✅ ESPEJOS PARA QUE TABLA, MODAL Y LIQUIDACIÓN LEAN LO MISMO
     profesionalId,
     rutProfesional: profesionalId,
 
     procedimientoId,
     ambulatorioId: procedimientoId,
 
-    procedimientoNombre: reg.resolved?.procedimientoNombre || reg.procedimientoDetectado || null,
-    profesionalNombre: reg.resolved?.profesionalNombre || reg.profesionalDetectado || null,
+    procedimientoNombre:
+      reg.resolved?.procedimientoNombre ||
+      reg.procedimientoDetectado ||
+      null,
+
+    profesionalNombre:
+      reg.resolved?.profesionalNombre ||
+      reg.profesionalDetectado ||
+      null,
 
     normalizado: {
       profesionalId,
       rutProfesional: profesionalId,
       procedimientoId,
       ambulatorioId: procedimientoId,
-      procedimientoNombre: reg.resolved?.procedimientoNombre || reg.procedimientoDetectado || null,
-      profesionalNombre: reg.resolved?.profesionalNombre || reg.profesionalDetectado || null
+
+      procedimientoNombre:
+        reg.resolved?.procedimientoNombre ||
+        reg.procedimientoDetectado ||
+        null,
+
+      profesionalNombre:
+        reg.resolved?.profesionalNombre ||
+        reg.profesionalDetectado ||
+        null
     },
 
     aplicacion: reg.aplicacion || null,
+    decisionManualAplicacion:
+      reg.decisionManualAplicacion || null,
+
     review: reg.review || null,
 
-    confirmadoEnProduccion: !!reg.confirmadoEnProduccion,
-    confirmadoEl: reg.confirmadoEl || null,
-    confirmadoPor: reg.confirmadoPor || null,
-    finalItemId: reg.finalItemId || null,
-    pacienteId: reg.pacienteId || null
+    historial: Array.isArray(reg.historial)
+      ? reg.historial
+      : [],
+
+    cambiosPendientesLiquidacion:
+      reg.cambiosPendientesLiquidacion === true,
+
+    ultimaVersionPublicada:
+      reg.ultimaVersionPublicada || null,
+
+    publicadoEnLiquidaciones:
+      reg.publicadoEnLiquidaciones === true ||
+      reg.confirmadoEnProduccion === true,
+
+    publicadoPacienteId:
+      reg.publicadoPacienteId ||
+      reg.pacienteId ||
+      null,
+
+    publicadoFinalItemId:
+      reg.publicadoFinalItemId ||
+      reg.finalItemId ||
+      null,
+
+    confirmadoEnProduccion:
+      !!reg.confirmadoEnProduccion,
+
+    confirmadoEl:
+      reg.confirmadoEl || null,
+
+    confirmadoPor:
+      reg.confirmadoPor || null,
+
+    finalItemId:
+      reg.finalItemId || null,
+
+    pacienteId:
+      reg.pacienteId || null
   };
 }
 
@@ -1860,28 +2720,22 @@ function itemSearchText(it) {
 function aplicarFiltroPill(items) {
   switch (uiState.pillFiltro) {
     case "alertas":
-      return items.filter(it => (it.review?.alertas || []).length > 0);
+      return items.filter(tieneAlertaOperativa);
 
-    case "pend_prof":
-      return items.filter(it => it.review?.pendientes?.profesional === true);
-
-    case "pend_proc":
-      return items.filter(it => it.review?.pendientes?.procedimiento === true);
-
-    case "reservo_validos":
-      return items.filter(it => it.origen === "Reservo" && it.aplicacion?.estado === "aplica");
-
-    case "mk_validos":
-      return items.filter(it => it.origen === "MK" && it.aplicacion?.estado === "aplica");
-
-    case "ok":
-      return items.filter(it => it.review?.estadoRevision === "ok");
-
-    case "confirmables":
-      return items.filter(it => esItemConfirmable(it) && !it.confirmadoEnProduccion);
+    case "aplica":
+      return items.filter(it =>
+        !tieneAlertaOperativa(it) &&
+        it.aplicacion?.estado === "aplica"
+      );
 
     case "no_aplica":
-      return items.filter(it => it.aplicacion?.estado === "no_aplica");
+      return items.filter(it =>
+        !tieneAlertaOperativa(it) &&
+        it.aplicacion?.estado === "no_aplica"
+      );
+
+    case "cambios_pendientes":
+      return items.filter(estaPendienteLiquidacion);
 
     case "":
     default:
@@ -1892,19 +2746,41 @@ function aplicarFiltroPill(items) {
 function filteredItems() {
   let items = itemsOperables();
 
-  if (uiState.mostrarNoAplica) {
-    items = items.filter(it => it.aplicacion?.estado === "no_aplica");
-  } else {
-    items = items.filter(it => it.aplicacion?.estado !== "no_aplica");
-  }
-
   items = aplicarFiltroPill(items);
 
-  if (!clean(uiState.q)) return items;
+  if (clean(uiState.q)) {
+    items = items.filter(it => {
+      const text = itemSearchText(it);
+      return matchBusquedaPrincipal(
+        text,
+        uiState.q
+      );
+    });
+  }
 
-  return items.filter(it => {
-    const text = itemSearchText(it);
-    return matchBusquedaPrincipal(text, uiState.q);
+  /*
+    Orden obligatorio:
+    1. Alertas
+    2. Aplican
+    3. No aplican
+  */
+
+  return [...items].sort((a, b) => {
+    const grupo =
+      ordenGrupoVisual(a) -
+      ordenGrupoVisual(b);
+
+    if (grupo !== 0) return grupo;
+
+    const fecha =
+      clean(b.fechaNorm).localeCompare(
+        clean(a.fechaNorm)
+      );
+
+    if (fecha !== 0) return fecha;
+
+    return Number(a.sourceIndex || 0) -
+      Number(b.sourceIndex || 0);
   });
 }
 
@@ -2053,7 +2929,19 @@ function render() {
     const estado = r.review?.estadoRevision || "pendiente";
     const alertasTexto = (r.review?.alertas || []).join(" · ");
 
-    const estadoFinalHtml = badgeConfirmacionHTML(r);
+    const pendienteLiquidacion =
+      estaPendienteLiquidacion(r);
+    
+    const estadoFinalHtml = pendienteLiquidacion
+      ? `<span class="warn">Cambio sin enviar</span>`
+      : (
+          r.publicadoEnLiquidaciones ||
+          r.confirmadoEnProduccion
+            ? `<span class="ok">Actualizado en liquidaciones</span>`
+            : `<span class="muted">Sin publicar</span>`
+        );
+    
+    tr.dataset.grupo = etiquetaGrupoVisual(r);
     
     tr.innerHTML = `
       <td>${from + i + 1}</td>
@@ -2087,41 +2975,72 @@ function render() {
   }
 
   const operables = itemsOperables();
-  const ocultosKine = totalPrestacionesExcluidasOcultas();
-
-  // ✅ Universo base según la vista actual
-  // - Vista normal: excluye no_aplica
-  // - Vista "Ver no aplica": solo incluye no_aplica
-  const universoVista = uiState.mostrarNoAplica
-    ? operables.filter(x => x.aplicacion?.estado === "no_aplica")
-    : operables.filter(x => x.aplicacion?.estado !== "no_aplica");
-
-  const pendientes = universoVista.filter(x => x.review?.estadoRevision === "pendiente").length;
-  const alertas = universoVista.filter(x => (x.review?.alertas || []).length > 0).length;
-  const ok = universoVista.filter(x => x.review?.estadoRevision === "ok").length;
-  const noAplica = operables.filter(x => x.aplicacion?.estado === "no_aplica").length;
-  const pendProf = universoVista.filter(x => x.review?.pendientes?.profesional).length;
-  const pendProc = universoVista.filter(x => x.review?.pendientes?.procedimiento).length;
-  const reservoAplica = universoVista.filter(x => x.origen === "Reservo" && x.aplicacion?.estado === "aplica").length;
-  const mkAplica = universoVista.filter(x => x.origen === "MK" && x.aplicacion?.estado === "aplica").length;
-  const confirmados = universoVista.filter(x => x.confirmadoEnProduccion).length;
-  const confirmables = universoVista.filter(it =>
-    esItemConfirmable(it) && !it.confirmadoEnProduccion
+  const ocultosKine =
+    totalPrestacionesExcluidasOcultas();
+  
+  const alertas = operables.filter(
+    tieneAlertaOperativa
   ).length;
   
-  if ($("countPill")) $("countPill").textContent = `Vista: ${items.length} · Total import: ${consolidado.length}`;
-  if ($("pillAlertas")) $("pillAlertas").textContent = `Alertas: ${alertas}`;
-  if ($("pillProf")) $("pillProf").textContent = `Pend. profesional: ${pendProf}`;
-  if ($("pillProc")) $("pillProc").textContent = `Pend. procedimiento: ${pendProc}`;
-  if ($("pillReservoValidos")) $("pillReservoValidos").textContent = `Reservo válidos: ${reservoAplica}`;
-  if ($("pillMKValidos")) $("pillMKValidos").textContent = `MK válidos: ${mkAplica}`;
-  if ($("pillOk")) $("pillOk").textContent = `OK: ${ok}`;
-  if ($("pillConfirmables")) $("pillConfirmables").textContent = `Nuevos confirmables: ${confirmables}`;
-  if ($("pillFusionados")) {
-    $("pillFusionados").textContent = uiState.mostrarNoAplica
-      ? `No aplica (vista): ${universoVista.length}`
-      : `No aplica: ${noAplica}`;
+  const aplican = operables.filter(it =>
+    !tieneAlertaOperativa(it) &&
+    it.aplicacion?.estado === "aplica"
+  ).length;
+  
+  const noAplica = operables.filter(it =>
+    !tieneAlertaOperativa(it) &&
+    it.aplicacion?.estado === "no_aplica"
+  ).length;
+  
+  const cambiosPendientes =
+    operables.filter(
+      estaPendienteLiquidacion
+    ).length;
+  
+  const publicados = operables.filter(it =>
+    it.publicadoEnLiquidaciones === true ||
+    it.confirmadoEnProduccion === true
+  ).length;
+  
+  if ($("countPill")) {
+    $("countPill").textContent =
+      `Vista: ${items.length} · Total import: ${consolidado.length}`;
   }
+  
+  if ($("pillAlertas")) {
+    $("pillAlertas").textContent =
+      `Alertas: ${alertas}`;
+  }
+  
+  if ($("pillReservoValidos")) {
+    $("pillReservoValidos").textContent =
+      `Aplican: ${aplican}`;
+  }
+  
+  if ($("pillFusionados")) {
+    $("pillFusionados").textContent =
+      `No aplican: ${noAplica}`;
+  }
+  
+  if ($("pillConfirmables")) {
+    $("pillConfirmables").textContent =
+      `Cambios sin enviar: ${cambiosPendientes}`;
+  }
+  
+  /*
+    Ocultamos contadores antiguos que ya no corresponden
+    al flujo simplificado.
+  */
+  
+  [
+    "pillProf",
+    "pillProc",
+    "pillMKValidos",
+    "pillOk"
+  ].forEach(id => {
+    const el = $(id);
+    if (el) el.style.display = "none";
+  });
 
   if ($("pagerInfo")) {
     $("pagerInfo").textContent =
@@ -2129,23 +3048,36 @@ function render() {
   }
 
   if ($("statusInfo")) {
-    const totalAmbulatorios = procedimientosAmbulatorios().length;
-    const vista = uiState.mostrarNoAplica ? "Vista: NO APLICA" : "Vista: APLICABLES / REVISAR";
-    const est = stateImport.status ? ` · Estado import: ${stateImport.status}` : "";
-    const imp = stateImport.importId ? ` · ImportID: ${stateImport.importId}` : "";
+    const totalAmbulatorios =
+      procedimientosAmbulatorios().length;
+  
+    const est = stateImport.status
+      ? ` · Estado import: ${stateImport.status}`
+      : "";
+  
+    const imp = stateImport.importId
+      ? ` · ImportID: ${stateImport.importId}`
+      : "";
+  
     const kineTxt = uiState.incluirKinesiologia
-      ? ` · Prestaciones excluidas: activas`
+      ? " · Prestaciones excluidas: activas"
       : ` · Prestaciones excluidas: ocultas (${ocultosKine})`;
-
-    $("statusInfo").textContent = consolidado.length
-      ? `${vista}${est}${imp}${kineTxt} · Confirmados: ${confirmados} · Nuevos confirmables: ${confirmables} · Catálogos: ${profesionales.length} profesionales · ${totalAmbulatorios} procedimientos ambulatorios`
-      : "—";
-  }
-
-  if ($("btnToggleNoAplica")) {
-    $("btnToggleNoAplica").textContent = uiState.mostrarNoAplica
-      ? "Ver aplicables"
-      : "Ver no aplica";
+  
+    $("statusInfo").textContent =
+      consolidado.length
+        ? (
+            `Alertas: ${alertas}` +
+            ` · Aplican: ${aplican}` +
+            ` · No aplican: ${noAplica}` +
+            ` · Publicados: ${publicados}` +
+            ` · Cambios sin enviar: ${cambiosPendientes}` +
+            est +
+            imp +
+            kineTxt +
+            ` · Catálogos: ${profesionales.length} profesionales` +
+            ` · ${totalAmbulatorios} procedimientos ambulatorios`
+          )
+        : "—";
   }
 
   if ($("btnToggleKine")) {
@@ -2157,14 +3089,30 @@ function render() {
   if ($("btnResolver")) $("btnResolver").disabled = consolidado.length === 0;
 
   if ($("btnConfirmar")) {
-    const canConfirm =
-      (stateImport.status === "staged" || stateImport.status === "confirmada") &&
-      confirmables > 0;
-
-    $("btnConfirmar").disabled = !canConfirm;
-    $("btnConfirmar").title = canConfirm
-      ? `Listo para confirmar (${confirmables} items nuevos)`
-      : `Bloqueado: estado=${stateImport.status || "—"} / nuevos confirmables=${confirmables}`;
+    const cambiosPendientes =
+      itemsOperables().filter(
+        estaPendienteLiquidacion
+      ).length;
+  
+    const puedeActualizar =
+      (
+        stateImport.status === "staged" ||
+        stateImport.status === "confirmada"
+      ) &&
+      cambiosPendientes > 0;
+  
+    $("btnConfirmar").disabled =
+      !puedeActualizar;
+  
+    $("btnConfirmar").textContent =
+      cambiosPendientes > 0
+        ? `Actualizar liquidaciones (${cambiosPendientes})`
+        : "Liquidaciones actualizadas";
+  
+    $("btnConfirmar").title =
+      puedeActualizar
+        ? `${cambiosPendientes} cambios pendientes de enviar`
+        : "No hay cambios pendientes de enviar";
   }
 
   if ($("btnAnular")) {
@@ -2175,18 +3123,11 @@ function render() {
 }
 
 function togglePillFiltro(nombreFiltro) {
-  // ✅ Caso especial: el pill "no_aplica" fuerza esa vista
-  if (nombreFiltro === "no_aplica") {
-    uiState.mostrarNoAplica = true;
-    uiState.pillFiltro = "no_aplica";
-    uiState.page = 0;
-    render();
-    return;
-  }
+  uiState.pillFiltro =
+    uiState.pillFiltro === nombreFiltro
+      ? ""
+      : nombreFiltro;
 
-  // ✅ Para todos los demás pills, NO cambiamos la vista actual.
-  // Solo filtramos dentro del universo que ya se está viendo.
-  uiState.pillFiltro = (uiState.pillFiltro === nombreFiltro) ? "" : nombreFiltro;
   uiState.page = 0;
   render();
 }
@@ -2478,8 +3419,13 @@ async function loadStagingFromFirestore(importId) {
       normalizado: x.normalizado || null,
       
       valor: Number(x.valor || 0) || 0,
+      originalImportado:
+        x.originalImportado ||
+        copiarSeguro(x.dataReservo || x.dataMK || {}),
+      
       dataReservo: x.dataReservo || null,
       dataMK: x.dataMK || null,
+      
       resolved: x.resolved || {
         profesionalId: null,
         profesionalNombre: null,
@@ -2491,8 +3437,36 @@ async function loadStagingFromFirestore(importId) {
         confirmadoManualProcedimiento: false
       },
       aplicacion: x.aplicacion || null,
+      
+      decisionManualAplicacion:
+        x.decisionManualAplicacion || null,
+      
       review: x.review || null,
-
+      
+      historial: Array.isArray(x.historial)
+        ? x.historial
+        : [],
+      
+      cambiosPendientesLiquidacion:
+        x.cambiosPendientesLiquidacion === true,
+      
+      ultimaVersionPublicada:
+        x.ultimaVersionPublicada || null,
+      
+      publicadoEnLiquidaciones:
+        x.publicadoEnLiquidaciones === true ||
+        x.confirmadoEnProduccion === true ||
+        x.estado === "confirmada",
+      
+      publicadoPacienteId:
+        x.publicadoPacienteId ||
+        x.pacienteId ||
+        null,
+      
+      publicadoFinalItemId:
+        x.publicadoFinalItemId ||
+        x.finalItemId ||
+        null,
       confirmadoEnProduccion: x.confirmadoEnProduccion === true || x.estado === "confirmada",
       confirmadoEl: x.confirmadoEl || null,
       confirmadoPor: x.confirmadoPor || null,
@@ -2702,76 +3676,100 @@ async function reemplazarMesAntesDeConfirmar(YYYY, MM, newImportId) {
 ====================== */
 
 async function confirmarImportacion() {
-  if (!(stateImport.status === "staged" || stateImport.status === "confirmada")) {
-    toast("Este import no está disponible para confirmar");
+  if (
+    !(
+      stateImport.status === "staged" ||
+      stateImport.status === "confirmada"
+    )
+  ) {
+    toast(
+      "Esta importación no está disponible para actualizar liquidaciones"
+    );
     return;
   }
 
   if (!stateImport.importId) {
-    toast("Falta importId");
+    toast("Falta ImportID");
     return;
   }
 
+  /*
+    Recalcular sin borrar decisiones manuales.
+  */
+
   for (const reg of consolidado) {
-    aplicarManualOverrides([reg]);
     recomputeItemFromCurrentValues(reg);
   }
 
   const operables = itemsOperables();
 
-  const itemsConfirmables = operables.filter(it =>
-    esItemConfirmable(it) && !it.confirmadoEnProduccion
+  const cambios = operables.filter(
+    estaPendienteLiquidacion
   );
 
-  const totalConfirmadosActuales = operables.filter(it => it.confirmadoEnProduccion).length;
-  const totalPend = operables.filter(x => x.review?.estadoRevision === "pendiente").length;
-  const totalRevisar = operables.filter(x => x.aplicacion?.estado === "revisar").length;
-  const totalNoAplica = operables.filter(x => x.aplicacion?.estado === "no_aplica").length;
-  const totalQuedanFuera = operables.length - (totalConfirmadosActuales + itemsConfirmables.length);
+  if (!cambios.length) {
+    toast(
+      "No hay cambios pendientes de actualizar en liquidaciones"
+    );
+    return;
+  }
 
-  if (!itemsConfirmables.length) {
-    // ✅ Caso especial:
-    // no hay nuevos items por confirmar, pero puede que este import
-    // ya tenga items confirmados y el doc padre aún haya quedado en "staged".
-    if (totalConfirmadosActuales > 0) {
-      await setDoc(doc(db, "produccion_ambulatoria_imports", stateImport.importId), {
-        estado: "confirmada",
-        confirmadoEl: serverTimestamp(),
-        confirmadoPor: stateImport.user?.email || "",
-        confirmadoEn: `produccion_ambulatoria/${String(stateImport.year)}/meses/${pad(stateImport.monthNum, 2)}/pacientes/{RUT}/items/{itemId}`,
-        totalItems: consolidado.length,
-        totalConfirmados: totalConfirmadosActuales,
-        totalPendientes: consolidado.length - totalConfirmadosActuales,
-        totalConfirmadosNuevosUltimaEjecucion: 0,
-        actualizadoEl: serverTimestamp(),
-        actualizadoPor: stateImport.user?.email || ""
-      }, { merge: true });
+  const conAlertas = cambios.filter(
+    tieneAlertaOperativa
+  );
 
-      stateImport.status = "confirmada";
+  const paraPublicar = cambios.filter(reg =>
+    esItemConfirmable(reg)
+  );
+  
+  const paraRetirar = cambios.filter(reg => {
+    const publicadoAntes =
+      reg.publicadoEnLiquidaciones === true ||
+      reg.confirmadoEnProduccion === true;
+  
+    return (
+      publicadoAntes &&
+      !tieneAlertaOperativa(reg) &&
+      reg.aplicacion?.estado === "no_aplica"
+    );
+  });
+  
+  const noPublicadosResueltos = cambios.filter(reg => {
+    const publicadoAntes =
+      reg.publicadoEnLiquidaciones === true ||
+      reg.confirmadoEnProduccion === true;
+  
+    return (
+      !publicadoAntes &&
+      !tieneAlertaOperativa(reg) &&
+      reg.aplicacion?.estado === "no_aplica"
+    );
+  });
+  
+  if (conAlertas.length) {
+    toast(
+      `Hay ${conAlertas.length} cambios con alertas. Se actualizarán solamente los registros resueltos.`
+    );
+  }
 
-      setStatus(
-        `✅ Import regularizado como confirmado: ${stateImport.importId} · ` +
-        `${totalConfirmadosActuales} items ya estaban en producción final`
-      );
+  const totalProcesables =
+    paraPublicar.length +
+    paraRetirar.length +
+    noPublicadosResueltos.length;
 
-      render();
-      toast("Este import ya tenía ítems confirmados. Se actualizó su estado a confirmada.");
-      return;
-    }
-
-    toast("No hay nuevos ítems válidos para pasar a producción final.");
+  if (!totalProcesables) {
+    toast(
+      "Todos los cambios pendientes mantienen alertas sin resolver"
+    );
     return;
   }
 
   const ok = confirm(
-    `Se pasarán ${itemsConfirmables.length} ítems nuevos a producción final.\n` +
-    `\n` +
-    `Ya estaban confirmados: ${totalConfirmadosActuales}\n` +
-    `Quedarán todavía fuera: ${totalQuedanFuera}\n` +
-    `- Pendientes revisión: ${totalPend}\n` +
-    `- En revisar: ${totalRevisar}\n` +
-    `- No aplica: ${totalNoAplica}\n` +
-    `\n` +
+    `Se actualizarán las liquidaciones con el estado actual del import.\n\n` +
+    `Agregar o actualizar: ${paraPublicar.length}\n` +
+    `Retirar de liquidaciones: ${paraRetirar.length}\n` +
+    `No aplican sin publicación previa: ${noPublicadosResueltos.length}\n` +
+    `Con alertas que quedarán pendientes: ${conAlertas.length}\n\n` +
     `¿Continuar?`
   );
 
@@ -2781,62 +3779,260 @@ async function confirmarImportacion() {
   const MM = pad(stateImport.monthNum, 2);
 
   try {
-    setStatus(`🟠 Iniciando confirmación... 0/${itemsConfirmables.length}`);
-    toast(`Iniciando confirmación de ${itemsConfirmables.length} ítems...`);
+    setStatus(
+      `Actualizando liquidaciones... 0/${totalProcesables}`
+    );
+
+    /*
+      Solamente en la primera publicación reemplazamos
+      importaciones anteriores del mismo mes.
+    */
 
     if (stateImport.status === "staged") {
-      const replacedCount = await reemplazarMesAntesDeConfirmar(YYYY, MM, stateImport.importId);
-      if (replacedCount > 0) {
-        toast(`Mes ${YYYY}-${MM}: ${replacedCount} items previos marcados como reemplazados.`);
+      const reemplazados =
+        await reemplazarMesAntesDeConfirmar(
+          YYYY,
+          MM,
+          stateImport.importId
+        );
+
+      if (reemplazados > 0) {
+        toast(
+          `${reemplazados} registros anteriores del mes fueron reemplazados`
+        );
       }
     }
 
-    await setDoc(doc(db, "produccion_ambulatoria", YYYY), {
-      ano: stateImport.year,
-      actualizadoEl: serverTimestamp(),
-      actualizadoPor: stateImport.user?.email || ""
-    }, { merge: true });
+    await setDoc(
+      doc(db, "produccion_ambulatoria", YYYY),
+      {
+        ano: stateImport.year,
+        actualizadoEl: serverTimestamp(),
+        actualizadoPor:
+          stateImport.user?.email || ""
+      },
+      { merge: true }
+    );
 
-    await setDoc(doc(db, "produccion_ambulatoria", YYYY, "meses", MM), {
-      ano: stateImport.year,
-      mesNum: stateImport.monthNum,
-      mes: stateImport.monthName,
-      monthId: monthId(stateImport.year, stateImport.monthNum),
-      actualizadoEl: serverTimestamp(),
-      actualizadoPor: stateImport.user?.email || ""
-    }, { merge: true });
+    await setDoc(
+      doc(
+        db,
+        "produccion_ambulatoria",
+        YYYY,
+        "meses",
+        MM
+      ),
+      {
+        ano: stateImport.year,
+        mesNum: stateImport.monthNum,
+        mes: stateImport.monthName,
+        monthId: monthId(
+          stateImport.year,
+          stateImport.monthNum
+        ),
+        actualizadoEl: serverTimestamp(),
+        actualizadoPor:
+          stateImport.user?.email || ""
+      },
+      { merge: true }
+    );
 
-    // Más chico para no saturar Firestore
-    const batchSize = 120;
-    let i = 0;
-    let confirmadosNuevos = 0;
+    let procesados = 0;
 
-    while (i < itemsConfirmables.length) {
-      const batch = writeBatch(db);
-      const slice = itemsConfirmables.slice(i, i + batchSize);
+    /*
+      1. AGREGAR O ACTUALIZAR
+    */
 
-      for (const reg of slice) {
-        const rutKey = normalizarRutKey(reg.rut || "");
-        const pacienteId = rutKey || `SINRUT_${stateImport.importId}`;
-        const itemDocId = finalItemId(reg);
+    for (const reg of paraPublicar) {
+      const rutKey =
+        normalizarRutKey(reg.rut || "");
 
-        reg.confirmadoEnProduccion = true;
-        reg.confirmadoEl = new Date().toISOString();
-        reg.confirmadoPor = stateImport.user?.email || "";
-        reg.finalItemId = itemDocId;
-        reg.pacienteId = pacienteId;
+      const pacienteId =
+        rutKey ||
+        `SINRUT_${stateImport.importId}`;
 
-        const refPaciente = doc(
+      const itemDocId =
+        finalItemId(reg);
+
+      /*
+        Si cambió RUT o fecha, puede cambiar la ruta.
+        En ese caso retiramos la publicación anterior.
+      */
+
+      const pacienteAnterior =
+        reg.publicadoPacienteId ||
+        reg.pacienteId ||
+        null;
+
+      const itemAnterior =
+        reg.publicadoFinalItemId ||
+        reg.finalItemId ||
+        null;
+
+      if (
+        pacienteAnterior &&
+        itemAnterior &&
+        (
+          pacienteAnterior !== pacienteId ||
+          itemAnterior !== itemDocId
+        )
+      ) {
+        const refAnterior = doc(
           db,
           "produccion_ambulatoria",
           YYYY,
           "meses",
           MM,
           "pacientes",
-          pacienteId
+          pacienteAnterior,
+          "items",
+          itemAnterior
         );
 
-        const refItem = doc(
+        await setDoc(refAnterior, {
+          estadoRegistro: "retirado",
+          retiradoEl: serverTimestamp(),
+          retiradoPor:
+            stateImport.user?.email || "",
+          motivoRetiro:
+            "Ruta modificada desde el import",
+          actualizadoEl: serverTimestamp(),
+          actualizadoPor:
+            stateImport.user?.email || ""
+        }, { merge: true });
+      }
+
+      reg.confirmadoEnProduccion = true;
+      reg.publicadoEnLiquidaciones = true;
+      reg.confirmadoEl =
+        new Date().toISOString();
+      reg.confirmadoPor =
+        stateImport.user?.email || "";
+
+      reg.finalItemId = itemDocId;
+      reg.pacienteId = pacienteId;
+
+      reg.publicadoFinalItemId = itemDocId;
+      reg.publicadoPacienteId = pacienteId;
+
+      reg.ultimaVersionPublicada =
+        snapshotLiquidacion(reg);
+
+      reg.cambiosPendientesLiquidacion =
+        false;
+
+      registrarHistorialLocal(reg, {
+        tipo: "publicacion_liquidaciones",
+        observacion:
+          "Registro agregado o actualizado en liquidaciones",
+        cambios: []
+      });
+
+      const refPaciente = doc(
+        db,
+        "produccion_ambulatoria",
+        YYYY,
+        "meses",
+        MM,
+        "pacientes",
+        pacienteId
+      );
+
+      const refItem = doc(
+        db,
+        "produccion_ambulatoria",
+        YYYY,
+        "meses",
+        MM,
+        "pacientes",
+        pacienteId,
+        "items",
+        itemDocId
+      );
+
+      const refStaging = doc(
+        db,
+        "produccion_ambulatoria_imports",
+        stateImport.importId,
+        "items",
+        reg.itemId
+      );
+
+      const batch = writeBatch(db);
+
+      batch.set(refPaciente, {
+        rut: reg.rut || null,
+        rutNorm: reg.rutNorm || null,
+        paciente: reg.paciente || null,
+        pacienteNorm:
+          reg.pacienteNorm || null,
+        actualizadoEl: serverTimestamp(),
+        actualizadoPor:
+          stateImport.user?.email || ""
+      }, { merge: true });
+
+      batch.set(refItem, {
+        ...serializeAmbItem(reg),
+
+        finalItemId: itemDocId,
+        pacienteId,
+
+        importId: stateImport.importId,
+        ano: stateImport.year,
+        mesNum: stateImport.monthNum,
+
+        monthId: monthId(
+          stateImport.year,
+          stateImport.monthNum
+        ),
+
+        estadoRegistro: "activo",
+
+        retiradoEl: null,
+        retiradoPor: null,
+        motivoRetiro: null,
+
+        reemplazadoEl: null,
+        reemplazadoPor: null,
+        reemplazadoPorImportId: null,
+
+        actualizadoEl: serverTimestamp(),
+        actualizadoPor:
+          stateImport.user?.email || ""
+      }, { merge: true });
+
+      batch.set(refStaging, {
+        ...serializeAmbItem(reg),
+        estado: "confirmada",
+        actualizadoEl: serverTimestamp(),
+        actualizadoPor:
+          stateImport.user?.email || ""
+      }, { merge: true });
+
+      await batch.commit();
+
+      procesados++;
+
+      setStatus(
+        `Actualizando liquidaciones... ${procesados}/${totalProcesables}`
+      );
+    }
+
+    /*
+      2. RETIRAR REGISTROS QUE ANTES APLICABAN
+    */
+
+    for (const reg of paraRetirar) {
+      const pacienteId =
+        reg.publicadoPacienteId ||
+        reg.pacienteId;
+
+      const itemDocId =
+        reg.publicadoFinalItemId ||
+        reg.finalItemId;
+
+      if (pacienteId && itemDocId) {
+        const refPublicado = doc(
           db,
           "produccion_ambulatoria",
           YYYY,
@@ -2848,98 +4044,206 @@ async function confirmarImportacion() {
           itemDocId
         );
 
-        const refStaging = doc(
+        await setDoc(refPublicado, {
+          estadoRegistro: "retirado",
+          retiradoEl: serverTimestamp(),
+          retiradoPor:
+            stateImport.user?.email || "",
+          motivoRetiro:
+            reg.aplicacion?.motivo ||
+            "El registro dejó de aplicar",
+          actualizadoEl: serverTimestamp(),
+          actualizadoPor:
+            stateImport.user?.email || ""
+        }, { merge: true });
+      }
+
+      reg.publicadoEnLiquidaciones = false;
+      reg.confirmadoEnProduccion = false;
+      reg.cambiosPendientesLiquidacion =
+        false;
+
+      reg.ultimaVersionPublicada =
+        snapshotLiquidacion(reg);
+
+      registrarHistorialLocal(reg, {
+        tipo: "retiro_liquidaciones",
+        observacion:
+          reg.aplicacion?.motivo ||
+          "Registro retirado de liquidaciones",
+        cambios: []
+      });
+
+      await setDoc(
+        doc(
           db,
           "produccion_ambulatoria_imports",
           stateImport.importId,
           "items",
           reg.itemId
-        );
-
-        batch.set(refPaciente, {
-          rut: reg.rut || null,
-          rutNorm: reg.rutNorm || null,
-          paciente: reg.paciente || null,
-          pacienteNorm: reg.pacienteNorm || null,
-          actualizadoEl: serverTimestamp(),
-          actualizadoPor: stateImport.user?.email || ""
-        }, { merge: true });
-
-        batch.set(refItem, {
-          ...serializeAmbItem(reg),
-          finalItemId: itemDocId,
-          pacienteId,
-          importId: stateImport.importId,
-          ano: stateImport.year,
-          mesNum: stateImport.monthNum,
-          monthId: monthId(stateImport.year, stateImport.monthNum),
-          estadoRegistro: "activo",
-          reemplazadoEl: null,
-          reemplazadoPor: null,
-          reemplazadoPorImportId: null,
-          creadoEl: serverTimestamp(),
-          creadoPor: stateImport.user?.email || "",
-          actualizadoEl: serverTimestamp(),
-          actualizadoPor: stateImport.user?.email || ""
-        }, { merge: true });
-
-        batch.set(refStaging, {
+        ),
+        {
           ...serializeAmbItem(reg),
           estado: "confirmada",
           actualizadoEl: serverTimestamp(),
-          actualizadoPor: stateImport.user?.email || ""
-        }, { merge: true });
-      }
+          actualizadoPor:
+            stateImport.user?.email || ""
+        },
+        { merge: true }
+      );
 
-      await batch.commit();
+      procesados++;
 
-      confirmadosNuevos += slice.length;
-      i += batchSize;
-
-      setStatus(`🟠 Confirmando... ${confirmadosNuevos}/${itemsConfirmables.length}`);
-      console.log(`CONFIRMACION OK: ${confirmadosNuevos}/${itemsConfirmables.length}`);
-
-      await sleep(250);
+      setStatus(
+        `Actualizando liquidaciones... ${procesados}/${totalProcesables}`
+      );
     }
 
-    const totalConfirmadosAcumulados = consolidado.filter(x => x.confirmadoEnProduccion).length;
-    const totalPendientesAcumulados = consolidado.length - totalConfirmadosAcumulados;
+    /*
+      3. NO APLICA QUE NUNCA FUE PUBLICADO
 
-    await setDoc(doc(db, "produccion_ambulatoria_imports", stateImport.importId), {
-      estado: "confirmada",
-      confirmadoEl: serverTimestamp(),
-      confirmadoPor: stateImport.user?.email || "",
-      confirmadoEn: `produccion_ambulatoria/${YYYY}/meses/${MM}/pacientes/{RUT}/items/{itemId}`,
-      totalItems: consolidado.length,
-      totalConfirmados: totalConfirmadosAcumulados,
-      totalPendientes: totalPendientesAcumulados,
-      totalConfirmadosNuevosUltimaEjecucion: confirmadosNuevos,
-      actualizadoEl: serverTimestamp(),
-      actualizadoPor: stateImport.user?.email || ""
-    }, { merge: true });
+      No hay que crear ni retirar nada.
+      Solamente dejamos constancia de que su estado
+      actual ya fue revisado en la sincronización.
+    */
+
+    for (const reg of noPublicadosResueltos) {
+      reg.cambiosPendientesLiquidacion =
+        false;
+
+      reg.ultimaVersionPublicada =
+        snapshotLiquidacion(reg);
+
+      registrarHistorialLocal(reg, {
+        tipo: "sincronizacion_no_aplica",
+        observacion:
+          "Registro revisado y mantenido fuera de liquidaciones",
+        cambios: []
+      });
+
+      await setDoc(
+        doc(
+          db,
+          "produccion_ambulatoria_imports",
+          stateImport.importId,
+          "items",
+          reg.itemId
+        ),
+        {
+          ...serializeAmbItem(reg),
+          estado: "confirmada",
+          actualizadoEl: serverTimestamp(),
+          actualizadoPor:
+            stateImport.user?.email || ""
+        },
+        { merge: true }
+      );
+
+      procesados++;
+
+      setStatus(
+        `Actualizando liquidaciones... ${procesados}/${totalProcesables}`
+      );
+    }
+
+    const pendientesRestantes =
+      consolidado.filter(
+        estaPendienteLiquidacion
+      ).length;
+
+    const alertasRestantes =
+      consolidado.filter(
+        tieneAlertaOperativa
+      ).length;
+
+    await setDoc(
+      doc(
+        db,
+        "produccion_ambulatoria_imports",
+        stateImport.importId
+      ),
+      {
+        estado: "confirmada",
+
+        confirmadoEl: serverTimestamp(),
+        confirmadoPor:
+          stateImport.user?.email || "",
+
+        ultimaSincronizacionLiquidaciones:
+          serverTimestamp(),
+
+        totalItems: consolidado.length,
+
+        totalPublicados:
+          consolidado.filter(it =>
+            it.publicadoEnLiquidaciones === true ||
+            it.confirmadoEnProduccion === true
+          ).length,
+
+        totalAlertasPendientes:
+          alertasRestantes,
+
+        totalCambiosPendientesLiquidacion:
+          pendientesRestantes,
+
+        tieneCambiosPendientesLiquidacion:
+          pendientesRestantes > 0,
+
+        actualizadoEl: serverTimestamp(),
+        actualizadoPor:
+          stateImport.user?.email || ""
+      },
+      { merge: true }
+    );
 
     stateImport.status = "confirmada";
 
     setStatus(
-      `✅ Confirmada: ${stateImport.importId} · ` +
-      `${totalConfirmadosAcumulados} items ya están en producción final · ` +
-      `${totalPendientesAcumulados} siguen pendientes dentro del import`
+      `Liquidaciones actualizadas · ` +
+      `${paraPublicar.length} agregados/actualizados · ` +
+      `${paraRetirar.length} retirados · ` +
+      `${alertasRestantes} alertas pendientes`
     );
 
     render();
-    toast(`✅ Confirmación completada: ${confirmadosNuevos} nuevos items pasaron a producción`);
+
+    toast(
+      `Liquidaciones actualizadas correctamente: ${procesados} registros procesados`
+    );
   } catch (err) {
-    console.error("Error en confirmarImportacion():", err);
+    console.error(
+      "Error en confirmarImportacion():",
+      err
+    );
 
-    await setDoc(doc(db, "produccion_ambulatoria_imports", stateImport.importId), {
-      estado: "confirmada_error",
-      errorConfirmacion: String(err?.message || err || "Error desconocido"),
-      actualizadoEl: serverTimestamp(),
-      actualizadoPor: stateImport.user?.email || ""
-    }, { merge: true });
+    await setDoc(
+      doc(
+        db,
+        "produccion_ambulatoria_imports",
+        stateImport.importId
+      ),
+      {
+        estado: "confirmada_error",
+        errorConfirmacion:
+          String(
+            err?.message ||
+            err ||
+            "Error desconocido"
+          ),
+        actualizadoEl: serverTimestamp(),
+        actualizadoPor:
+          stateImport.user?.email || ""
+      },
+      { merge: true }
+    );
 
-    setStatus(`⚠️ Error durante confirmación: ${stateImport.importId}`);
-    toast(`Error durante la confirmación. Revisa consola e import ${stateImport.importId}`);
+    setStatus(
+      `Error actualizando liquidaciones: ${stateImport.importId}`
+    );
+
+    toast(
+      "Ocurrió un error actualizando liquidaciones. Revisa la consola."
+    );
   }
 }
 
@@ -3067,20 +4371,6 @@ if ($("btnNext")) {
   };
 }
 
-if ($("btnToggleNoAplica")) {
-  $("btnToggleNoAplica").onclick = () => {
-    uiState.mostrarNoAplica = !uiState.mostrarNoAplica;
-
-    // ✅ Si entras/sales manualmente de "no aplica", limpiamos filtro pill conflictivo
-    if (!uiState.mostrarNoAplica && uiState.pillFiltro === "no_aplica") {
-      uiState.pillFiltro = "";
-    }
-
-    uiState.page = 0;
-    render();
-  };
-}
-
 if ($("btnToggleKine")) {
   $("btnToggleKine").onclick = () => {
     uiState.incluirKinesiologia = !uiState.incluirKinesiologia;
@@ -3089,36 +4379,32 @@ if ($("btnToggleKine")) {
   };
 }
 
+if ($("pillTodos")) {
+  $("pillTodos").onclick = () => {
+    uiState.pillFiltro = "";
+    uiState.page = 0;
+    render();
+  };
+}
+
 if ($("pillAlertas")) {
-  $("pillAlertas").onclick = () => togglePillFiltro("alertas");
-}
-
-if ($("pillProf")) {
-  $("pillProf").onclick = () => togglePillFiltro("pend_prof");
-}
-
-if ($("pillProc")) {
-  $("pillProc").onclick = () => togglePillFiltro("pend_proc");
+  $("pillAlertas").onclick = () =>
+    togglePillFiltro("alertas");
 }
 
 if ($("pillReservoValidos")) {
-  $("pillReservoValidos").onclick = () => togglePillFiltro("reservo_validos");
-}
-
-if ($("pillMKValidos")) {
-  $("pillMKValidos").onclick = () => togglePillFiltro("mk_validos");
-}
-
-if ($("pillOk")) {
-  $("pillOk").onclick = () => togglePillFiltro("ok");
-}
-
-if ($("pillConfirmables")) {
-  $("pillConfirmables").onclick = () => togglePillFiltro("confirmables");
+  $("pillReservoValidos").onclick = () =>
+    togglePillFiltro("aplica");
 }
 
 if ($("pillFusionados")) {
-  $("pillFusionados").onclick = () => togglePillFiltro("no_aplica");
+  $("pillFusionados").onclick = () =>
+    togglePillFiltro("no_aplica");
+}
+
+if ($("pillConfirmables")) {
+  $("pillConfirmables").onclick = () =>
+    togglePillFiltro("cambios_pendientes");
 }
 
 /* resolver */
@@ -3136,8 +4422,9 @@ if ($("modalResolverBackdrop")) {
 /* detalle */
 if ($("btnItemClose")) $("btnItemClose").onclick = cerrarDetalle;
 if ($("btnItemCancelar")) $("btnItemCancelar").onclick = cerrarDetalle;
-if ($("btnGuardarItem")) $("btnGuardarItem").onclick = guardarDetalle;
-if ($("btnGuardarTodo")) $("btnGuardarTodo").onclick = guardarDetalle;
+if ($("btnGuardarItem")) {
+  $("btnGuardarItem").onclick = guardarDetalle;
+}
 
 if ($("modalItemBackdrop")) {
   $("modalItemBackdrop").addEventListener("click", e => {
