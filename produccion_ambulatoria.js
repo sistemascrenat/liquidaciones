@@ -968,11 +968,16 @@ function valorHistorial(valor) {
 }
 
 function snapshotEditable(reg) {
-  const raw = reg.dataReservo || reg.dataMK || {};
+  const raw =
+    reg.dataReservo ||
+    reg.dataMK ||
+    {};
 
   return {
     profesionalId:
-      clean(reg.resolved?.profesionalId),
+      clean(
+        reg.resolved?.profesionalId
+      ),
 
     profesionalNombre:
       clean(
@@ -980,13 +985,37 @@ function snapshotEditable(reg) {
         reg.profesionalDetectado
       ),
 
+    /*
+      Es importante guardar si la asociación fue
+      confirmada manualmente.
+
+      Aunque el ID no cambie, pasar de AUTO a MANUAL
+      es una modificación real que debe persistirse.
+    */
+
+    profesionalConfirmadoManual:
+      reg.resolved
+        ?.confirmadoManualProfesional === true,
+
     procedimientoId:
-      clean(reg.resolved?.procedimientoId),
+      clean(
+        reg.resolved?.procedimientoId
+      ),
 
     procedimientoNombre:
       clean(
         reg.resolved?.procedimientoNombre ||
         reg.procedimientoDetectado
+      ),
+
+    procedimientoConfirmadoManual:
+      reg.resolved
+        ?.confirmadoManualProcedimiento === true,
+
+    procedimientoTipoResolucion:
+      clean(
+        reg.resolved
+          ?.autoProcedimientoTipoMatch
       ),
 
     estadoCita:
@@ -999,9 +1028,14 @@ function snapshotEditable(reg) {
         ? clean(raw["Estado pago"])
         : "",
 
-    fecha: clean(reg.fecha),
-    rut: clean(reg.rut),
-    paciente: clean(reg.paciente),
+    fecha:
+      clean(reg.fecha),
+
+    rut:
+      clean(reg.rut),
+
+    paciente:
+      clean(reg.paciente),
 
     profesionalArchivo:
       clean(reg.profesional),
@@ -1010,22 +1044,28 @@ function snapshotEditable(reg) {
       clean(reg.prestacion),
 
     valorArchivo:
-      Number(reg.valorArchivo || 0),
-    
+      Number(
+        reg.valorArchivo || 0
+      ),
+
     valorBaseCatalogo:
       tieneValorCatalogo(
         reg.valorBaseCatalogo
       )
-        ? Number(reg.valorBaseCatalogo)
+        ? Number(
+            reg.valorBaseCatalogo
+          )
         : null,
-    
+
     porcentajeCatalogo:
       tieneValorCatalogo(
         reg.porcentajeCatalogo
       )
-        ? Number(reg.porcentajeCatalogo)
+        ? Number(
+            reg.porcentajeCatalogo
+          )
         : null,
-    
+
     valorProfesionalCatalogo:
       tieneValorCatalogo(
         reg.valorProfesionalCatalogo
@@ -1034,21 +1074,31 @@ function snapshotEditable(reg) {
             reg.valorProfesionalCatalogo
           )
         : null,
-    
+
     valor:
       Number(reg.valor || 0),
-    
+
     aplicacionEstado:
-      clean(reg.aplicacion?.estado),
-    
+      clean(
+        reg.aplicacion?.estado
+      ),
+
     aplicacionMotivo:
-      clean(reg.aplicacion?.motivo),
-    
+      clean(
+        reg.aplicacion?.motivo
+      ),
+
     decisionManualEstado:
-      clean(reg.decisionManualAplicacion?.estado),
-    
+      clean(
+        reg.decisionManualAplicacion
+          ?.estado
+      ),
+
     decisionManualMotivo:
-      clean(reg.decisionManualAplicacion?.motivo)
+      clean(
+        reg.decisionManualAplicacion
+          ?.motivo
+      )
   };
 }
 
@@ -1087,10 +1137,26 @@ function snapshotsIguales(a, b) {
 
 function crearCambiosHistorial(antes = {}, despues = {}) {
   const etiquetas = {
-    profesionalId: "Profesional",
-    profesionalNombre: "Nombre profesional",
-    procedimientoId: "Procedimiento",
-    procedimientoNombre: "Nombre procedimiento",
+    profesionalId:
+      "Profesional",
+  
+    profesionalNombre:
+      "Nombre profesional",
+  
+    profesionalConfirmadoManual:
+      "Confirmación manual del profesional",
+  
+    procedimientoId:
+      "Procedimiento",
+  
+    procedimientoNombre:
+      "Nombre procedimiento",
+  
+    procedimientoConfirmadoManual:
+      "Confirmación manual del procedimiento",
+  
+    procedimientoTipoResolucion:
+      "Tipo de resolución del procedimiento",
     estadoCita: "Estado de cita",
     estadoPago: "Estado de pago",
     fecha: "Fecha",
