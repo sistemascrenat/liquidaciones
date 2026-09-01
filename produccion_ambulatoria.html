@@ -218,8 +218,13 @@
         </div>
 
         <div class="divider"></div>
-
-        <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+        
+        <div style="
+          display:flex;
+          gap:10px;
+          flex-wrap:wrap;
+          align-items:center;
+        ">
           <button
             class="pill"
             id="pillTodos"
@@ -253,6 +258,15 @@
           </button>
         
           <button
+            class="pill"
+            id="pillNoAplicaObservaciones"
+            type="button"
+            title="Registros que no aplican, pero tienen datos incompletos que puedes revisar opcionalmente"
+          >
+            Observaciones no aplica: 0
+          </button>
+        
+          <button
             class="pill warn"
             id="pillConfirmables"
             type="button"
@@ -260,7 +274,10 @@
             Cambios sin enviar: 0
           </button>
         
-          <span class="muted tiny" id="hintResolver">
+          <span
+            class="muted tiny"
+            id="hintResolver"
+          >
             Importar bruto → resolver alertas → guardar → actualizar liquidaciones.
           </span>
         </div>
