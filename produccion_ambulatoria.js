@@ -78,7 +78,16 @@ let procedimientos = [];
 let consolidado = [];
 
 let stateEdicion = {
-  actual: null
+  actual: null,
+
+  /*
+    Indica que el detalle fue abierto desde
+    el modal “Resolver alertas”.
+
+    Después de guardar, permite volver automáticamente
+    a la lista con los casos restantes.
+  */
+  volverAResolver: false
 };
 
 let manualOverrides = {};
@@ -1814,7 +1823,12 @@ function recomputeItemFromCurrentValues(reg) {
    DETALLE / EDICIÓN
 ====================== */
 
-function abrirDetalle(reg) {
+function abrirDetalle(
+  reg,
+  {
+    volverAResolver = false
+  } = {}
+) {
   const modal = $("modalItemBackdrop");
   const itemSub = $("itemSub");
   const itemForm = $("itemForm");
@@ -1825,6 +1839,8 @@ function abrirDetalle(reg) {
   }
 
   stateEdicion.actual = reg;
+  stateEdicion.volverAResolver =
+    volverAResolver === true;
 
   const opcionesProfesionales = profesionales.map(p => {
     const nombre = nombreProfesionalCatalogo(p);
@@ -2298,25 +2314,70 @@ async function guardarDetalle() {
   reg.cambiosPendientesLiquidacion = true;
 
   await persistirItemEditado(reg);
-
+  
+  /*
+    Guardamos esta información antes de cerrar el detalle,
+    porque cerrarDetalle() limpia stateEdicion.
+  */
+  
+  const volverAResolver =
+    stateEdicion.volverAResolver === true;
+  
+  const sigueConAlerta =
+    tieneAlertaOperativa(reg);
+  
   cerrarDetalle();
   render();
-
-  toast(
-    tieneAlertaOperativa(reg)
-      ? "Cambio guardado. El registro todavía mantiene alertas pendientes."
-      : "Cambio guardado. La alerta quedó resuelta."
-  );
+  
+  if (sigueConAlerta) {
+    toast(
+      "Cambio guardado, pero el registro todavía mantiene alertas pendientes."
+    );
+  } else {
+    toast(
+      "Cambio guardado. La alerta quedó resuelta."
+    );
+  }
+  
+  /*
+    Si abrimos el registro desde Resolver alertas,
+    volvemos automáticamente a la lista.
+  
+    Si ya no quedan alertas, permanecemos en la vista
+    principal porque el trabajo terminó.
+  */
+  
+  if (volverAResolver) {
+    const alertasRestantes =
+      obtenerAlertasOperativas();
+  
+    if (alertasRestantes.length > 0) {
+      abrirResolver();
+    } else {
+      toast(
+        "Todas las alertas de la importación quedaron resueltas."
+      );
+    }
+  }
 }
       
 function cerrarDetalle() {
-  const modal = $("modalItemBackdrop");
-  const itemForm = $("itemForm");
+  const modal =
+    $("modalItemBackdrop");
 
-  if (modal) modal.style.display = "none";
-  if (itemForm) itemForm.innerHTML = "";
+  const itemForm =
+    $("itemForm");
+
+  if (modal) {
+    modal.style.display = "none";
+  }
+
+  if (itemForm) {
+    itemForm.innerHTML = "";
+  }
 
   stateEdicion.actual = null;
+  stateEdicion.volverAResolver = false;
 }
 
 /* ======================
@@ -2508,213 +2569,419 @@ function serializeAmbItem(reg) {
    RESOLVER PENDIENTES
 ====================== */
 
-function rowMiniHTML(it, extra = "") {
+function causasAlertaRegistro(reg) {
+  const causas = [];
+
+  /*
+    Aplicación todavía sin decidir.
+  */
+
+  if (reg?.aplicacion?.estado === "revisar") {
+    causas.push(
+      reg.aplicacion?.motivo ||
+      "Debes decidir si el registro aplica o no aplica"
+    );
+  }
+
+  /*
+    Profesional pendiente.
+  */
+
+  if (
+    reg?.review?.pendientes?.profesional === true ||
+    !reg?.resolved?.profesionalId
+  ) {
+    causas.push("Falta asociar el profesional");
+  }
+
+  /*
+    Procedimiento pendiente.
+  */
+
+  if (
+    reg?.review?.pendientes?.procedimiento === true ||
+    !reg?.resolved?.procedimientoId
+  ) {
+    causas.push("Falta asociar el procedimiento");
+  }
+
+  /*
+    Alertas específicas guardadas en el registro.
+  */
+
+  for (const alerta of reg?.review?.alertas || []) {
+    if (!clean(alerta)) continue;
+    causas.push(clean(alerta));
+  }
+
+  /*
+    Quitamos textos repetidos.
+  */
+
+  return [...new Set(causas)];
+}
+
+function tarjetaAlertaResolverHTML(reg, numero) {
+  const causas =
+    causasAlertaRegistro(reg);
+
+  const aplicacion =
+    reg?.aplicacion?.estado === "aplica"
+      ? "APLICA"
+      : reg?.aplicacion?.estado === "revisar"
+        ? "POR DEFINIR"
+        : etiquetaAplicacion(
+            reg?.aplicacion?.estado || ""
+          );
+
+  const causasHTML = causas.length
+    ? causas.map(causa => `
+        <li style="margin-top:5px;">
+          ${escapeHtml(causa)}
+        </li>
+      `).join("")
+    : `
+        <li>
+          El registro necesita revisión manual.
+        </li>
+      `;
+
   return `
-    <div class="miniRow" style="${it.confirmadoEnProduccion ? 'border-left:4px solid #16a34a; padding-left:10px;' : ''}">
-      <div>
-        <div>
-          <b>${escapeHtml(it.origen)}</b> · ${escapeHtml(it.fecha || "")} · ${escapeHtml(it.rut || "")}
-          ${it.confirmadoEnProduccion
-            ? `<span class="ok" style="margin-left:8px;">Confirmado final</span>`
-            : ``}
+    <article
+      class="miniRow"
+      style="
+        display:block;
+        border-left:5px solid #f59e0b;
+        padding:14px;
+      "
+    >
+      <div style="
+        display:flex;
+        justify-content:space-between;
+        align-items:flex-start;
+        gap:14px;
+      ">
+        <div style="min-width:0; flex:1;">
+          <div style="
+            display:flex;
+            align-items:center;
+            gap:8px;
+            flex-wrap:wrap;
+          ">
+            <span
+              class="pill warn"
+              style="
+                min-width:28px;
+                justify-content:center;
+                padding:3px 8px;
+              "
+            >
+              ${numero}
+            </span>
+
+            <strong style="font-size:14px;">
+              ${escapeHtml(reg.paciente || "Paciente sin nombre")}
+            </strong>
+
+            <span class="muted tiny">
+              ${escapeHtml(reg.rut || "Sin RUT")}
+            </span>
+          </div>
+
+          <div
+            class="tiny"
+            style="margin-top:8px;"
+          >
+            <b>Fecha:</b>
+            ${escapeHtml(reg.fecha || "—")}
+          </div>
+
+          <div
+            class="tiny"
+            style="margin-top:4px;"
+          >
+            <b>Profesional archivo:</b>
+            ${escapeHtml(reg.profesional || "—")}
+          </div>
+
+          <div
+            class="tiny"
+            style="margin-top:4px;"
+          >
+            <b>Profesional resuelto:</b>
+            ${escapeHtml(
+              reg.resolved?.profesionalNombre ||
+              reg.profesionalDetectado ||
+              "Pendiente"
+            )}
+          </div>
+
+          <div
+            class="tiny"
+            style="margin-top:4px;"
+          >
+            <b>Procedimiento archivo:</b>
+            ${escapeHtml(reg.prestacion || "—")}
+          </div>
+
+          <div
+            class="tiny"
+            style="margin-top:4px;"
+          >
+            <b>Procedimiento resuelto:</b>
+            ${escapeHtml(
+              reg.resolved?.procedimientoNombre ||
+              reg.procedimientoDetectado ||
+              "Pendiente"
+            )}
+          </div>
+
+          <div style="
+            display:flex;
+            gap:8px;
+            flex-wrap:wrap;
+            margin-top:9px;
+          ">
+            <span class="pill">
+              Aplicación: ${escapeHtml(aplicacion)}
+            </span>
+
+            <span class="pill warn">
+              Revisión pendiente
+            </span>
+          </div>
+
+          <div
+            style="
+              margin-top:12px;
+              padding:10px;
+              border-radius:10px;
+              background:#fffbeb;
+              border:1px solid #fde68a;
+            "
+          >
+            <div
+              class="tiny"
+              style="
+                font-weight:900;
+                color:#92400e;
+              "
+            >
+              ¿QUÉ DEBES RESOLVER?
+            </div>
+
+            <ul
+              class="tiny"
+              style="
+                margin:5px 0 0 18px;
+                padding:0;
+                color:#92400e;
+              "
+            >
+              ${causasHTML}
+            </ul>
+          </div>
         </div>
-        <div class="muted tiny">${escapeHtml(it.paciente || "")}</div>
-        <div class="tiny">Prof: ${escapeHtml(it.profesional || "")} · Proc: ${escapeHtml(it.prestacion || "")}</div>
-        ${extra ? `<div class="tiny warn" style="margin-top:4px;">${escapeHtml(extra)}</div>` : ""}
+
+        <button
+          class="btn primary"
+          type="button"
+          data-resolver-item="${escapeHtml(reg.itemId)}"
+          style="flex:0 0 auto;"
+        >
+          Resolver
+        </button>
       </div>
-      <div class="tiny">
-        <div><b>Revisión:</b> ${escapeHtml(it.review?.estadoRevision || "pendiente")}</div>
-        <div><b>Aplicación:</b> ${escapeHtml(it.aplicacion?.estado || "—")}</div>
-        <div><b>Motivo:</b> ${escapeHtml(it.aplicacion?.motivo || "—")}</div>
-        <div><b>Estado final:</b> ${it.confirmadoEnProduccion ? "Ya confirmado" : (esItemConfirmable(it) ? "Listo para confirmar" : "Pendiente")}</div>
-      </div>
-      <div>
-        <button class="btn small" type="button" data-edit-item="${escapeHtml(it.itemId)}">Editar</button>
-      </div>
-    </div>
+    </article>
   `;
 }
 
-function bindEditButtonsIn(container) {
+function bindBotonesResolver(container) {
   if (!container) return;
-  container.querySelectorAll("[data-edit-item]").forEach(btn => {
-    btn.onclick = () => {
-      const id = btn.getAttribute("data-edit-item");
-      const it = consolidado.find(x => x.itemId === id);
-      if (!it) return;
-      cerrarResolver();
-      abrirDetalle(it);
-    };
-  });
+
+  container
+    .querySelectorAll("[data-resolver-item]")
+    .forEach(btn => {
+      btn.onclick = () => {
+        const itemId =
+          btn.getAttribute(
+            "data-resolver-item"
+          );
+
+        const reg = consolidado.find(
+          item => item.itemId === itemId
+        );
+
+        if (!reg) {
+          toast(
+            "No se encontró el registro seleccionado"
+          );
+          return;
+        }
+
+        /*
+          Cerramos la lista y abrimos el detalle.
+
+          Indicamos que, después de guardar,
+          debemos volver a “Resolver alertas”.
+        */
+
+        cerrarResolver();
+
+        abrirDetalle(reg, {
+          volverAResolver: true
+        });
+      };
+    });
 }
 
-function getResolverBaseItems() {
-  const operables = itemsOperables();
+function obtenerAlertasOperativas() {
+  return itemsOperables()
+    .filter(tieneAlertaOperativa)
+    .sort((a, b) => {
+      const fecha =
+        clean(b.fechaNorm).localeCompare(
+          clean(a.fechaNorm)
+        );
 
-  const universoResolver = uiState.mostrarNoAplica
-    ? operables.filter(it => it.aplicacion?.estado === "no_aplica")
-    : operables.filter(it => it.aplicacion?.estado !== "no_aplica");
+      if (fecha !== 0) return fecha;
 
-  return universoResolver.filter(it =>
-    it.review?.estadoRevision === "pendiente" ||
-    it.aplicacion?.estado === "revisar"
-  );
-}
-
-function getResolverItemsByFiltro() {
-  const operables = itemsOperables();
-
-  const universoResolver = uiState.mostrarNoAplica
-    ? operables.filter(it => it.aplicacion?.estado === "no_aplica")
-    : operables.filter(it => it.aplicacion?.estado !== "no_aplica");
-
-  const base = universoResolver.filter(it =>
-    it.review?.estadoRevision === "pendiente" ||
-    it.aplicacion?.estado === "revisar"
-  );
-
-  switch (uiState.resolverFiltro) {
-    case "pendientes":
-      return universoResolver.filter(it => it.review?.estadoRevision === "pendiente");
-
-    case "revisar":
-      return universoResolver.filter(it => it.aplicacion?.estado === "revisar");
-
-    case "no_aplica":
-      return uiState.mostrarNoAplica ? base : [];
-
-    case "base":
-    default:
-      return base;
-  }
-}
-
-function resolverFiltroLabel() {
-  const sufijo = uiState.mostrarNoAplica ? " · No aplica" : "";
-
-  switch (uiState.resolverFiltro) {
-    case "pendientes": return `Pendientes${sufijo}`;
-    case "revisar": return `Revisar${sufijo}`;
-    case "no_aplica": return "Pendientes y revisar · No aplica";
-    case "base":
-    default:
-      return `Pendientes y revisar${sufijo}`;
-  }
-}
-
-function resolverResumenLink(label, count, filtro) {
-  const activo = uiState.resolverFiltro === filtro;
-  const style = activo
-    ? 'style="font-weight:900; text-decoration:underline;"'
-    : 'style="font-weight:800;"';
-
-  return `<button type="button" class="linkBtn" data-resolver-filter="${escapeHtml(filtro)}" ${style}>${escapeHtml(label)}: ${count}</button>`;
-}
-
-function bindResolverResumenFiltros() {
-  const resumen = $("resolverResumen");
-  if (!resumen) return;
-
-  resumen.querySelectorAll("[data-resolver-filter]").forEach(btn => {
-    btn.onclick = () => {
-      const filtro = btn.getAttribute("data-resolver-filter") || "base";
-
-      if (filtro === "no_aplica") {
-        uiState.mostrarNoAplica = !uiState.mostrarNoAplica;
-        uiState.resolverFiltro = "base";
-        renderResolver();
-        return;
-      }
-
-      uiState.resolverFiltro = filtro;
-      renderResolver();
-    };
-  });
+      return (
+        Number(a.sourceIndex || 0) -
+        Number(b.sourceIndex || 0)
+      );
+    });
 }
 
 function renderResolver() {
-  const resumen = $("resolverResumen");
-  const listResumen = $("resolverCoincidenciasList");
-  const listProf = $("resolverProfesionalesList");
-  const listProc = $("resolverPrestacionesList");
-  const listAlert = $("resolverAlertasList");
+  const resumen =
+    $("resolverResumen");
 
-  if (!resumen || !listResumen || !listProf || !listProc || !listAlert) return;
+  const lista =
+    $("resolverCoincidenciasList");
 
-  const operables = itemsOperables();
+  if (!resumen || !lista) return;
 
-  const universoResolver = uiState.mostrarNoAplica
-    ? operables.filter(x => x.aplicacion?.estado === "no_aplica")
-    : operables.filter(x => x.aplicacion?.estado !== "no_aplica");
+  const alertas =
+    obtenerAlertasOperativas();
 
-  const base = universoResolver.filter(x =>
-    x.review?.estadoRevision === "pendiente" ||
-    x.aplicacion?.estado === "revisar"
-  );
+  resumen.innerHTML = `
+    <div style="
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      gap:12px;
+      flex-wrap:wrap;
+    ">
+      <div>
+        <div
+          class="muted tiny"
+          style="margin-bottom:4px;"
+        >
+          Trabajo obligatorio antes de actualizar liquidaciones
+        </div>
 
-  const pendientes = universoResolver.filter(x => x.review?.estadoRevision === "pendiente");
-  const pendProf = universoResolver.filter(x => x.review?.pendientes?.profesional);
-  const pendProc = universoResolver.filter(x => x.review?.pendientes?.procedimiento);
-  const conAlerta = universoResolver.filter(x => (x.review?.alertas || []).length > 0);
-  const revisarApp = universoResolver.filter(x => x.aplicacion?.estado === "revisar");
+        <div style="
+          font-size:18px;
+          font-weight:900;
+        ">
+          Alertas pendientes:
+          <span class="${alertas.length ? "warn" : "ok"}">
+            ${alertas.length}
+          </span>
+        </div>
+      </div>
 
-  const resumenItems = getResolverItemsByFiltro();
+      ${
+        alertas.length
+          ? `
+              <span class="pill warn">
+                Debes resolver ${alertas.length}
+              </span>
+            `
+          : `
+              <span class="pill ok">
+                Todo resuelto
+              </span>
+            `
+      }
+    </div>
 
-  resumen.innerHTML = [
-    resolverResumenLink("Pend. + revisar", base.length, "base"),
-    `<span> · </span>`,
-    resolverResumenLink("Pendientes", pendientes.length, "pendientes"),
-    `<span> · </span>`,
-    resolverResumenLink("Revisar", revisarApp.length, "revisar"),
-    `<span> · </span>`,
-    resolverResumenLink(
-      uiState.mostrarNoAplica ? "Salir de no aplica" : "Ver no aplica",
-      uiState.mostrarNoAplica ? base.length : operables.filter(x => x.aplicacion?.estado === "no_aplica").length,
-      "no_aplica"
-    ),
-    `<div class="help" style="margin-top:8px;">Vista actual: <b>${escapeHtml(resolverFiltroLabel())}</b></div>`
-  ].join("");
+    <div
+      class="help"
+      style="margin-top:8px;"
+    >
+      Cada registro aparece una sola vez. Presiona
+      <b>Resolver</b>, realiza los cambios y luego
+      presiona <b>Guardar cambios</b>.
+    </div>
+  `;
 
-  listResumen.innerHTML = resumenItems.length
-    ? resumenItems.map(it => rowMiniHTML(
-        it,
-        (it.review?.alertas || []).join(" · ") || it.aplicacion?.motivo || ""
-      )).join("")
-    : `<div class="muted tiny">No hay ítems para el filtro seleccionado.</div>`;
+  if (!alertas.length) {
+    lista.innerHTML = `
+      <div style="
+        padding:26px 16px;
+        text-align:center;
+        border:1px solid #bbf7d0;
+        background:#f0fdf4;
+        border-radius:12px;
+      ">
+        <div style="
+          font-size:32px;
+          margin-bottom:8px;
+        ">
+          ✓
+        </div>
 
-  listProf.innerHTML = pendProf.length
-    ? pendProf.map(it => rowMiniHTML(it, "Falta asociar profesional")).join("")
-    : `<div class="muted tiny">No hay pendientes de profesional.</div>`;
+        <div
+          class="ok"
+          style="font-size:16px;"
+        >
+          No quedan alertas pendientes
+        </div>
 
-  listProc.innerHTML = pendProc.length
-    ? pendProc.map(it => rowMiniHTML(it, "Falta asociar procedimiento")).join("")
-    : `<div class="muted tiny">No hay pendientes de procedimiento.</div>`;
+        <div
+          class="muted tiny"
+          style="margin-top:6px;"
+        >
+          Los registros resueltos ya están disponibles
+          en Aplican o No aplican.
+        </div>
+      </div>
+    `;
 
-  listAlert.innerHTML = conAlerta.length
-    ? conAlerta.map(it => rowMiniHTML(it, (it.review?.alertas || []).join(" · "))).join("")
-    : `<div class="muted tiny">No hay alertas.</div>`;
+    return;
+  }
 
-  bindResolverResumenFiltros();
+  lista.innerHTML = alertas
+    .map((reg, index) =>
+      tarjetaAlertaResolverHTML(
+        reg,
+        index + 1
+      )
+    )
+    .join("");
 
-  bindEditButtonsIn(listResumen);
-  bindEditButtonsIn(listProf);
-  bindEditButtonsIn(listProc);
-  bindEditButtonsIn(listAlert);
+  bindBotonesResolver(lista);
 }
 
 function abrirResolver() {
-  const modal = $("modalResolverBackdrop");
+  const modal =
+    $("modalResolverBackdrop");
+
   if (!modal) return;
 
-  uiState.resolverFiltro = "base";
-  uiState.mostrarNoAplica = false;
   renderResolver();
   modal.style.display = "block";
 }
 
 function cerrarResolver() {
-  const modal = $("modalResolverBackdrop");
-  if (modal) modal.style.display = "none";
+  const modal =
+    $("modalResolverBackdrop");
+
+  if (modal) {
+    modal.style.display = "none";
+  }
 }
 
 /* ======================
