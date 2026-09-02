@@ -890,6 +890,46 @@ function rolEsperadoProcedimiento(proc, textoArchivo = "") {
   return { canon: "", label: "" };
 }
 
+function especialidadProcedimientoAmbulatorio(proc) {
+  if (!proc) return "";
+
+  const texto = normalizarTexto([
+    proc?.categoria,
+    proc?.nombre,
+    proc?.tratamiento,
+    proc?.procedimiento,
+    proc?.descripcion
+  ]
+    .filter(Boolean)
+    .join(" | ")
+  );
+
+  if (!texto) return "";
+
+  /*
+    Orden importante:
+    primero Nutriología, porque contiene "NUTRI"
+    y no queremos confundirla con Nutrición.
+  */
+
+  if (texto.includes("NUTRIOLOG")) {
+    return "nutriologia";
+  }
+
+  if (texto.includes("PSICOLOG")) {
+    return "psicologia";
+  }
+
+  if (
+    texto.includes("NUTRICION") ||
+    texto.includes("BIOIMPEDANCIOMETR")
+  ) {
+    return "nutricion";
+  }
+
+  return "otra";
+}
+
 function construirAlertaRolProcedimiento({ profesional, procedimiento, textoProcedimientoArchivo = "" }) {
   if (!profesional || !procedimiento) return null;
 
@@ -1435,15 +1475,12 @@ function evaluarAplicacionReservo(
   const tratamiento =
     clean(raw["Tratamiento"]);
 
-  const valoresCatalogo =
-    calcularValoresCatalogoReservo(
-      procedimientoCatalogo
-    );
-
   const alertas = [];
 
   /*
+    =========================
     EXCEPCIONES ESPECÍFICAS
+    =========================
   */
 
   if (
@@ -1475,6 +1512,11 @@ function evaluarAplicacionReservo(
     };
   }
 
+  /*
+    Esta excepción debe evaluarse antes
+    de la regla general Atendido + Descartado.
+  */
+
   if (
     esControlPad(tratamiento) &&
     estadoPago === "descartado"
@@ -1489,7 +1531,9 @@ function evaluarAplicacionReservo(
   }
 
   /*
+    =========================
     SUSPENDIDOS
+    =========================
   */
 
   if (estadoCita === "suspendido") {
@@ -1503,7 +1547,9 @@ function evaluarAplicacionReservo(
   }
 
   /*
+    =========================
     NO LLEGÓ
+    =========================
   */
 
   if (
@@ -1538,7 +1584,9 @@ function evaluarAplicacionReservo(
   }
 
   /*
+    =========================
     ATENDIDOS PAGADOS O PLAN
+    =========================
   */
 
   if (
@@ -1560,93 +1608,120 @@ function evaluarAplicacionReservo(
   }
 
   /*
+    =========================
     ATENDIDO + DESCARTADO
+    =========================
 
-    Por defecto NO APLICA.
+    REGLA:
 
-    La excepción se determina utilizando:
-    - procedimiento resuelto;
-    - valor profesional del catálogo.
+    Nutrición   -> APLICA
+    Psicología  -> APLICA
+    Nutriología -> APLICA
+    Otra        -> REVISAR
+    Desconocida -> REVISAR
 
-    El valor del Excel no participa.
+    La especialidad se obtiene del procedimiento
+    resuelto del catálogo.
   */
 
   if (
     estadoCita === "atendido" &&
     estadoPago === "descartado"
   ) {
-    if (
-      esEvaluacionNutricionalPadTelemedicina(
-        tratamiento
-      )
-    ) {
-      if (!procedimientoCatalogo) {
-        alertas.push(
-          "Evaluación Nutricional PAD pendiente de asociar a un procedimiento del catálogo"
-        );
+    /*
+      Si todavía no existe procedimiento resuelto,
+      no podemos determinar la especialidad.
+    */
 
-        return {
-          aplicacion: construirAplicacion(
-            "revisar",
-            "Falta resolver el procedimiento para validar la excepción PAD"
-          ),
-          alertas
-        };
-      }
-
-      if (
-        !valoresCatalogo.tarifaConfigurada
-      ) {
-        alertas.push(
-          "El procedimiento PAD no tiene valor profesional configurado en el catálogo"
-        );
-
-        return {
-          aplicacion: construirAplicacion(
-            "revisar",
-            "Procedimiento PAD sin valor de catálogo"
-          ),
-          alertas
-        };
-      }
-
-      if (
-        Number(
-          valoresCatalogo.valorLiquidable
-        ) !== 8500
-      ) {
-        alertas.push(
-          `El procedimiento PAD tiene un valor de catálogo distinto de $8.500: $${Number(
-            valoresCatalogo.valorLiquidable || 0
-          ).toLocaleString("es-CL")}`
-        );
-
-        return {
-          aplicacion: construirAplicacion(
-            "revisar",
-            "Revisar valor de catálogo de la excepción PAD"
-          ),
-          alertas
-        };
-      }
+    if (!procedimientoCatalogo) {
+      alertas.push(
+        "Atendido + descartado: falta resolver el procedimiento para determinar la especialidad"
+      );
 
       return {
         aplicacion: construirAplicacion(
-          "aplica",
-          "Evaluación Nutricional PAD Telemedicina: $8.500 según catálogo"
+          "revisar",
+          "Atendido + descartado con especialidad desconocida"
         ),
         alertas
       };
     }
 
+    const especialidad =
+      especialidadProcedimientoAmbulatorio(
+        procedimientoCatalogo
+      );
+
+    if (especialidad === "nutricion") {
+      return {
+        aplicacion: construirAplicacion(
+          "aplica",
+          "Atendido + descartado · Nutrición"
+        ),
+        alertas
+      };
+    }
+
+    if (especialidad === "psicologia") {
+      return {
+        aplicacion: construirAplicacion(
+          "aplica",
+          "Atendido + descartado · Psicología"
+        ),
+        alertas
+      };
+    }
+
+    if (especialidad === "nutriologia") {
+      return {
+        aplicacion: construirAplicacion(
+          "aplica",
+          "Atendido + descartado · Nutriología"
+        ),
+        alertas
+      };
+    }
+
+    /*
+      Otra especialidad.
+    */
+
+    if (especialidad === "otra") {
+      alertas.push(
+        "Atendido + descartado: la especialidad no corresponde a Nutrición, Psicología o Nutriología"
+      );
+
+      return {
+        aplicacion: construirAplicacion(
+          "revisar",
+          "Atendido + descartado en otra especialidad"
+        ),
+        alertas
+      };
+    }
+
+    /*
+      Especialidad vacía o desconocida.
+    */
+
+    alertas.push(
+      "Atendido + descartado: no se pudo determinar la especialidad del procedimiento"
+    );
+
     return {
       aplicacion: construirAplicacion(
-        "no_aplica",
-        "Atendido con pago descartado"
+        "revisar",
+        "Atendido + descartado con especialidad desconocida"
       ),
       alertas
     };
   }
+
+  /*
+    =========================
+    ATENDIDO SIN PAGO
+    =========================
+  */
 
   if (
     estadoCita === "atendido" &&
@@ -1662,7 +1737,9 @@ function evaluarAplicacionReservo(
   }
 
   /*
-    ESTADOS QUE EL SISTEMA NO PUEDE DECIDIR
+    =========================
+    ESTADOS NO RECONOCIDOS
+    =========================
   */
 
   if (
@@ -1685,6 +1762,12 @@ function evaluarAplicacionReservo(
       alertas
     };
   }
+
+  /*
+    =========================
+    RESTO
+    =========================
+  */
 
   return {
     aplicacion: construirAplicacion(
@@ -6088,13 +6171,6 @@ if ($("btnConfirmar")) {
 
 if ($("btnAnular")) {
   $("btnAnular").onclick = anularImportacion;
-}
-
-if ($("btnLimpiarCola")) {
-  $("btnLimpiarCola").onclick = () => {
-    manualOverrides = {};
-    recalcularTodo();
-  };
 }
 
 if ($("importSelect")) {
