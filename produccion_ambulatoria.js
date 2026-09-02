@@ -390,65 +390,126 @@ function tarifaProcedimientoCatalogo(procedimiento) {
   };
 }
 
-function calcularValoresCatalogoReservo(procedimiento) {
+function calcularValoresCatalogoReservo(
+  procedimiento
+) {
+  /*
+    Si no encontramos el procedimiento,
+    no podemos calcular ningún valor.
+  */
+
   if (!procedimiento) {
     return {
       procedimientoEncontrado: false,
       tarifaConfigurada: false,
+
       valorBaseCatalogo: null,
       porcentajeCatalogo: null,
       valorProfesionalCatalogo: null,
+
       valorLiquidable: 0
     };
   }
 
   const tarifa =
-    tarifaProcedimientoCatalogo(procedimiento);
+    tarifaProcedimientoCatalogo(
+      procedimiento
+    );
 
   const valorBaseCatalogo =
-    tieneValorCatalogo(tarifa.valor)
+    tieneValorCatalogo(
+      tarifa.valor
+    )
       ? Number(tarifa.valor)
       : null;
 
   const porcentajeCatalogo =
-    tieneValorCatalogo(tarifa.comisionPct)
+    tieneValorCatalogo(
+      tarifa.comisionPct
+    )
       ? Number(tarifa.comisionPct)
       : null;
 
-  let valorProfesionalCatalogo = null;
+  const valorProfesionalFijo =
+    tieneValorCatalogo(
+      tarifa.valorProfesional
+    )
+      ? Number(
+          tarifa.valorProfesional
+        )
+      : null;
+
+  let valorProfesionalCatalogo =
+    null;
+
+  let tipoCalculo =
+    "";
 
   /*
-    Primera prioridad:
-    valor profesional fijo configurado en el catálogo.
+    PRIMERA PRIORIDAD:
+    comisión porcentual.
+
+    Si el catálogo tiene un porcentaje mayor que cero
+    y existe un valor base, calculamos el pago profesional
+    utilizando ambos datos del catálogo.
+
+    Ejemplo:
+    $19.220 × 50% = $9.610
   */
 
   if (
     tieneValorCatalogo(
-      tarifa.valorProfesional
+      porcentajeCatalogo
+    ) &&
+    porcentajeCatalogo > 0 &&
+    tieneValorCatalogo(
+      valorBaseCatalogo
     )
   ) {
     valorProfesionalCatalogo =
-      Number(tarifa.valorProfesional);
+      Math.round(
+        valorBaseCatalogo *
+        (
+          porcentajeCatalogo /
+          100
+        )
+      );
+
+    tipoCalculo =
+      "porcentaje";
   }
 
   /*
-    Segunda prioridad:
-    porcentaje configurado en catálogo aplicado
-    sobre el valor base también configurado en catálogo.
+    SEGUNDA PRIORIDAD:
+    valor profesional fijo.
 
-    Nunca se utiliza el valor del Excel.
+    Solo se utiliza cuando no existe una comisión
+    porcentual mayor que cero.
+
+    Un valor fijo de $0 es válido.
   */
 
   else if (
-    tieneValorCatalogo(porcentajeCatalogo) &&
-    porcentajeCatalogo > 0 &&
-    tieneValorCatalogo(valorBaseCatalogo)
+    tieneValorCatalogo(
+      valorProfesionalFijo
+    )
   ) {
-    valorProfesionalCatalogo = Math.round(
-      valorBaseCatalogo *
-      (porcentajeCatalogo / 100)
-    );
+    valorProfesionalCatalogo =
+      Number(
+        valorProfesionalFijo
+      );
+
+    tipoCalculo =
+      "valor_fijo";
   }
+
+  /*
+    La tarifa está configurada si logramos obtener
+    un valor profesional.
+
+    El valor cero también puede ser una configuración
+    válida cuando fue definido como valor fijo.
+  */
 
   const tarifaConfigurada =
     tieneValorCatalogo(
@@ -457,6 +518,7 @@ function calcularValoresCatalogoReservo(procedimiento) {
 
   return {
     procedimientoEncontrado: true,
+
     tarifaConfigurada,
 
     valorBaseCatalogo,
@@ -465,8 +527,12 @@ function calcularValoresCatalogoReservo(procedimiento) {
 
     valorLiquidable:
       tarifaConfigurada
-        ? Number(valorProfesionalCatalogo)
-        : 0
+        ? Number(
+            valorProfesionalCatalogo
+          )
+        : 0,
+
+    tipoCalculo
   };
 }
 
