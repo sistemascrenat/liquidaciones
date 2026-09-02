@@ -890,44 +890,158 @@ function rolEsperadoProcedimiento(proc, textoArchivo = "") {
   return { canon: "", label: "" };
 }
 
-function especialidadProcedimientoAmbulatorio(proc) {
-  if (!proc) return "";
-
-  const texto = normalizarTexto([
-    proc?.categoria,
-    proc?.nombre,
-    proc?.tratamiento,
-    proc?.procedimiento,
-    proc?.descripcion
-  ]
-    .filter(Boolean)
-    .join(" | ")
-  );
-
-  if (!texto) return "";
-
+function especialidadProcedimientoAmbulatorio(
+  proc = null,
+  especialidadArchivo = ""
+) {
   /*
-    Orden importante:
-    primero Nutriología, porque contiene "NUTRI"
-    y no queremos confundirla con Nutrición.
+    PRIORIDAD 1:
+    información explícita del catálogo.
   */
 
-  if (texto.includes("NUTRIOLOG")) {
+  const especialidadCatalogo =
+    normalizarTexto([
+      proc?.especialidad,
+      proc?.especialidades,
+      proc?.categoria,
+      proc?.subcategoria
+    ]
+      .flat()
+      .filter(Boolean)
+      .join(" | ")
+    );
+
+  /*
+    PRIORIDAD 2:
+    nombre y descripción del procedimiento
+    guardado en el catálogo.
+  */
+
+  const textoProcedimientoCatalogo =
+    normalizarTexto([
+      proc?.nombre,
+      proc?.tratamiento,
+      proc?.procedimiento,
+      proc?.descripcion
+    ]
+      .filter(Boolean)
+      .join(" | ")
+    );
+
+  const textoCatalogo =
+    [
+      especialidadCatalogo,
+      textoProcedimientoCatalogo
+    ]
+      .filter(Boolean)
+      .join(" | ");
+
+  /*
+    Nutriología se revisa antes que Nutrición
+    para evitar confundir ambas especialidades.
+  */
+
+  if (
+    textoCatalogo.includes(
+      "NUTRIOLOG"
+    )
+  ) {
     return "nutriologia";
   }
 
-  if (texto.includes("PSICOLOG")) {
+  if (
+    textoCatalogo.includes(
+      "PSICOLOG"
+    )
+  ) {
     return "psicologia";
   }
 
   if (
-    texto.includes("NUTRICION") ||
-    texto.includes("BIOIMPEDANCIOMETR")
+    textoCatalogo.includes(
+      "NUTRICION"
+    ) ||
+    textoCatalogo.includes(
+      "BIOIMPEDANCIOMETR"
+    )
   ) {
     return "nutricion";
   }
 
-  return "otra";
+  /*
+    Si el catálogo declara explícitamente una
+    especialidad distinta, respetamos el catálogo
+    y la consideramos “otra”.
+  */
+
+  if (
+    especialidadCatalogo &&
+    !especialidadCatalogo.includes(
+      "AMBULATORIO"
+    )
+  ) {
+    return "otra";
+  }
+
+  /*
+    RESPALDO:
+    si el catálogo no permitió determinar la
+    especialidad, revisamos la columna Especialidad
+    del archivo Reservo.
+  */
+
+  const especialidadReservo =
+    normalizarTexto(
+      especialidadArchivo
+    );
+
+  if (
+    especialidadReservo.includes(
+      "NUTRIOLOG"
+    )
+  ) {
+    return "nutriologia";
+  }
+
+  if (
+    especialidadReservo.includes(
+      "PSICOLOG"
+    )
+  ) {
+    return "psicologia";
+  }
+
+  if (
+    especialidadReservo.includes(
+      "NUTRICION"
+    ) ||
+    especialidadReservo.includes(
+      "BIOIMPEDANCIOMETR"
+    )
+  ) {
+    return "nutricion";
+  }
+
+  /*
+    Si Reservo informa otra especialidad,
+    corresponde revisión manual.
+  */
+
+  if (especialidadReservo) {
+    return "otra";
+  }
+
+  /*
+    Si existe un procedimiento, pero ni el catálogo
+    ni Reservo permiten identificar una especialidad,
+    también corresponde revisión.
+  */
+
+  if (proc) {
+    return "otra";
+  }
+
+  return "";
 }
 
 function construirAlertaRolProcedimiento({ profesional, procedimiento, textoProcedimientoArchivo = "" }) {
@@ -1470,17 +1584,29 @@ function evaluarAplicacionReservo(
     );
 
   const profesional =
-    clean(raw["Profesional"]);
+    clean(
+      raw["Profesional"]
+    );
 
   const tratamiento =
-    clean(raw["Tratamiento"]);
+    clean(
+      raw["Tratamiento"]
+    );
+
+  const especialidadArchivo =
+    clean(
+      raw["Especialidad"]
+    );
 
   const alertas = [];
 
   /*
     =========================
-    EXCEPCIONES ESPECÍFICAS
+    EXCLUSIONES ESPECÍFICAS
     =========================
+
+    Estas reglas tienen prioridad sobre todas
+    las reglas generales.
   */
 
   if (
@@ -1490,10 +1616,12 @@ function evaluarAplicacionReservo(
     estadoPago === "pagado"
   ) {
     return {
-      aplicacion: construirAplicacion(
-        "no_aplica",
-        "Profesional excluido cuando el pago está pagado"
-      ),
+      aplicacion:
+        construirAplicacion(
+          "no_aplica",
+          "Profesional excluido cuando el pago está pagado"
+        ),
+
       alertas
     };
   }
@@ -1504,44 +1632,55 @@ function evaluarAplicacionReservo(
     )
   ) {
     return {
-      aplicacion: construirAplicacion(
-        "no_aplica",
-        "Instalación Balón Gástrico Allurion"
-      ),
+      aplicacion:
+        construirAplicacion(
+          "no_aplica",
+          "Instalación Balón Gástrico Allurion"
+        ),
+
       alertas
     };
   }
 
   /*
-    Esta excepción debe evaluarse antes
-    de la regla general Atendido + Descartado.
+    Control Post Cirugía PAD con pago descartado
+    nunca debe entrar por la regla general de
+    Nutrición/Psicología/Nutriología.
   */
 
   if (
-    esControlPad(tratamiento) &&
+    esControlPad(
+      tratamiento
+    ) &&
     estadoPago === "descartado"
   ) {
     return {
-      aplicacion: construirAplicacion(
-        "no_aplica",
-        "Control Post Cirugía PAD con pago descartado"
-      ),
+      aplicacion:
+        construirAplicacion(
+          "no_aplica",
+          "Control Post Cirugía PAD con pago descartado"
+        ),
+
       alertas
     };
   }
 
   /*
     =========================
-    SUSPENDIDOS
+    CITA SUSPENDIDA
     =========================
   */
 
-  if (estadoCita === "suspendido") {
+  if (
+    estadoCita === "suspendido"
+  ) {
     return {
-      aplicacion: construirAplicacion(
-        "no_aplica",
-        `Cita suspendida con pago ${estadoPago}`
-      ),
+      aplicacion:
+        construirAplicacion(
+          "no_aplica",
+          `Cita suspendida con pago ${estadoPago}`
+        ),
+
       alertas
     };
   }
@@ -1560,12 +1699,14 @@ function evaluarAplicacionReservo(
     )
   ) {
     return {
-      aplicacion: construirAplicacion(
-        "aplica",
-        estadoPago === "pagado"
-          ? "No llegó y pagado"
-          : "No llegó y plan"
-      ),
+      aplicacion:
+        construirAplicacion(
+          "aplica",
+          estadoPago === "pagado"
+            ? "No llegó y pagado"
+            : "No llegó y plan"
+        ),
+
       alertas
     };
   }
@@ -1575,17 +1716,19 @@ function evaluarAplicacionReservo(
     estadoPago === "descartado"
   ) {
     return {
-      aplicacion: construirAplicacion(
-        "no_aplica",
-        "No llegó y pago descartado"
-      ),
+      aplicacion:
+        construirAplicacion(
+          "no_aplica",
+          "No llegó y pago descartado"
+        ),
+
       alertas
     };
   }
 
   /*
     =========================
-    ATENDIDOS PAGADOS O PLAN
+    ATENDIDO + PAGADO/PLAN
     =========================
   */
 
@@ -1597,12 +1740,14 @@ function evaluarAplicacionReservo(
     )
   ) {
     return {
-      aplicacion: construirAplicacion(
-        "aplica",
-        estadoPago === "pagado"
-          ? "Atendido y pagado"
-          : "Atendido y plan"
-      ),
+      aplicacion:
+        construirAplicacion(
+          "aplica",
+          estadoPago === "pagado"
+            ? "Atendido y pagado"
+            : "Atendido y plan"
+        ),
+
       alertas
     };
   }
@@ -1612,114 +1757,111 @@ function evaluarAplicacionReservo(
     ATENDIDO + DESCARTADO
     =========================
 
-    REGLA:
-
     Nutrición   -> APLICA
     Psicología  -> APLICA
     Nutriología -> APLICA
     Otra        -> REVISAR
     Desconocida -> REVISAR
-
-    La especialidad se obtiene del procedimiento
-    resuelto del catálogo.
   */
 
   if (
     estadoCita === "atendido" &&
     estadoPago === "descartado"
   ) {
-    /*
-      Si todavía no existe procedimiento resuelto,
-      no podemos determinar la especialidad.
-    */
-
-    if (!procedimientoCatalogo) {
-      alertas.push(
-        "Atendido + descartado: falta resolver el procedimiento para determinar la especialidad"
-      );
-
-      return {
-        aplicacion: construirAplicacion(
-          "revisar",
-          "Atendido + descartado con especialidad desconocida"
-        ),
-        alertas
-      };
-    }
-
     const especialidad =
       especialidadProcedimientoAmbulatorio(
-        procedimientoCatalogo
+        procedimientoCatalogo,
+        especialidadArchivo
       );
 
-    if (especialidad === "nutricion") {
+    if (
+      especialidad === "nutricion"
+    ) {
       return {
-        aplicacion: construirAplicacion(
-          "aplica",
-          "Atendido + descartado · Nutrición"
-        ),
+        aplicacion:
+          construirAplicacion(
+            "aplica",
+            "Atendido + descartado · Nutrición"
+          ),
+
         alertas
       };
     }
 
-    if (especialidad === "psicologia") {
+    if (
+      especialidad === "psicologia"
+    ) {
       return {
-        aplicacion: construirAplicacion(
-          "aplica",
-          "Atendido + descartado · Psicología"
-        ),
+        aplicacion:
+          construirAplicacion(
+            "aplica",
+            "Atendido + descartado · Psicología"
+          ),
+
         alertas
       };
     }
 
-    if (especialidad === "nutriologia") {
+    if (
+      especialidad === "nutriologia"
+    ) {
       return {
-        aplicacion: construirAplicacion(
-          "aplica",
-          "Atendido + descartado · Nutriología"
-        ),
+        aplicacion:
+          construirAplicacion(
+            "aplica",
+            "Atendido + descartado · Nutriología"
+          ),
+
         alertas
       };
     }
 
     /*
-      Otra especialidad.
+      Si existe otra especialidad, el sistema no
+      decide automáticamente: queda en Alertas.
     */
 
-    if (especialidad === "otra") {
+    if (
+      especialidad === "otra"
+    ) {
       alertas.push(
-        "Atendido + descartado: la especialidad no corresponde a Nutrición, Psicología o Nutriología"
+        "Atendido + descartado: revisar porque la especialidad no corresponde a Nutrición, Psicología o Nutriología"
       );
 
       return {
-        aplicacion: construirAplicacion(
-          "revisar",
-          "Atendido + descartado en otra especialidad"
-        ),
+        aplicacion:
+          construirAplicacion(
+            "revisar",
+            "Atendido + descartado en otra especialidad"
+          ),
+
         alertas
       };
     }
 
     /*
-      Especialidad vacía o desconocida.
+      Si no fue posible determinar la especialidad,
+      también queda para revisión manual.
     */
 
     alertas.push(
-      "Atendido + descartado: no se pudo determinar la especialidad del procedimiento"
+      "Atendido + descartado: no se pudo determinar la especialidad"
     );
 
     return {
-      aplicacion: construirAplicacion(
-        "revisar",
-        "Atendido + descartado con especialidad desconocida"
-      ),
+      aplicacion:
+        construirAplicacion(
+          "revisar",
+          "Atendido + descartado con especialidad desconocida"
+        ),
+
       alertas
     };
   }
 
   /*
     =========================
-    ATENDIDO SIN PAGO
+    ATENDIDO + NO PAGADO
     =========================
   */
 
@@ -1728,17 +1870,19 @@ function evaluarAplicacionReservo(
     estadoPago === "no_pagado"
   ) {
     return {
-      aplicacion: construirAplicacion(
-        "no_aplica",
-        "Atendido sin pago"
-      ),
+      aplicacion:
+        construirAplicacion(
+          "no_aplica",
+          "Atendido sin pago"
+        ),
+
       alertas
     };
   }
 
   /*
     =========================
-    ESTADOS NO RECONOCIDOS
+    ESTADO DE CITA DESCONOCIDO
     =========================
   */
 
@@ -1748,32 +1892,38 @@ function evaluarAplicacionReservo(
       "pagado",
       "plan",
       "descartado"
-    ].includes(estadoPago)
+    ].includes(
+      estadoPago
+    )
   ) {
     alertas.push(
       "Estado de cita no reconocido: decidir manualmente si aplica"
     );
 
     return {
-      aplicacion: construirAplicacion(
-        "revisar",
-        "Estado de cita no reconocido"
-      ),
+      aplicacion:
+        construirAplicacion(
+          "revisar",
+          "Estado de cita no reconocido"
+        ),
+
       alertas
     };
   }
 
   /*
     =========================
-    RESTO
+    RESTO DE COMBINACIONES
     =========================
   */
 
   return {
-    aplicacion: construirAplicacion(
-      "no_aplica",
-      "Combinación no válida para liquidar"
-    ),
+    aplicacion:
+      construirAplicacion(
+        "no_aplica",
+        "Combinación no válida para liquidar"
+      ),
+
     alertas
   };
 }
