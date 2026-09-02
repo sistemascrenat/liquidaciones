@@ -607,31 +607,40 @@ function getValorMKFallback(raw){
   return 0;
 }
 
-function calcularPagoSegunOrigen(x, procDoc) {
+function calcularPagoSegunOrigen(
+  x,
+  procDoc
+) {
   const raw =
     getRawContainer(x);
 
   const tarifa =
-    getTarifaAmbulatoria(procDoc);
+    getTarifaAmbulatoria(
+      procDoc
+    );
 
   let valorBase = 0;
   let pagoProfesional = 0;
   let utilidad = 0;
 
-  const origen = normalizeOrigin(
-    x.origen ||
-    x.archivo ||
-    pickRaw(raw, "Origen") ||
-    pickRaw(raw, "Archivo") ||
-    ""
-  );
+  const origen =
+    normalizeOrigin(
+      x.origen ||
+      x.archivo ||
+      pickRaw(raw, "Origen") ||
+      pickRaw(raw, "Archivo") ||
+      ""
+    );
+
+  /*
+    =========================
+    MK
+    =========================
+
+    MK mantiene el monto dinámico del archivo.
+  */
 
   if (origen === "MK") {
-    /*
-      MK conserva su lógica dinámica porque el monto
-      de la prestación puede depender del archivo.
-    */
-
     valorBase =
       tarifa.modoValor === "archivo"
         ? (
@@ -643,26 +652,44 @@ function calcularPagoSegunOrigen(x, procDoc) {
           )
         : (
             getValorMKFallback(raw) ||
-            Number(tarifa.valor ?? 0) ||
+            Number(
+              tarifa.valor ?? 0
+            ) ||
             0
           );
+
+    /*
+      En MK, si existe comisión porcentual,
+      se calcula sobre el valor del archivo.
+    */
 
     if (
       hasRealValue(
         tarifa.comisionPct
       ) &&
-      Number(tarifa.comisionPct) > 0 &&
+      Number(
+        tarifa.comisionPct
+      ) > 0 &&
       valorBase > 0
     ) {
-      pagoProfesional = Math.round(
-        valorBase *
-        (
-          Number(
-            tarifa.comisionPct
-          ) / 100
-        )
-      );
-    } else if (
+      pagoProfesional =
+        Math.round(
+          valorBase *
+          (
+            Number(
+              tarifa.comisionPct
+            ) /
+            100
+          )
+        );
+    }
+
+    /*
+      Si no hay porcentaje, utilizamos el
+      valor profesional fijo configurado.
+    */
+
+    else if (
       hasRealValue(
         tarifa.valorProfesional
       )
@@ -676,21 +703,70 @@ function calcularPagoSegunOrigen(x, procDoc) {
     utilidad =
       valorBase -
       pagoProfesional;
-  } else {
-    /*
-      RESERVO:
-      todos los valores provienen exclusivamente
-      del catálogo.
+  }
 
-      Nunca utilizamos una columna del Excel.
-    */
+  /*
+    =========================
+    RESERVO
+    =========================
 
+    En Reservo todos los valores provienen
+    exclusivamente del catálogo.
+
+    Nunca se utiliza el valor del Excel.
+  */
+
+  else {
     valorBase =
-      hasRealValue(tarifa.valor)
-        ? Number(tarifa.valor)
+      hasRealValue(
+        tarifa.valor
+      )
+        ? Number(
+            tarifa.valor
+          )
         : 0;
 
+    /*
+      PRIMERA PRIORIDAD:
+      comisión porcentual aplicada al valor base
+      del catálogo.
+
+      Ejemplo:
+      $19.220 × 50% = $9.610
+    */
+
     if (
+      hasRealValue(
+        tarifa.comisionPct
+      ) &&
+      Number(
+        tarifa.comisionPct
+      ) > 0 &&
+      valorBase > 0
+    ) {
+      pagoProfesional =
+        Math.round(
+          valorBase *
+          (
+            Number(
+              tarifa.comisionPct
+            ) /
+            100
+          )
+        );
+    }
+
+    /*
+      SEGUNDA PRIORIDAD:
+      valor profesional fijo.
+
+      Solo se utiliza cuando no existe una
+      comisión porcentual mayor que cero.
+
+      El valor fijo puede ser $0.
+    */
+
+    else if (
       hasRealValue(
         tarifa.valorProfesional
       )
@@ -699,21 +775,6 @@ function calcularPagoSegunOrigen(x, procDoc) {
         Number(
           tarifa.valorProfesional
         ) || 0;
-    } else if (
-      hasRealValue(
-        tarifa.comisionPct
-      ) &&
-      Number(tarifa.comisionPct) > 0 &&
-      valorBase > 0
-    ) {
-      pagoProfesional = Math.round(
-        valorBase *
-        (
-          Number(
-            tarifa.comisionPct
-          ) / 100
-        )
-      );
     }
 
     utilidad =
