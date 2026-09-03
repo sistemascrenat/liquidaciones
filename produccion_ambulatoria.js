@@ -755,40 +755,7 @@ function buscarProfesional(texto) {
   return analizarBusquedaProfesional(texto)?.profesional || null;
 }
 
-function procedimientoForzadoPorTexto(texto) {
-  const t = normalizarTexto(texto);
-
-  const esConsultaBariatricaTelemedicina =
-    t.includes("CONSULTA BARIATRICA TELEMEDICINA");
-
-  const esIsapreOParticular =
-    t.includes("ISAPRE") ||
-    t.includes("PARTICULAR");
-
-  if (
-    esConsultaBariatricaTelemedicina &&
-    esIsapreOParticular
-  ) {
-    return procedimientos.find(p => {
-      const nombre = normalizarTexto(
-        nombreProcedimientoCatalogo(p)
-      );
-
-      return (
-        nombre.includes("CONSULTA BARIATRICA TELEMEDICINA") &&
-        (
-          nombre.includes("ISAPRE") ||
-          nombre.includes("PARTICULAR")
-        ) &&
-        !nombre.includes("GINECOLOGIA")
-      );
-    }) || null;
-  }
-
-  return null;
-}
-
-function analizarBusquedaProcedimiento(texto) {
+ffunction analizarBusquedaProcedimiento(texto) {
   const textoOriginal = clean(texto);
   const t = normalizarTexto(textoOriginal);
 
@@ -800,19 +767,30 @@ function analizarBusquedaProcedimiento(texto) {
     };
   }
 
-  const forzado = procedimientoForzadoPorTexto(textoOriginal);
-  if (forzado) {
-    return {
-      procedimiento: forzado,
-      tipoMatch: "forzado",
-      alerta: null
-    };
-  }
+  /*
+    1. COINCIDENCIA EXACTA
 
-  // 1) Coincidencia exacta por ID o nombre
+    Se considera exacta después de normalizar:
+    - mayúsculas y minúsculas;
+    - acentos;
+    - espacios;
+    - signos normalizados por normalizarTexto().
+
+    Si coincide exactamente:
+    - se selecciona automáticamente;
+    - no genera alerta;
+    - puede quedar OK.
+  */
   for (const p of procedimientos) {
-    const id = normalizarTexto(p?.id || "");
-    const nombre = normalizarTexto(nombreProcedimientoCatalogo(p));
+    const id = normalizarTexto(
+      p?.id ||
+      p?.codigo ||
+      ""
+    );
+
+    const nombre = normalizarTexto(
+      nombreProcedimientoCatalogo(p)
+    );
 
     if (!nombre && !id) continue;
 
@@ -825,30 +803,69 @@ function analizarBusquedaProcedimiento(texto) {
     }
   }
 
-  // 2) Coincidencia parcial: se sugiere, pero debe revisarse
+  /*
+    2. COINCIDENCIA PARCIAL
+
+    Si el nombre no es exacto, el sistema solamente
+    propone un posible procedimiento.
+
+    El registro debe quedar en ALERTAS para que una
+    persona confirme o cambie el procedimiento.
+  */
   const candidatos = procedimientos
     .map(p => {
-      const id = normalizarTexto(p?.id || "");
-      const nombre = normalizarTexto(nombreProcedimientoCatalogo(p));
+      const id = normalizarTexto(
+        p?.id ||
+        p?.codigo ||
+        ""
+      );
+
+      const nombre = normalizarTexto(
+        nombreProcedimientoCatalogo(p)
+      );
 
       let score = 0;
 
-      if (id && t.includes(id)) score += 10;
-      if (nombre && t.includes(nombre)) score += 5;
-      if (nombre && nombre.includes(t)) score += 4;
+      if (id && t.includes(id)) {
+        score += 10;
+      }
 
-      return { procedimiento: p, id, nombre, score };
+      if (nombre && t.includes(nombre)) {
+        score += 5;
+      }
+
+      if (nombre && nombre.includes(t)) {
+        score += 4;
+      }
+
+      return {
+        procedimiento: p,
+        id,
+        nombre,
+        score
+      };
     })
-    .filter(x => x.score > 0)
-    .sort((a, b) => b.score - a.score);
+    .filter(candidato => candidato.score > 0)
+    .sort((a, b) => {
+      if (b.score !== a.score) {
+        return b.score - a.score;
+      }
 
-  const mejor = candidatos[0];
+      return a.nombre.localeCompare(
+        b.nombre,
+        "es",
+        { sensitivity: "base" }
+      );
+    });
+
+  const mejor = candidatos[0] || null;
 
   if (!mejor) {
     return {
       procedimiento: null,
       tipoMatch: "sin_match",
-      alerta: `No se encontró procedimiento para "${textoOriginal}"`
+      alerta:
+        `No se encontró procedimiento para "${textoOriginal}"`
     };
   }
 
@@ -856,8 +873,10 @@ function analizarBusquedaProcedimiento(texto) {
     procedimiento: mejor.procedimiento,
     tipoMatch: "parcial",
     alerta:
-      `Asociación automática parcial de procedimiento: archivo "${textoOriginal}" ` +
-      `→ catálogo "${nombreProcedimientoCatalogo(mejor.procedimiento)}". Revisar antes de confirmar.`
+      `Asociación automática parcial de procedimiento: ` +
+      `archivo "${textoOriginal}" → catálogo ` +
+      `"${nombreProcedimientoCatalogo(mejor.procedimiento)}". ` +
+      `Revisar antes de confirmar.`
   };
 }
 
@@ -6472,25 +6491,14 @@ window.sincronizarAmbulatoriosRetroactivo = async function({
       ""
     );
     
-    const procForzado = procedimientoForzadoPorTexto(
-      x.prestacion ||
-      x.dataReservo?.["Tratamiento"] ||
-      x.dataMK?.["D Artículo"] ||
-      x.procedimientoNombre ||
-      resolved.procedimientoNombre ||
-      ""
-    );
-    
     const procedimientoId = clean(
-      procForzado?.id ||
-      procForzado?.codigo ||
       x.procedimientoId ||
       x.ambulatorioId ||
       resolved.procedimientoId ||
       ""
     );
     
-    const procDoc = procForzado || procedimientos.find(p =>
+    const procDoc = procedimientos.find(p =>
       clean(p.id) === procedimientoId ||
       clean(p.codigo) === procedimientoId
     ) || null;
