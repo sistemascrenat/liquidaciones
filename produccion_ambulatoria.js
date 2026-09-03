@@ -768,50 +768,96 @@ function analizarBusquedaProcedimiento(texto) {
   }
 
   /*
-    1. COINCIDENCIA EXACTA
+    1. COINCIDENCIA EXACTA UNIVERSAL
 
-    Se considera exacta después de normalizar:
-    - mayúsculas y minúsculas;
-    - acentos;
-    - espacios;
-    - signos normalizados por normalizarTexto().
+    Se compara contra:
+    - ID;
+    - código;
+    - nombre del procedimiento.
 
-    Si coincide exactamente:
-    - se selecciona automáticamente;
-    - no genera alerta;
-    - puede quedar OK.
+    No existen códigos ni procedimientos forzados.
   */
-  for (const p of procedimientos) {
-    const id = normalizarTexto(
-      p?.id ||
-      p?.codigo ||
-      ""
-    );
 
-    const nombre = normalizarTexto(
-      nombreProcedimientoCatalogo(p)
-    );
+  const coincidenciasExactas = procedimientos
+    .map(p => {
+      const id = normalizarTexto(
+        p?.id ||
+        p?.codigo ||
+        ""
+      );
 
-    if (!nombre && !id) continue;
+      const codigo = normalizarTexto(
+        p?.codigo ||
+        p?.id ||
+        ""
+      );
 
-    if (t === id || t === nombre) {
+      const nombre = normalizarTexto(
+        nombreProcedimientoCatalogo(p)
+      );
+
       return {
         procedimiento: p,
-        tipoMatch: "exacto",
-        alerta: null
+        id,
+        codigo,
+        nombre,
+        coincide:
+          t === id ||
+          t === codigo ||
+          t === nombre
       };
-    }
+    })
+    .filter(x => x.coincide);
+
+  /*
+    Solo una coincidencia exacta:
+    queda resuelta automáticamente.
+  */
+
+  if (coincidenciasExactas.length === 1) {
+    return {
+      procedimiento:
+        coincidenciasExactas[0].procedimiento,
+
+      tipoMatch: "exacto",
+      alerta: null
+    };
+  }
+
+  /*
+    Más de una coincidencia exacta:
+    existen procedimientos duplicados en el catálogo.
+
+    No escogemos uno silenciosamente.
+  */
+
+  if (coincidenciasExactas.length > 1) {
+    const opciones = coincidenciasExactas
+      .map(x => {
+        const p = x.procedimiento;
+
+        return `${clean(p?.codigo || p?.id || "")} · ${nombreProcedimientoCatalogo(p)}`;
+      })
+      .join(" / ");
+
+    return {
+      procedimiento: null,
+      tipoMatch: "ambiguo_exacto",
+      alerta:
+        `Existen varios procedimientos con coincidencia exacta para ` +
+        `"${textoOriginal}": ${opciones}. Seleccionar manualmente.`
+    };
   }
 
   /*
     2. COINCIDENCIA PARCIAL
 
-    Si el nombre no es exacto, el sistema solamente
-    propone un posible procedimiento.
+    Solo se utiliza como sugerencia.
 
-    El registro debe quedar en ALERTAS para que una
-    persona confirme o cambie el procedimiento.
+    Nunca se considera confirmada automáticamente.
+    Siempre genera una alerta para revisión.
   */
+
   const candidatos = procedimientos
     .map(p => {
       const id = normalizarTexto(
@@ -845,7 +891,7 @@ function analizarBusquedaProcedimiento(texto) {
         score
       };
     })
-    .filter(candidato => candidato.score > 0)
+    .filter(x => x.score > 0)
     .sort((a, b) => {
       if (b.score !== a.score) {
         return b.score - a.score;
@@ -2492,33 +2538,62 @@ function limpiarAlertasAutoProcedimiento(alertas = []) {
 ====================== */
 
 function recomputeItemFromCurrentValues(reg) {
-  reg.resolved = reg.resolved || {
-    profesionalId: null,
-    profesionalNombre: null,
-    procedimientoId: null,
-    procedimientoNombre: null,
-    autoProfesional: false,
-    autoProcedimiento: false,
-    autoProcedimientoTipoMatch: null,
-    confirmadoManualProfesional: false,
-    confirmadoManualProcedimiento: false
+  reg.resolved = {
+    profesionalId:
+      reg.resolved?.profesionalId || null,
+
+    profesionalNombre:
+      reg.resolved?.profesionalNombre || null,
+
+    procedimientoId:
+      reg.resolved?.procedimientoId || null,
+
+    procedimientoNombre:
+      reg.resolved?.procedimientoNombre || null,
+
+    autoProfesional:
+      reg.resolved?.autoProfesional === true,
+
+    autoProcedimiento:
+      reg.resolved?.autoProcedimiento === true,
+
+    autoProcedimientoTipoMatch:
+      reg.resolved?.autoProcedimientoTipoMatch || null,
+
+    confirmadoManualProfesional:
+      reg.resolved?.confirmadoManualProfesional === true,
+
+    confirmadoManualProcedimiento:
+      reg.resolved?.confirmadoManualProcedimiento === true
   };
 
-  reg.rutNorm = normalizarRut(reg.rut);
-  reg.pacienteNorm = normalizarPaciente(reg.paciente);
-  reg.profesionalNorm = normalizarTexto(reg.profesional);
-  reg.procedimientoNorm = normalizarTexto(reg.prestacion);
-  reg.fechaNorm = normalizarFecha(reg.fecha);
+  reg.rutNorm =
+    normalizarRut(reg.rut);
+
+  reg.pacienteNorm =
+    normalizarPaciente(reg.paciente);
+
+  reg.profesionalNorm =
+    normalizarTexto(reg.profesional);
+
+  reg.procedimientoNorm =
+    normalizarTexto(reg.prestacion);
+
+  reg.fechaNorm =
+    normalizarFecha(reg.fecha);
+
   /*
-    MK mantiene el valor dinámico del archivo.
-    Reservo se actualizará después desde el catálogo.
+    MK mantiene el valor del archivo.
+
+    Reservo volverá a obtener el valor
+    desde el procedimiento del catálogo.
   */
-  
+
   if (reg.origen === "MK") {
     reg.valor =
       normalizarMonto(reg.valor);
   }
-  
+
   if (reg.origen === "Reservo") {
     reg.valorArchivo =
       leerValorArchivoReservo(
@@ -2528,6 +2603,9 @@ function recomputeItemFromCurrentValues(reg) {
 
   /*
     PROFESIONAL
+
+    Por ahora se conserva el profesional resuelto
+    existente. Si no existe, se intenta resolver.
   */
 
   let profesionalDetectado = null;
@@ -2535,64 +2613,171 @@ function recomputeItemFromCurrentValues(reg) {
 
   if (reg.resolved.profesionalId) {
     profesionalDetectado =
-      profesionales.find(p => p.id === reg.resolved.profesionalId) ||
-      null;
-  } else {
-    const analisis = analizarBusquedaProfesional(reg.profesional);
+      profesionales.find(p =>
+        p.id === reg.resolved.profesionalId ||
+        clean(p.rutId) ===
+          clean(reg.resolved.profesionalId) ||
+        clean(p.rut) ===
+          clean(reg.resolved.profesionalId)
+      ) || null;
 
-    profesionalDetectado = analisis?.profesional || null;
-    alertaProfesional = analisis?.alerta || null;
+    /*
+      Si el profesional ya no existe en el catálogo,
+      se elimina la resolución anterior.
+    */
+
+    if (!profesionalDetectado) {
+      reg.resolved.profesionalId = null;
+      reg.resolved.profesionalNombre = null;
+      reg.resolved.autoProfesional = false;
+      reg.resolved.confirmadoManualProfesional = false;
+
+      alertaProfesional =
+        "El profesional anteriormente asociado ya no existe en el catálogo";
+    }
+  }
+
+  if (!reg.resolved.profesionalId) {
+    const analisis =
+      analizarBusquedaProfesional(
+        reg.profesional
+      );
+
+    profesionalDetectado =
+      analisis?.profesional || null;
+
+    alertaProfesional =
+      analisis?.alerta || alertaProfesional;
 
     if (profesionalDetectado?.id) {
-      reg.resolved.profesionalId = profesionalDetectado.id;
+      reg.resolved.profesionalId =
+        profesionalDetectado.id;
+
       reg.resolved.profesionalNombre =
-        nombreProfesionalCatalogo(profesionalDetectado);
+        nombreProfesionalCatalogo(
+          profesionalDetectado
+        );
+
       reg.resolved.autoProfesional = true;
     }
   }
 
   /*
-    PROCEDIMIENTO
+    PROCEDIMIENTO — REGLA UNIVERSAL
+
+    Si fue seleccionado manualmente:
+    - se conserva.
+
+    Si fue seleccionado automáticamente:
+    - se elimina la resolución anterior;
+    - se vuelve a comparar contra el catálogo actual;
+    - exacto queda OK;
+    - parcial queda en revisión;
+    - inexistente queda pendiente.
   */
 
   let procedimientoDetectado = null;
   let alertaProcedimiento = null;
   let tipoMatchProcedimiento = null;
 
-  if (reg.resolved.procedimientoId) {
+  const procedimientoFueConfirmadoManualmente =
+    reg.resolved.confirmadoManualProcedimiento === true &&
+    !!reg.resolved.procedimientoId;
+
+  if (procedimientoFueConfirmadoManualmente) {
     procedimientoDetectado =
-      procedimientos.find(p => p.id === reg.resolved.procedimientoId) ||
-      null;
+      procedimientos.find(p =>
+        p.id === reg.resolved.procedimientoId ||
+        clean(p.codigo) ===
+          clean(reg.resolved.procedimientoId)
+      ) || null;
+
+    if (procedimientoDetectado) {
+      tipoMatchProcedimiento = "manual";
+
+      reg.resolved.procedimientoId =
+        procedimientoDetectado.id;
+
+      reg.resolved.procedimientoNombre =
+        nombreProcedimientoCatalogo(
+          procedimientoDetectado
+        );
+
+      reg.resolved.autoProcedimiento = false;
+      reg.resolved.autoProcedimientoTipoMatch =
+        "manual";
+    } else {
+      reg.resolved.procedimientoId = null;
+      reg.resolved.procedimientoNombre = null;
+      reg.resolved.autoProcedimiento = false;
+      reg.resolved.autoProcedimientoTipoMatch = null;
+      reg.resolved.confirmadoManualProcedimiento =
+        false;
+
+      alertaProcedimiento =
+        "El procedimiento seleccionado manualmente ya no existe en el catálogo";
+    }
+  } else {
+    /*
+      El procedimiento era automático o estaba vacío.
+
+      Siempre se vuelve a analizar desde el dato
+      original del archivo.
+    */
+
+    const textoProcedimientoOriginal = clean(
+      reg.prestacion ||
+      reg.dataReservo?.["Tratamiento"] ||
+      reg.dataMK?.["D Artículo"] ||
+      ""
+    );
+
+    const analisis =
+      analizarBusquedaProcedimiento(
+        textoProcedimientoOriginal
+      );
+
+    procedimientoDetectado =
+      analisis?.procedimiento || null;
+
+    alertaProcedimiento =
+      analisis?.alerta || null;
 
     tipoMatchProcedimiento =
-      reg.resolved.confirmadoManualProcedimiento
-        ? "manual"
-        : reg.resolved.autoProcedimientoTipoMatch;
-  } else {
-    const analisis = analizarBusquedaProcedimiento(reg.prestacion);
+      analisis?.tipoMatch || null;
 
-    procedimientoDetectado = analisis?.procedimiento || null;
-    alertaProcedimiento = analisis?.alerta || null;
-    tipoMatchProcedimiento = analisis?.tipoMatch || null;
+    reg.resolved.procedimientoId =
+      procedimientoDetectado?.id || null;
 
-    if (procedimientoDetectado?.id) {
-      reg.resolved.procedimientoId = procedimientoDetectado.id;
-      reg.resolved.procedimientoNombre =
-        nombreProcedimientoCatalogo(procedimientoDetectado);
-      reg.resolved.autoProcedimiento = true;
-      reg.resolved.autoProcedimientoTipoMatch =
-        tipoMatchProcedimiento;
-    }
+    reg.resolved.procedimientoNombre =
+      procedimientoDetectado
+        ? nombreProcedimientoCatalogo(
+            procedimientoDetectado
+          )
+        : null;
+
+    reg.resolved.autoProcedimiento =
+      !!procedimientoDetectado;
+
+    reg.resolved.autoProcedimientoTipoMatch =
+      tipoMatchProcedimiento;
+
+    reg.resolved.confirmadoManualProcedimiento =
+      false;
   }
 
   if (profesionalDetectado) {
     reg.resolved.profesionalNombre =
-      nombreProfesionalCatalogo(profesionalDetectado);
+      nombreProfesionalCatalogo(
+        profesionalDetectado
+      );
   }
 
   if (procedimientoDetectado) {
     reg.resolved.procedimientoNombre =
-      nombreProcedimientoCatalogo(procedimientoDetectado);
+      nombreProcedimientoCatalogo(
+        procedimientoDetectado
+      );
   }
 
   reg.profesionalDetectado =
@@ -2602,59 +2787,54 @@ function recomputeItemFromCurrentValues(reg) {
     reg.resolved.procedimientoNombre || null;
 
   /*
-    Cada vez que se resuelve o cambia el procedimiento,
-    se vuelven a leer los valores desde el catálogo.
+    RESERVO SIEMPRE LEE LA TARIFA DEL CATÁLOGO
   */
-  
+
   if (reg.origen === "Reservo") {
-    const procedimientoCatalogoValor =
-      procedimientos.find(
-        p =>
-          p.id ===
-          reg.resolved?.procedimientoId
-      ) || procedimientoDetectado || null;
-  
     aplicarValoresCatalogoAlRegistro(
       reg,
-      procedimientoCatalogoValor
+      procedimientoDetectado
     );
   }
 
   /*
     APLICACIÓN
 
-    Si existe decisión manual, no volvemos a reemplazarla
-    con la clasificación automática.
+    Una decisión manual se conserva.
+
+    Si no existe decisión manual, se vuelve
+    a ejecutar la regla automática.
   */
 
   let alertas = [];
 
   if (reg.decisionManualAplicacion?.estado) {
-    reg.aplicacion = construirAplicacion(
-      reg.decisionManualAplicacion.estado,
-      reg.decisionManualAplicacion.motivo ||
-        "Decisión manual"
-    );
+    reg.aplicacion =
+      construirAplicacion(
+        reg.decisionManualAplicacion.estado,
+        reg.decisionManualAplicacion.motivo ||
+          "Decisión manual"
+      );
   } else if (reg.origen === "Reservo") {
-    const procedimientoParaEvaluar =
-      procedimientos.find(
-        p =>
-          p.id ===
-          reg.resolved?.procedimientoId
-      ) || procedimientoDetectado || null;
-    
     const evaluacion =
       evaluarAplicacionReservo(
         reg.dataReservo || {},
-        procedimientoParaEvaluar
+        procedimientoDetectado
       );
 
-    reg.aplicacion = evaluacion.aplicacion;
-    alertas.push(...(evaluacion.alertas || []));
+    reg.aplicacion =
+      evaluacion.aplicacion;
+
+    alertas.push(
+      ...(evaluacion.alertas || [])
+    );
   } else if (reg.origen === "MK") {
     reg.aplicacion =
       reg.aplicacion ||
-      construirAplicacion("no_aplica", "Sin evaluar");
+      construirAplicacion(
+        "no_aplica",
+        "Sin evaluar"
+      );
   }
 
   /*
@@ -2662,24 +2842,29 @@ function recomputeItemFromCurrentValues(reg) {
   */
 
   if (!reg.rutNorm) {
-    alertas.push("RUT vacío o inválido");
+    alertas.push(
+      "RUT vacío o inválido"
+    );
   }
 
   if (!reg.resolved.profesionalId) {
-    if (alertaProfesional) {
-      alertas.push(alertaProfesional);
-    } else {
-      alertas.push("Profesional pendiente de resolver");
-    }
+    alertas.push(
+      alertaProfesional ||
+      "Profesional pendiente de resolver"
+    );
   }
 
   if (!reg.resolved.procedimientoId) {
-    if (alertaProcedimiento) {
-      alertas.push(alertaProcedimiento);
-    } else {
-      alertas.push("Procedimiento pendiente de resolver");
-    }
+    alertas.push(
+      alertaProcedimiento ||
+      "Procedimiento pendiente de resolver"
+    );
   }
+
+  /*
+    Un procedimiento parcial siempre debe revisarse,
+    aunque exista una sugerencia automática.
+  */
 
   if (
     reg.resolved.procedimientoId &&
@@ -2687,19 +2872,36 @@ function recomputeItemFromCurrentValues(reg) {
     tipoMatchProcedimiento === "parcial"
   ) {
     alertas.push(
-      `Asociación automática parcial de procedimiento: archivo "${reg.prestacion}" → catálogo "${reg.resolved.procedimientoNombre || ""}". Revisar antes de enviar.`
+      alertaProcedimiento ||
+      (
+        `Asociación automática parcial de procedimiento: ` +
+        `archivo "${reg.prestacion || ""}" → catálogo ` +
+        `"${reg.resolved.procedimientoNombre || ""}". ` +
+        `Revisar antes de enviar.`
+      )
     );
   }
 
   const profesionalCatalogo =
-    profesionales.find(
-      p => p.id === reg.resolved.profesionalId
+    profesionales.find(p =>
+      p.id === reg.resolved.profesionalId ||
+      clean(p.rutId) ===
+        clean(reg.resolved.profesionalId) ||
+      clean(p.rut) ===
+        clean(reg.resolved.profesionalId)
     ) || null;
 
   const procedimientoCatalogo =
-    procedimientos.find(
-      p => p.id === reg.resolved.procedimientoId
+    procedimientos.find(p =>
+      p.id === reg.resolved.procedimientoId ||
+      clean(p.codigo) ===
+        clean(reg.resolved.procedimientoId)
     ) || null;
+
+  /*
+    Si Reservo aplica, la tarifa debe estar
+    configurada en el catálogo.
+  */
 
   if (
     reg.origen === "Reservo" &&
@@ -2710,7 +2912,7 @@ function recomputeItemFromCurrentValues(reg) {
       calcularValoresCatalogoReservo(
         procedimientoCatalogo
       );
-  
+
     if (!valores.tarifaConfigurada) {
       alertas.push(
         "El procedimiento no tiene valor profesional configurado en el catálogo"
@@ -2718,50 +2920,87 @@ function recomputeItemFromCurrentValues(reg) {
     }
   }
 
-  const alertaRol = construirAlertaRolProcedimiento({
-    profesional: profesionalCatalogo,
-    procedimiento: procedimientoCatalogo,
-    textoProcedimientoArchivo: reg.prestacion || ""
-  });
+  /*
+    VALIDACIÓN DE ROL
+  */
+
+  const alertaRol =
+    construirAlertaRolProcedimiento({
+      profesional:
+        profesionalCatalogo,
+
+      procedimiento:
+        procedimientoCatalogo,
+
+      textoProcedimientoArchivo:
+        reg.prestacion || ""
+    });
 
   if (alertaRol) {
     alertas.push(alertaRol);
   }
 
   /*
-    Si profesional o procedimiento fueron escogidos
-    manualmente, quitamos alertas automáticas antiguas.
+    Una selección manual de profesional elimina
+    las alertas automáticas anteriores de profesional.
   */
 
-  if (reg.resolved.confirmadoManualProfesional) {
+  if (
+    reg.resolved.confirmadoManualProfesional &&
+    reg.resolved.profesionalId
+  ) {
     alertas = alertas.filter(a => {
       const t = normalizarTexto(a);
 
       return !(
-        t.includes("COINCIDENCIA AMBIGUA EN PROFESIONAL") ||
-        t.includes("NO SE ENCONTRO COINCIDENCIA") ||
-        t.includes("PROFESIONAL PENDIENTE")
-      );
-    });
-  }
-
-  if (reg.resolved.confirmadoManualProcedimiento) {
-    alertas = limpiarAlertasAutoProcedimiento(alertas);
-
-    alertas = alertas.filter(a => {
-      const t = normalizarTexto(a);
-
-      return !(
-        t.includes("PROCEDIMIENTO PENDIENTE") ||
-        t.includes("NO SE ENCONTRO PROCEDIMIENTO")
+        t.includes(
+          "COINCIDENCIA AMBIGUA EN PROFESIONAL"
+        ) ||
+        t.includes(
+          "NO SE ENCONTRO COINCIDENCIA"
+        ) ||
+        t.includes(
+          "PROFESIONAL PENDIENTE"
+        )
       );
     });
   }
 
   /*
-    Una decisión manual APLICA/NO APLICA resuelve
-    únicamente la duda de aplicación.
-    No elimina problemas de profesional/procedimiento/RUT.
+    Una selección manual válida de procedimiento
+    elimina las alertas automáticas de procedimiento.
+  */
+
+  if (
+    reg.resolved.confirmadoManualProcedimiento &&
+    reg.resolved.procedimientoId
+  ) {
+    alertas =
+      limpiarAlertasAutoProcedimiento(
+        alertas
+      );
+
+    alertas = alertas.filter(a => {
+      const t = normalizarTexto(a);
+
+      return !(
+        t.includes(
+          "PROCEDIMIENTO PENDIENTE"
+        ) ||
+        t.includes(
+          "NO SE ENCONTRO PROCEDIMIENTO"
+        ) ||
+        t.includes(
+          "VARIOS PROCEDIMIENTOS CON COINCIDENCIA EXACTA"
+        )
+      );
+    });
+  }
+
+  /*
+    Una decisión manual APLICA/NO APLICA
+    elimina solamente las alertas relacionadas
+    con la decisión de aplicación.
   */
 
   if (reg.decisionManualAplicacion?.estado) {
@@ -2769,19 +3008,36 @@ function recomputeItemFromCurrentValues(reg) {
       const t = normalizarTexto(a);
 
       return !(
-        t.includes("DECIDIR MANUALMENTE SI APLICA") ||
-        t.includes("ESTADO DE CITA NO RECONOCIDO")
+        t.includes(
+          "DECIDIR MANUALMENTE SI APLICA"
+        ) ||
+        t.includes(
+          "ESTADO DE CITA NO RECONOCIDO"
+        )
       );
     });
   }
 
-  alertas = [...new Set(alertas.filter(Boolean))];
+  /*
+    Evitar alertas repetidas.
+  */
 
-  reg.review = construirReview({
-    profesionalId: reg.resolved.profesionalId || null,
-    procedimientoId: reg.resolved.procedimientoId || null,
-    alertas
-  });
+  alertas = [
+    ...new Set(
+      alertas.filter(Boolean)
+    )
+  ];
+
+  reg.review =
+    construirReview({
+      profesionalId:
+        reg.resolved.profesionalId || null,
+
+      procedimientoId:
+        reg.resolved.procedimientoId || null,
+
+      alertas
+    });
 }
 
 /* ======================
