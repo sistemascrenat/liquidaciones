@@ -758,14 +758,31 @@ function buscarProfesional(texto) {
 function procedimientoForzadoPorTexto(texto) {
   const t = normalizarTexto(texto);
 
+  const esConsultaBariatricaTelemedicina =
+    t.includes("CONSULTA BARIATRICA TELEMEDICINA");
+
+  const esIsapreOParticular =
+    t.includes("ISAPRE") ||
+    t.includes("PARTICULAR");
+
   if (
-    t.includes("CONSULTA BARIATRICA TELEMEDICINA") &&
-    (t.includes("ISAPRE") || t.includes("PARTICULAR"))
+    esConsultaBariatricaTelemedicina &&
+    esIsapreOParticular
   ) {
-    return procedimientos.find(p =>
-      p.id === "PA0076" ||
-      clean(p.codigo) === "PA0076"
-    ) || null;
+    return procedimientos.find(p => {
+      const nombre = normalizarTexto(
+        nombreProcedimientoCatalogo(p)
+      );
+
+      return (
+        nombre.includes("CONSULTA BARIATRICA TELEMEDICINA") &&
+        (
+          nombre.includes("ISAPRE") ||
+          nombre.includes("PARTICULAR")
+        ) &&
+        !nombre.includes("GINECOLOGIA")
+      );
+    }) || null;
   }
 
   return null;
