@@ -755,7 +755,7 @@ function buscarProfesional(texto) {
   return analizarBusquedaProfesional(texto)?.profesional || null;
 }
 
-ffunction analizarBusquedaProcedimiento(texto) {
+function analizarBusquedaProcedimiento(texto) {
   const textoOriginal = clean(texto);
   const t = normalizarTexto(textoOriginal);
 
