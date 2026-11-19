@@ -1049,13 +1049,19 @@ function ensureBonosModalDOM(){
               <th>Desde</th>
               <th>Hasta</th>
               <th>Monto (CLP)</th>
+              <th>Acciones</th>
             </tr>
           </thead>
           <tbody id="bonosTbody"></tbody>
         </table>
 
+        <button class="btn" id="btnBonosAgregarTramo" type="button"
+                style="margin-top:10px;">
+          + Agregar tramo
+        </button>
+
         <div class="mini muted" style="margin-top:10px;">
-          Nota: “Hasta” vacío significa “sin tope” (31+).
+          Deja “Hasta” vacío en el último tramo para indicar que no tiene tope.
         </div>
       </div>
 
@@ -1076,52 +1082,101 @@ function ensureBonosModalDOM(){
   document.getElementById('btnBonosCancelar').addEventListener('click', close);
   div.addEventListener('click', (e)=>{ if(e.target === div) close(); });
 
+  document.getElementById('btnBonosAgregarTramo').addEventListener('click', () => {
+    agregarFilaBono().focus();
+  });
+
   document.getElementById('btnBonosGuardar').addEventListener('click', saveBonosOnlyThis);
   document.getElementById('btnBonosGuardarTodos').addEventListener('click', saveBonosForAll);
 }
 
-function paintBonosTable(tramos){
-  const tb = document.getElementById('bonosTbody');
-  tb.innerHTML = '';
+function agregarFilaBono(tramo = {}){
+  const tbody = document.getElementById('bonosTbody');
+  const fila = tbody.insertRow();
 
-  (tramos || []).forEach((t, i)=>{
-    const tr = document.createElement('tr');
-    tr.innerHTML = `
-      <td><input class="inp" data-k="min" data-i="${i}" value="${Number(t.min ?? 0) || 0}"></td>
-      <td><input class="inp" data-k="max" data-i="${i}" value="${t.max===null || t.max===undefined ? '' : (Number(t.max)||'')}"></td>
-      <td><input class="inp" data-k="montoCLP" data-i="${i}" value="${Number(t.montoCLP ?? 0) || 0}"></td>
-    `;
-    tb.appendChild(tr);
-  });
+  const campos = [
+    ['min', 'Desde', tramo.min],
+    ['max', 'Hasta', tramo.max],
+    ['montoCLP', 'Monto en pesos', tramo.montoCLP]
+  ];
+
+  for(const [clave, etiqueta, valor] of campos){
+    const input = document.createElement('input');
+    input.className = 'inp';
+    input.type = 'number';
+    input.min = '1';
+    input.step = '1';
+    input.dataset.k = clave;
+    input.setAttribute('aria-label', etiqueta);
+    input.value = valor ?? '';
+    fila.insertCell().appendChild(input);
+  }
+
+  const quitar = document.createElement('button');
+  quitar.className = 'btn';
+  quitar.type = 'button';
+  quitar.textContent = 'Quitar';
+  quitar.addEventListener('click', () => fila.remove());
+  fila.insertCell().appendChild(quitar);
+
+  return fila.querySelector('[data-k="min"]');
+}
+
+function paintBonosTable(tramos){
+  const tbody = document.getElementById('bonosTbody');
+  tbody.replaceChildren();
+
+  for(const tramo of tramos){
+    agregarFilaBono(tramo);
+  }
 }
 
 function readBonosTable(){
-  const tb = document.getElementById('bonosTbody');
-  const inputs = tb.querySelectorAll('input[data-k][data-i]');
-  const map = new Map(); // i -> obj
-
-  inputs.forEach(inp=>{
-    const i = Number(inp.getAttribute('data-i'));
-    const k = inp.getAttribute('data-k');
-    if(!map.has(i)) map.set(i, {});
-    map.get(i)[k] = inp.value;
-  });
-
+  const filas = document.getElementById('bonosTbody').rows;
   const tramos = [];
-  [...map.keys()].sort((a,b)=>a-b).forEach(i=>{
-    const o = map.get(i) || {};
-    const min = Number(o.min ?? 0) || 0;
-    const maxRaw = (o.max ?? '').toString().trim();
-    const max = maxRaw ? (Number(maxRaw) || null) : null;
-    const montoCLP = Number(o.montoCLP ?? 0) || 0;
 
-    if(min <= 0 || montoCLP <= 0) return; // omitimos filas inválidas
+  for(const fila of filas){
+    const desde = fila.querySelector('[data-k="min"]');
+    const hasta = fila.querySelector('[data-k="max"]');
+    const monto = fila.querySelector('[data-k="montoCLP"]');
+
+    const min = desde.valueAsNumber;
+    const max = hasta.value === '' ? null : hasta.valueAsNumber;
+    const montoCLP = monto.valueAsNumber;
+
+    if(
+      desde.validity.badInput ||
+      hasta.validity.badInput ||
+      monto.validity.badInput ||
+      !Number.isSafeInteger(min) || min < 1 ||
+      (max !== null && (!Number.isSafeInteger(max) || max < min)) ||
+      !Number.isSafeInteger(montoCLP) || montoCLP < 1
+    ){
+      toast(`Revisa Desde, Hasta y Monto en la fila ${fila.sectionRowIndex + 1}`);
+      return null;
+    }
+
     tramos.push({ min, max, montoCLP });
-  });
+  }
 
-  // Orden por min asc
-  tramos.sort((a,b)=> (a.min||0) - (b.min||0));
-  return tramos.length ? tramos : bonosDefaultTramos();
+  if(!tramos.length){
+    toast('Agrega al menos un tramo de bono');
+    return null;
+  }
+
+  tramos.sort((a, b) => a.min - b.min);
+
+  for(let i = 1; i < tramos.length; i++){
+    const anterior = tramos[i - 1];
+    const actual = tramos[i];
+
+    if(anterior.max === null || actual.min <= anterior.max){
+      toast(`Los tramos que comienzan en ${anterior.min} y ${actual.min} se superponen`);
+      return null;
+    }
+  }
+
+  return tramos;
 }
 
 function openBonosModalForProfesional(p){
@@ -1166,6 +1221,7 @@ async function saveBonosOnlyThis(){
   }
 
   const tramos = readBonosTable();
+  if(!tramos) return;
 
   await setDoc(doc(db,'profesionales',rutId), {
     bonosTramosOverride: tramos,
@@ -1180,6 +1236,7 @@ async function saveBonosOnlyThis(){
 
 async function saveBonosForAll(){
   const tramos = readBonosTable();
+  if(!tramos) return;
 
   try{
     // =====================================================
